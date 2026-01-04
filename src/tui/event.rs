@@ -1,0 +1,266 @@
+use crate::agent::Agent;
+use crate::config::Keybindings;
+use crate::error::Result;
+use crate::terminal::Terminal;
+
+use super::app::{App, Focus, InputMode, SidebarSection};
+
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use std::time::Duration;
+
+fn matches_key(code: KeyCode, binding: &str) -> bool {
+    match code {
+        KeyCode::Tab => binding == "Tab",
+        KeyCode::Esc => binding == "Esc",
+        KeyCode::Enter => binding == "Enter",
+        KeyCode::Char(c) => {
+            if binding.len() == 1 {
+                binding.chars().next() == Some(c)
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>) -> Result<bool> {
+    if !event::poll(Duration::from_millis(100))? {
+        return Ok(false);
+    }
+
+    if let Event::Key(key) = event::read()? {
+        if key.kind != KeyEventKind::Press {
+            return Ok(false);
+        }
+
+        match app.input_mode {
+            InputMode::Normal => handle_normal_mode(app, key.code),
+            InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
+                handle_input_mode(app, key.code, key.modifiers)
+            }
+            InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
+            InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
+        }
+    }
+
+    Ok(true)
+}
+
+fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
+    if code == KeyCode::Esc { return Some("quit"); }
+
+    let bindings: &[(&str, &str)] = &[
+        (&kb.quit, "quit"),
+        (&kb.help, "help"),
+        (&kb.toggle_sidebar, "toggle_sidebar"),
+        (&kb.refresh, "refresh"),
+        (&kb.attach, "attach"),
+        (&kb.new_task, "new_task"),
+        (&kb.add_pane, "add_pane"),
+        (&kb.delete, "delete"),
+        (&kb.send_message, "send_message"),
+        (&kb.settings, "settings"),
+        (&kb.switch_section, "switch_section"),
+    ];
+
+    bindings.iter()
+        .find(|(binding, _)| matches_key(code, binding))
+        .map(|(_, action)| *action)
+}
+
+fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if app.show_help {
+        if code == KeyCode::Esc || matches_key(code, &kb.help) || matches_key(code, &kb.quit) {
+            app.toggle_help();
+        }
+        return;
+    }
+
+    match get_action(code, kb) {
+        Some("quit") => app.should_quit = true,
+        Some("help") => app.toggle_help(),
+        Some("toggle_sidebar") => app.toggle_sidebar(),
+        Some("refresh") => { let _ = app.refresh_data(); }
+        Some("attach") => app.attach_current(),
+        Some("new_task") => app.start_new_task(),
+        Some("add_pane") => app.add_pane(),
+        Some("delete") => app.start_delete(),
+        Some("send_message") => app.start_send_message(),
+        Some("settings") => app.open_settings(),
+        Some("switch_section") if app.focus == Focus::Sidebar => app.toggle_sidebar_section(),
+        _ => handle_navigation(app, code),
+    }
+}
+
+fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    match code {
+        KeyCode::Char('g') => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_top();
+            }
+        }
+        KeyCode::Char('G') => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_bottom();
+            }
+        }
+
+        KeyCode::Char('j') | KeyCode::Down => match app.focus {
+            Focus::Sidebar => match app.sidebar_section {
+                SidebarSection::Tasks => app.next_task(),
+                SidebarSection::Sessions => app.next_pane(),
+            },
+            Focus::Terminal => app.scroll_terminal_down(),
+        },
+        KeyCode::Char('k') | KeyCode::Up => match app.focus {
+            Focus::Sidebar => match app.sidebar_section {
+                SidebarSection::Tasks => app.prev_task(),
+                SidebarSection::Sessions => app.prev_pane(),
+            },
+            Focus::Terminal => app.scroll_terminal_up(),
+        },
+
+        KeyCode::PageUp | KeyCode::Char('u') => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_page_up(20);
+            }
+        }
+        KeyCode::PageDown | KeyCode::Char('f') => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_page_down(20);
+            }
+        }
+
+        KeyCode::Home => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_top();
+            }
+        }
+        KeyCode::End => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_bottom();
+            }
+        }
+
+        KeyCode::Char('h') | KeyCode::Left => {
+            if !app.show_sidebar {
+                app.show_sidebar = true;
+            }
+            app.focus = Focus::Sidebar;
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            app.focus = Focus::Terminal;
+        }
+
+        KeyCode::Enter => {
+            if app.focus == Focus::Sidebar {
+                app.focus = Focus::Terminal;
+                let _ = app.refresh_terminal_output();
+            }
+        }
+
+        _ => {}
+    }
+}
+
+fn handle_input_mode<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    match code {
+        KeyCode::Esc => {
+            app.cancel_input();
+        }
+        KeyCode::Enter => {
+            app.submit_input();
+        }
+        KeyCode::Backspace => {
+            app.input_backspace();
+        }
+        KeyCode::Delete => {
+            app.input_delete();
+        }
+        KeyCode::Left => {
+            app.input_left();
+        }
+        KeyCode::Right => {
+            app.input_right();
+        }
+        KeyCode::Char(c) => {
+            if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                app.cancel_input();
+            } else {
+                app.input_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_settings_mode<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.close_settings();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.settings_next();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.settings_prev();
+        }
+        KeyCode::Enter => {
+            app.start_edit_setting();
+        }
+        KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.save_settings();
+        }
+        _ => {}
+    }
+}
+
+fn handle_edit_setting_mode<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    match code {
+        KeyCode::Esc => {
+            app.input_buffer.clear();
+            app.editing_setting_key = None;
+            app.input_mode = InputMode::Settings;
+        }
+        KeyCode::Enter => {
+            app.apply_setting();
+        }
+        KeyCode::Backspace => {
+            app.input_backspace();
+        }
+        KeyCode::Delete => {
+            app.input_delete();
+        }
+        KeyCode::Left => {
+            app.input_left();
+        }
+        KeyCode::Right => {
+            app.input_right();
+        }
+        KeyCode::Char(c) => {
+            if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                app.input_buffer.clear();
+                app.editing_setting_key = None;
+                app.input_mode = InputMode::Settings;
+            } else {
+                app.input_char(c);
+            }
+        }
+        _ => {}
+    }
+}

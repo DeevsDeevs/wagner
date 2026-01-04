@@ -18,7 +18,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Attach { task }) => cmd_attach(&wagner, &task),
         Some(Commands::Send { session, message }) => cmd_send(&wagner, &session, &message),
         Some(Commands::Chains { task, repo }) => cmd_chains(&wagner, task.as_deref(), repo.as_deref()),
-        None => cmd_tui(&wagner),
+        None => cmd_tui(wagner),
     }
 }
 
@@ -160,12 +160,7 @@ fn cmd_chains<T: Terminal, A: Agent>(
     Ok(())
 }
 
-fn cmd_tui<T: Terminal, A: Agent>(_wagner: &Wagner<T, A>) -> Result<()> {
-    info!("TUI not yet implemented");
-    println!("TUI not yet implemented. Use subcommands:");
-    println!("  wagner new <name> --repos ...");
-    println!("  wagner list");
-    println!("  wagner attach <task>");
-    println!("  wagner delete <task>");
-    Ok(())
+fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {
+    info!("Launching TUI");
+    wagner::tui::run(wagner)
 }

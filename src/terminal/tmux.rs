@@ -77,13 +77,15 @@ impl Terminal for Tmux {
             "-t",
             &pane.0,
             "-p",
+            "-e",
             "-S",
             &format!("-{}", lines),
         ])
     }
 
     fn send_keys(&self, pane: &PaneHandle, keys: &str) -> Result<()> {
-        self.run(&["send-keys", "-t", &pane.0, keys, "Enter"])?;
+        self.run(&["send-keys", "-t", &pane.0, "-l", keys])?;
+        self.run(&["send-keys", "-t", &pane.0, "Enter"])?;
         Ok(())
     }
 
@@ -103,6 +105,7 @@ impl Terminal for Tmux {
     fn list_panes(&self, session: &SessionHandle) -> Result<Vec<PaneHandle>> {
         let output = self.run(&[
             "list-panes",
+            "-s",
             "-t",
             &session.0,
             "-F",

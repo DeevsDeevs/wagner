@@ -4,6 +4,7 @@ pub mod error;
 pub mod model;
 pub mod store;
 pub mod terminal;
+pub mod tui;
 pub mod wagner;
 
 pub use agent::{Agent, ClaudeCode};

@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::process::Command;
 
 pub struct Wagner<T: Terminal, A: Agent> {
-    terminal: T,
-    agent: A,
-    store: Store,
-    config: Config,
+    pub terminal: T,
+    pub agent: A,
+    pub store: Store,
+    pub config: Config,
 }
 
 impl<T: Terminal, A: Agent> Wagner<T, A> {
