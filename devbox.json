@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.16.0/.schema/devbox.schema.json",
+  "packages": [
+    "pkg-config@0.29.2",
+    "cmake@4.1.2",
+    "pre-commit@4.3.0",
+    "rustup@latest",
+    "git@latest",
+    "gcc@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "export RUSTUP_HOME=\"$PWD/.rustup\"",
+      "mkdir -p \"$RUSTUP_HOME\"",
+      "rustup default stable 2>/dev/null || true"
+    ],
+    "scripts": {}
+  }
+}
+
