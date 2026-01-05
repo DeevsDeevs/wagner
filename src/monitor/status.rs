@@ -44,13 +44,22 @@ impl PaneStatus {
     }
 
     pub fn is_waiting(&self) -> bool {
-        matches!(self, Self::Agent { status: AgentStatus::Waiting(_), .. })
+        matches!(
+            self,
+            Self::Agent {
+                status: AgentStatus::Waiting(_),
+                ..
+            }
+        )
     }
 
     pub fn is_active(&self) -> bool {
         matches!(
             self,
-            Self::Agent { status: AgentStatus::Active(_), .. } | Self::Terminal(TerminalStatus::Active)
+            Self::Agent {
+                status: AgentStatus::Active(_),
+                ..
+            } | Self::Terminal(TerminalStatus::Active)
         )
     }
 }

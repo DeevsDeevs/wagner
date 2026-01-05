@@ -50,7 +50,9 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>) -> Result<bool>
 }
 
 fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
-    if code == KeyCode::Esc { return Some("quit"); }
+    if code == KeyCode::Esc {
+        return Some("quit");
+    }
 
     let bindings: &[(&str, &str)] = &[
         (&kb.quit, "quit"),
@@ -67,12 +69,17 @@ fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
         (&kb.open_diff, "open_diff"),
     ];
 
-    bindings.iter()
+    bindings
+        .iter()
         .find(|(binding, _)| matches_key(code, binding))
         .map(|(_, action)| *action)
 }
 
-fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode, modifiers: KeyModifiers) {
+fn handle_normal_mode<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
     let kb = &app.wagner.config.keybindings;
 
     if app.show_help {
@@ -111,7 +118,9 @@ fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode,
         Some("quit") => app.should_quit = true,
         Some("help") => app.toggle_help(),
         Some("toggle_sidebar") => app.toggle_sidebar(),
-        Some("refresh") => { let _ = app.refresh_data(); }
+        Some("refresh") => {
+            let _ = app.refresh_data();
+        }
         Some("attach") => app.attach_current(),
         Some("new_task") => app.start_new_task(),
         Some("add_pane") => app.add_pane(),
@@ -124,7 +133,11 @@ fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode,
     }
 }
 
-fn send_key_to_pane<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode, modifiers: KeyModifiers) {
+fn send_key_to_pane<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
     let key_str = match code {
         KeyCode::Enter => "Enter".to_string(),
         KeyCode::Backspace => "BSpace".to_string(),

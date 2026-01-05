@@ -5,11 +5,11 @@ use super::app::{App, Focus, InputMode};
 use super::widgets::{diff_view, help_popup, pane_list, settings_popup, task_tree, terminal_view};
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 use std::time::Duration;
 
@@ -70,7 +70,9 @@ fn draw_sidebar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<
     .split(area);
 
     let title_style = if app.focus == Focus::Sidebar {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -129,8 +131,7 @@ fn draw_input_dialog<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    let input_area = Layout::vertical([Constraint::Length(1), Constraint::Min(0)])
-        .split(inner)[0];
+    let input_area = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner)[0];
 
     let cursor_pos = app.input_cursor;
     let input_text = &app.input_buffer;

@@ -5,15 +5,15 @@ pub mod widgets;
 
 pub use app::App;
 
+use crate::agent::Agent;
 use crate::error::Result;
 use crate::terminal::Terminal;
-use crate::agent::Agent;
 use crate::wagner::Wagner;
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 use std::io;

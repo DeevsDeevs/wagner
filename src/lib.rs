@@ -9,7 +9,7 @@ pub mod terminal;
 pub mod tui;
 pub mod wagner;
 
-pub use agent::{Agent, ClaudeCode};
+pub use agent::{Agent, ClaudeCode, ClaudeCodeDetector};
 pub use config::Config;
 pub use error::{Result, WagnerError};
 pub use model::{RepoSource, Task, TaskRepo};

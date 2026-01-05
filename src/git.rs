@@ -18,10 +18,18 @@ pub struct RepoStats {
 
 pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
     let output = Command::new("git")
-        .args(["-C", &repo_path.to_string_lossy(), "diff", "--numstat", &format!("{}..HEAD", base)])
+        .args([
+            "-C",
+            &repo_path.to_string_lossy(),
+            "diff",
+            "--numstat",
+            &format!("{}..HEAD", base),
+        ])
         .output();
 
-    let Ok(output) = output else { return Vec::new() };
+    let Ok(output) = output else {
+        return Vec::new();
+    };
     if !output.status.success() {
         return Vec::new();
     }
@@ -53,9 +61,13 @@ pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
 fn get_file_status(repo_path: &Path, base: &str, file_path: &str) -> char {
     let output = Command::new("git")
         .args([
-            "-C", &repo_path.to_string_lossy(),
-            "diff", "--name-status", &format!("{}..HEAD", base),
-            "--", file_path
+            "-C",
+            &repo_path.to_string_lossy(),
+            "diff",
+            "--name-status",
+            &format!("{}..HEAD", base),
+            "--",
+            file_path,
         ])
         .output();
 
@@ -70,10 +82,18 @@ fn get_file_status(repo_path: &Path, base: &str, file_path: &str) -> char {
 
 pub fn get_repo_stats(repo_path: &Path, base: &str) -> RepoStats {
     let output = Command::new("git")
-        .args(["-C", &repo_path.to_string_lossy(), "diff", "--shortstat", &format!("{}..HEAD", base)])
+        .args([
+            "-C",
+            &repo_path.to_string_lossy(),
+            "diff",
+            "--shortstat",
+            &format!("{}..HEAD", base),
+        ])
         .output();
 
-    let Ok(output) = output else { return RepoStats::default() };
+    let Ok(output) = output else {
+        return RepoStats::default();
+    };
     if !output.status.success() {
         return RepoStats::default();
     }
@@ -108,13 +128,19 @@ fn parse_shortstat(s: &str) -> RepoStats {
 pub fn get_diff_content(repo_path: &Path, base: &str, file_path: &str) -> Vec<String> {
     let output = Command::new("git")
         .args([
-            "-C", &repo_path.to_string_lossy(),
-            "diff", "--color=always", &format!("{}..HEAD", base),
-            "--", file_path
+            "-C",
+            &repo_path.to_string_lossy(),
+            "diff",
+            "--color=always",
+            &format!("{}..HEAD", base),
+            "--",
+            file_path,
         ])
         .output();
 
-    let Ok(output) = output else { return Vec::new() };
+    let Ok(output) = output else {
+        return Vec::new();
+    };
     if !output.status.success() {
         return Vec::new();
     }

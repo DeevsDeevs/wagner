@@ -3,7 +3,7 @@ use crate::config::Config;
 use crate::error::{Result, WagnerError};
 use crate::model::{RepoSource, Task, TaskRepo};
 use crate::store::Store;
-use crate::terminal::{Terminal, SessionHandle, PaneHandle};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -66,7 +66,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let task = Task::new(name, task_path, repos);
         self.store.save_task(&task)?;
 
-        let first_repo = task.repos.first().map(|r| &r.worktree).unwrap_or(&task.path);
+        let first_repo = task
+            .repos
+            .first()
+            .map(|r| &r.worktree)
+            .unwrap_or(&task.path);
         let session = self.terminal.create_session(name, first_repo)?;
 
         if let Ok(panes) = self.terminal.list_panes(&session) {
@@ -90,7 +94,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let task = self.store.load_task(name)?;
 
         if self.terminal.session_exists(name)? {
-            self.terminal.kill_session(&SessionHandle(format!("wagner_{}", name)))?;
+            self.terminal
+                .kill_session(&SessionHandle(format!("wagner_{}", name)))?;
         }
 
         for repo in &task.repos {
@@ -113,7 +118,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     fn get_main_repo(&self, worktree: &PathBuf, source: &RepoSource) -> PathBuf {
         if worktree.exists() {
             let output = Command::new("git")
-                .args(["-C", &worktree.to_string_lossy(), "rev-parse", "--git-common-dir"])
+                .args([
+                    "-C",
+                    &worktree.to_string_lossy(),
+                    "rev-parse",
+                    "--git-common-dir",
+                ])
                 .output();
 
             if let Ok(output) = output {
@@ -133,7 +143,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             RepoSource::Local(path) => path.clone(),
             RepoSource::Remote(_) => {
                 if let Some(task_dir) = worktree.parent() {
-                    let repo_name = worktree.file_name()
+                    let repo_name = worktree
+                        .file_name()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_default();
                     task_dir.join(format!(".{}_clone", repo_name))
@@ -161,7 +172,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         };
 
         let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-        self.terminal.send_keys(&pane, self.agent.launch_command())?;
+        self.terminal
+            .send_keys(&pane, self.agent.launch_command())?;
         Ok(pane)
     }
 
@@ -239,7 +251,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.contains("not found") {
-                return Err(WagnerError::Git(format!("Failed to delete branch '{}': {}", branch, stderr)));
+                return Err(WagnerError::Git(format!(
+                    "Failed to delete branch '{}': {}",
+                    branch, stderr
+                )));
             }
         }
 

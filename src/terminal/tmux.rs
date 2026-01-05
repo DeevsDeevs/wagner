@@ -42,14 +42,7 @@ impl Terminal for Tmux {
         let session_name = self.session_name(name);
         let cwd_str = cwd.to_string_lossy();
 
-        self.run(&[
-            "new-session",
-            "-d",
-            "-s",
-            &session_name,
-            "-c",
-            &cwd_str,
-        ])?;
+        self.run(&["new-session", "-d", "-s", &session_name, "-c", &cwd_str])?;
 
         Ok(SessionHandle(session_name))
     }

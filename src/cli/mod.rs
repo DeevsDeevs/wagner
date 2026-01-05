@@ -74,17 +74,13 @@ pub enum Commands {
 pub fn print_completions(shell: Shell) {
     match shell {
         Shell::Zsh => print_zsh_completions(),
-        _ => clap_complete::generate(
-            shell,
-            &mut Cli::command(),
-            "wagner",
-            &mut std::io::stdout(),
-        ),
+        _ => clap_complete::generate(shell, &mut Cli::command(), "wagner", &mut std::io::stdout()),
     }
 }
 
 fn print_zsh_completions() {
-    print!(r#"#compdef wagner
+    print!(
+        r#"#compdef wagner
 
 _wagner_tasks() {{
     local -a tasks
@@ -144,7 +140,8 @@ _wagner() {{
 }}
 
 compdef _wagner wagner
-"#);
+"#
+    );
 }
 
 pub use commands::run;

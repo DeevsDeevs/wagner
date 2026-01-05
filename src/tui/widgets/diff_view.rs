@@ -4,11 +4,11 @@ use crate::tui::app::{App, InputMode};
 
 use ansi_to_tui::IntoText;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
-    Frame,
 };
 
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
@@ -56,7 +56,9 @@ fn draw_file_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
             };
 
             let style = if is_selected {
-                Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };
@@ -64,7 +66,10 @@ fn draw_file_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
             let stats = format!("+{:<4} -{:<4}", file.additions, file.deletions);
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!(" {} ", file.status), Style::default().fg(status_color)),
+                Span::styled(
+                    format!(" {} ", file.status),
+                    Style::default().fg(status_color),
+                ),
                 Span::styled(&file.path, style),
                 Span::raw("  "),
                 Span::styled(stats, Style::default().fg(Color::DarkGray)),
