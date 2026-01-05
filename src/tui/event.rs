@@ -228,8 +228,13 @@ fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) 
     }
 
     if code == KeyCode::Enter && app.focus == Focus::Sidebar {
-        app.focus = Focus::Terminal;
-        let _ = app.refresh_terminal_output();
+        match app.sidebar_section {
+            SidebarSection::Tasks => app.toggle_task_expand(),
+            SidebarSection::Sessions => {
+                app.focus = Focus::Terminal;
+                let _ = app.refresh_terminal_output();
+            }
+        }
     }
 }
 

@@ -29,7 +29,16 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 
     for task in &app.tasks {
         let is_selected = app.selected_task.as_ref() == Some(&task.name);
-        let prefix = if is_selected { "▸ " } else { "  " };
+        let is_expanded = app.expanded_tasks.contains(&task.name);
+        let has_repos = !task.repos.is_empty();
+
+        let expand_icon = if !has_repos {
+            "  "
+        } else if is_expanded {
+            "▾ "
+        } else {
+            "▸ "
+        };
 
         let style = if is_selected {
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
@@ -46,21 +55,18 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
         };
 
         items.push(ListItem::new(Line::from(vec![
-            Span::raw(prefix),
+            Span::raw(expand_icon),
             Span::styled(format!("{} ", status_icon), Style::default().fg(status_color)),
             Span::styled(&task.name, style),
         ])));
 
-        for repo in &task.repos {
-            let repo_style = if is_selected {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::DarkGray)
-            };
-            items.push(ListItem::new(Line::from(vec![
-                Span::raw("    "),
-                Span::styled(&repo.name, repo_style),
-            ])));
+        if is_expanded {
+            for repo in &task.repos {
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw("    "),
+                    Span::styled(&repo.name, Style::default().fg(Color::DarkGray)),
+                ])));
+            }
         }
     }
 

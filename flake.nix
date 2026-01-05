@@ -18,9 +18,16 @@
           inherit system overlays;
         };
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default;
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [ "rust-src" ];
+        };
 
-        wagner = pkgs.rustPlatform.buildRustPackage {
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+
+        wagner = rustPlatform.buildRustPackage {
           pname = "wagner";
           version = "0.1.0";
 
@@ -42,7 +49,7 @@
           ];
 
           meta = with pkgs.lib; {
-            description = "AI agent monitoring CLI tool";
+            description = "AI agent monitoring CLI tool with TUI";
             homepage = "https://github.com/DeevsDeevs/wagner";
             license = licenses.mit;
             maintainers = [ ];

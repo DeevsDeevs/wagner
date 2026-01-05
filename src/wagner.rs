@@ -68,7 +68,14 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let task = Task::new(name, task_path, repos);
         self.store.save_task(&task)?;
 
-        self.terminal.create_session(name, &task.path)?;
+        let first_repo = task.repos.first().map(|r| &r.worktree).unwrap_or(&task.path);
+        let session = self.terminal.create_session(name, first_repo)?;
+
+        if let Ok(panes) = self.terminal.list_panes(&session) {
+            if let Some(pane) = panes.first() {
+                let _ = self.terminal.send_keys(pane, self.agent.launch_command());
+            }
+        }
 
         Ok(task)
     }
@@ -155,7 +162,9 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 .ok_or_else(|| WagnerError::TaskNotFound(task_name.to_string()))?,
         };
 
-        self.terminal.create_pane(&session, &repo.worktree)
+        let pane = self.terminal.create_pane(&session, &repo.worktree)?;
+        self.terminal.send_keys(&pane, self.agent.launch_command())?;
+        Ok(pane)
     }
 
     pub fn attach(&self, task_name: &str) -> Result<()> {

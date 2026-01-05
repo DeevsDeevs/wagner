@@ -39,25 +39,26 @@ cargo build --release
 
 ## Quick Start
 
-### 1. Create a task with repos
+### 1. Create a task
 
 ```bash
-# Format: name:source:branch
-# source can be a local path or git URL
+# From inside a git repo - just provide a name
+cd ~/projects/myrepo
+wagner new my-feature
 
-# Single repo from local path
-wagner new my-feature --repos frontend:/path/to/frontend:feature-branch
+# Creates worktree with branch task/my-feature
+# Specify custom branch with -b
+wagner new my-feature -b fix/auth-bug
 
-# Multiple repos
+# Multi-repo tasks use --repos
 wagner new my-feature --repos \
-  frontend:/path/to/frontend:feature-x,\
-  backend:/path/to/backend:feature-x,\
-  shared:/path/to/shared:feature-x
+  frontend:~/projects/frontend:feature-x,\
+  backend:~/projects/backend:feature-x
 ```
 
 This will:
 1. Create a task folder at `~/tasks/my-feature/`
-2. Create git worktrees for each repo in the task folder
+2. Create git worktrees for each repo
 3. Set up Claude Code hooks in each worktree
 4. Create a tmux session `wagner_my-feature`
 
@@ -69,25 +70,29 @@ wagner list
 
 Output:
 ```
-my-feature           3 repos  /home/user/tasks/my-feature
-another-task         1 repo   /home/user/tasks/another-task
+my-feature           3 repos  (2h ago)   /home/user/tasks/my-feature
+another-task         1 repo   (3d ago)   /home/user/tasks/another-task
 ```
 
 ### 3. Attach to a task
 
 ```bash
+# Explicit
 wagner attach my-feature
-```
 
-This attaches to the tmux session for that task.
+# Auto-detect from cwd (when inside a task directory)
+cd ~/tasks/my-feature
+wagner attach
+```
 
 ### 4. Add more Claude panes
 
 ```bash
-# Add a pane in the first repo
-wagner add my-feature
+# Auto-detect task from cwd
+cd ~/tasks/my-feature
+wagner add
 
-# Add a pane in a specific repo
+# Explicit task and repo
 wagner add my-feature backend
 ```
 
@@ -160,34 +165,33 @@ When you create a task, Wagner creates:
 
 | Command | Description |
 |---------|-------------|
-| `wagner new <name> --repos <specs>` | Create a new task with worktrees |
-| `wagner list` | List all tasks |
-| `wagner attach <task>` | Attach to task's tmux session |
-| `wagner add [task] [repo]` | Add a new Claude pane |
-| `wagner delete <task> [--force]` | Delete a task |
-| `wagner send <session> <message>` | Send message to session (not implemented) |
-| `wagner chains [task] [repo]` | List chains (not implemented) |
+| `wagner` | Launch TUI |
+| `wagner new <name>` | Create task from current repo (auto branch: `task/<name>`) |
+| `wagner new <name> -b <branch>` | Create task with specific branch |
+| `wagner new <name> --repos <specs>` | Create multi-repo task |
+| `wagner list` | List all tasks with age |
+| `wagner attach [task]` | Attach to tmux session (auto-detects from cwd) |
+| `wagner add [task] [repo]` | Add Claude pane (auto-detects from cwd) |
+| `wagner delete <task> [--force]` | Delete task (--force removes branches) |
 
 ## Workflow Example
 
 ```bash
-# 1. Create a task for a new feature spanning 3 repos
+# Single repo workflow
+cd ~/projects/myapi
+wagner new user-auth            # Creates task/user-auth branch
+wagner attach                   # Opens tmux
+wagner add                      # Add another Claude pane
+wagner delete user-auth --force # Cleanup when done
+
+# Multi-repo workflow
 wagner new user-auth --repos \
   api:~/work/api:feature/user-auth,\
-  web:~/work/web:feature/user-auth,\
-  shared:~/work/shared:feature/user-auth
+  web:~/work/web:feature/user-auth
 
-# 2. Attach and start working
-wagner attach user-auth
-
-# 3. Inside tmux, you'll have panes for each repo
-# Each pane is cd'd to its worktree with Claude hooks set up
-
-# 4. Add another Claude instance for parallel work
-wagner add user-auth api
-
-# 5. When done, clean up
-wagner delete user-auth
+cd ~/tasks/user-auth
+wagner attach                   # Auto-detects task
+wagner add api                  # Add pane in api repo
 ```
 
 ## Architecture

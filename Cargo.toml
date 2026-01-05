@@ -2,6 +2,15 @@
 name = "wagner"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "AI agent monitoring CLI tool with TUI"
+authors = ["Aleks Shteinman <deevsgt15@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/DeevsDeevs/wagner"
+homepage = "https://github.com/DeevsDeevs/wagner"
+readme = "README.md"
+keywords = ["cli", "ai", "monitoring", "tui", "agent"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 ansi-to-tui = "8.0.0"

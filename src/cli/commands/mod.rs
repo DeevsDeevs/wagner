@@ -117,19 +117,27 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
 
     if tasks.is_empty() {
         println!("No tasks found");
-        println!("Create one with: wagner new <name> --repos name:path:branch");
+        println!("Create one with: wagner new <name>");
         return Ok(());
     }
 
+    let now = chrono::Utc::now();
     for task in tasks {
         let repos_count = task.repos.len();
         let repos_label = if repos_count == 1 { "repo" } else { "repos" };
+        let age = now.signed_duration_since(task.created_at);
+        let created = match age.num_days() {
+            0 => format!("{}h ago", age.num_hours().max(1)),
+            1..=6 => format!("{}d ago", age.num_days()),
+            _ => task.created_at.format("%Y-%m-%d").to_string(),
+        };
 
         println!(
-            "{:<20} {} {}  {}",
+            "{:<20} {} {}  ({})  {}",
             task.name,
             repos_count,
             repos_label,
+            created,
             task.path.display()
         );
     }

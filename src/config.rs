@@ -102,6 +102,8 @@ pub struct Config {
     pub sidebar_width: u16,
     #[serde(default = "default_page_scroll")]
     pub page_scroll_lines: u16,
+    #[serde(default = "default_background_poll_ms")]
+    pub background_poll_interval_ms: u64,
     #[serde(default)]
     pub keybindings: Keybindings,
 }
@@ -109,6 +111,7 @@ pub struct Config {
 fn default_refresh_ms() -> u64 { 100 }
 fn default_sidebar_width() -> u16 { 28 }
 fn default_page_scroll() -> u16 { 20 }
+fn default_background_poll_ms() -> u64 { 2000 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -119,6 +122,7 @@ impl Default for Config {
             show_hints: false,
             sidebar_width: default_sidebar_width(),
             page_scroll_lines: default_page_scroll(),
+            background_poll_interval_ms: default_background_poll_ms(),
             keybindings: Keybindings::default(),
         }
     }

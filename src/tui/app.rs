@@ -6,7 +6,7 @@ use crate::terminal::{PaneHandle, SessionHandle, Terminal};
 use crate::wagner::{RepoSpec, Wagner};
 
 use ratatui::widgets::ListState;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +45,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub sessions: Vec<Session>,
     pub panes: Vec<PaneHandle>,
     pub pane_statuses: HashMap<String, PaneStatus>,
+    pub expanded_tasks: HashSet<String>,
     pub task_list_state: ListState,
     pub pane_list_state: ListState,
 
@@ -94,6 +95,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             sessions: Vec::new(),
             panes: Vec::new(),
             pane_statuses: HashMap::new(),
+            expanded_tasks: HashSet::new(),
             task_list_state,
             pane_list_state: ListState::default(),
 
@@ -256,22 +258,42 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.show_help = !self.show_help;
     }
 
+    fn task_index_to_list_pos(&self, task_idx: usize) -> usize {
+        let mut pos = 0;
+        for (i, task) in self.tasks.iter().enumerate() {
+            if i == task_idx {
+                return pos;
+            }
+            pos += 1;
+            if self.expanded_tasks.contains(&task.name) {
+                pos += task.repos.len();
+            }
+        }
+        pos
+    }
+
+    pub fn toggle_task_expand(&mut self) {
+        if let Some(ref name) = self.selected_task {
+            if self.expanded_tasks.contains(name) {
+                self.expanded_tasks.remove(name);
+            } else {
+                self.expanded_tasks.insert(name.clone());
+            }
+        }
+    }
+
     pub fn next_task(&mut self) {
         if self.tasks.is_empty() {
             return;
         }
-        let i = match self.task_list_state.selected() {
-            Some(i) => {
-                if i >= self.tasks.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
+        let current_idx = self.tasks.iter().position(|t| Some(&t.name) == self.selected_task.as_ref());
+        let next_idx = match current_idx {
+            Some(i) if i >= self.tasks.len() - 1 => 0,
+            Some(i) => i + 1,
             None => 0,
         };
-        self.task_list_state.select(Some(i));
-        self.selected_task = self.tasks.get(i).map(|t| t.name.clone());
+        self.task_list_state.select(Some(self.task_index_to_list_pos(next_idx)));
+        self.selected_task = self.tasks.get(next_idx).map(|t| t.name.clone());
         self.selected_pane = None;
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
@@ -281,18 +303,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if self.tasks.is_empty() {
             return;
         }
-        let i = match self.task_list_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.tasks.len() - 1
-                } else {
-                    i - 1
-                }
-            }
+        let current_idx = self.tasks.iter().position(|t| Some(&t.name) == self.selected_task.as_ref());
+        let prev_idx = match current_idx {
+            Some(0) => self.tasks.len() - 1,
+            Some(i) => i - 1,
             None => 0,
         };
-        self.task_list_state.select(Some(i));
-        self.selected_task = self.tasks.get(i).map(|t| t.name.clone());
+        self.task_list_state.select(Some(self.task_index_to_list_pos(prev_idx)));
+        self.selected_task = self.tasks.get(prev_idx).map(|t| t.name.clone());
         self.selected_pane = None;
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
