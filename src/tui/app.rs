@@ -1,6 +1,7 @@
 use crate::agent::Agent;
 use crate::error::Result;
-use crate::model::{Session, Task};
+use crate::git::{DiffFile, RepoStats};
+use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
 use crate::terminal::{PaneHandle, SessionHandle, Terminal};
 use crate::wagner::{RepoSpec, Wagner};
@@ -18,7 +19,7 @@ pub enum Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarSection {
     Tasks,
-    Sessions,
+    Panes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,8 @@ pub enum InputMode {
     Confirm,
     Settings,
     EditSetting,
+    DiffFileList,
+    DiffContent,
 }
 
 pub struct App<T: Terminal, A: Agent> {
@@ -42,7 +45,6 @@ pub struct App<T: Terminal, A: Agent> {
     pub input_mode: InputMode,
 
     pub tasks: Vec<Task>,
-    pub sessions: Vec<Session>,
     pub panes: Vec<PaneHandle>,
     pub pane_statuses: HashMap<String, PaneStatus>,
     pub expanded_tasks: HashSet<String>,
@@ -68,6 +70,14 @@ pub struct App<T: Terminal, A: Agent> {
     pub settings_items: Vec<(String, String)>,
     pub settings_index: usize,
     pub editing_setting_key: Option<String>,
+
+    pub diff_repo_path: Option<std::path::PathBuf>,
+    pub diff_repo_name: Option<String>,
+    pub diff_files: Vec<DiffFile>,
+    pub diff_file_index: usize,
+    pub diff_content: Vec<String>,
+    pub diff_scroll: usize,
+    pub repo_stats: HashMap<String, RepoStats>,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -92,7 +102,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
             input_mode: InputMode::Normal,
 
             tasks,
-            sessions: Vec::new(),
             panes: Vec::new(),
             pane_statuses: HashMap::new(),
             expanded_tasks: HashSet::new(),
@@ -118,6 +127,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
             settings_items: Vec::new(),
             settings_index: 0,
             editing_setting_key: None,
+
+            diff_repo_path: None,
+            diff_repo_name: None,
+            diff_files: Vec::new(),
+            diff_file_index: 0,
+            diff_content: Vec::new(),
+            diff_scroll: 0,
+            repo_stats: HashMap::new(),
         }
     }
 
@@ -278,6 +295,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 self.expanded_tasks.remove(name);
             } else {
                 self.expanded_tasks.insert(name.clone());
+                self.refresh_repo_stats();
             }
         }
     }
@@ -339,7 +357,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if index < self.panes.len() {
             self.pane_list_state.select(Some(index));
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
-            self.sidebar_section = SidebarSection::Sessions;
+            self.sidebar_section = SidebarSection::Panes;
             let _ = self.refresh_terminal_output();
         }
     }
@@ -365,8 +383,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn toggle_sidebar_section(&mut self) {
         self.sidebar_section = match self.sidebar_section {
-            SidebarSection::Tasks => SidebarSection::Sessions,
-            SidebarSection::Sessions => SidebarSection::Tasks,
+            SidebarSection::Tasks => SidebarSection::Panes,
+            SidebarSection::Panes => SidebarSection::Tasks,
         };
     }
 
@@ -470,7 +488,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             InputMode::Confirm => {
                 self.confirm_delete();
             }
-            InputMode::Normal | InputMode::Settings | InputMode::EditSetting => {}
+            InputMode::Normal | InputMode::Settings | InputMode::EditSetting
+            | InputMode::DiffFileList | InputMode::DiffContent => {}
         }
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
@@ -618,6 +637,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             ("show_hints".to_string(), cfg.show_hints.to_string()),
             ("sidebar_width".to_string(), cfg.sidebar_width.to_string()),
             ("page_scroll_lines".to_string(), cfg.page_scroll_lines.to_string()),
+            ("diff_base".to_string(), cfg.diff_base.clone()),
             ("key.quit".to_string(), kb.quit.clone()),
             ("key.help".to_string(), kb.help.clone()),
             ("key.refresh".to_string(), kb.refresh.clone()),
@@ -637,6 +657,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             ("key.scroll_bottom".to_string(), kb.scroll_bottom.clone()),
             ("key.page_up".to_string(), kb.page_up.clone()),
             ("key.page_down".to_string(), kb.page_down.clone()),
+            ("key.open_diff".to_string(), kb.open_diff.clone()),
         ]
     }
 
@@ -662,6 +683,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     cfg.page_scroll_lines = v;
                 }
             }
+            "diff_base" => cfg.diff_base = value.to_string(),
             "key.quit" => cfg.keybindings.quit = value.to_string(),
             "key.help" => cfg.keybindings.help = value.to_string(),
             "key.refresh" => cfg.keybindings.refresh = value.to_string(),
@@ -681,6 +703,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             "key.scroll_bottom" => cfg.keybindings.scroll_bottom = value.to_string(),
             "key.page_up" => cfg.keybindings.page_up = value.to_string(),
             "key.page_down" => cfg.keybindings.page_down = value.to_string(),
+            "key.open_diff" => cfg.keybindings.open_diff = value.to_string(),
             _ => {}
         }
     }
@@ -728,5 +751,134 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .nth(char_pos)
             .map(|(i, _)| i)
             .unwrap_or(self.input_buffer.len())
+    }
+
+    pub fn open_diff_view(&mut self) {
+        let Some(task_name) = &self.selected_task else {
+            self.set_status("No task selected");
+            return;
+        };
+
+        let Ok(task) = self.wagner.get_task(task_name) else {
+            self.set_status("Task not found");
+            return;
+        };
+
+        let Some(repo) = task.repos.first() else {
+            self.set_status("No repos in task");
+            return;
+        };
+
+        self.diff_repo_path = Some(repo.worktree.clone());
+        self.diff_repo_name = Some(repo.name.clone());
+        self.load_diff_files();
+        self.input_mode = InputMode::DiffFileList;
+    }
+
+    pub fn open_diff_for_repo(&mut self, repo_name: &str) {
+        let Some(task_name) = &self.selected_task else {
+            return;
+        };
+
+        let Ok(task) = self.wagner.get_task(task_name) else {
+            return;
+        };
+
+        let Some(repo) = task.repos.iter().find(|r| r.name == repo_name) else {
+            return;
+        };
+
+        self.diff_repo_path = Some(repo.worktree.clone());
+        self.diff_repo_name = Some(repo.name.clone());
+        self.load_diff_files();
+        self.input_mode = InputMode::DiffFileList;
+    }
+
+    fn load_diff_files(&mut self) {
+        let Some(repo_path) = &self.diff_repo_path else {
+            return;
+        };
+
+        let base = &self.wagner.config.diff_base;
+        self.diff_files = crate::git::get_diff_files(repo_path, base);
+        self.diff_file_index = 0;
+        self.diff_content.clear();
+        self.diff_scroll = 0;
+    }
+
+    pub fn select_diff_file(&mut self) {
+        let Some(repo_path) = &self.diff_repo_path else {
+            return;
+        };
+
+        let Some(file) = self.diff_files.get(self.diff_file_index) else {
+            return;
+        };
+
+        let base = &self.wagner.config.diff_base;
+        self.diff_content = crate::git::get_diff_content(repo_path, base, &file.path);
+        self.diff_scroll = 0;
+        self.input_mode = InputMode::DiffContent;
+    }
+
+    pub fn close_diff_view(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.diff_files.clear();
+        self.diff_content.clear();
+        self.diff_repo_path = None;
+        self.diff_repo_name = None;
+    }
+
+    pub fn diff_back_to_list(&mut self) {
+        self.input_mode = InputMode::DiffFileList;
+        self.diff_content.clear();
+        self.diff_scroll = 0;
+    }
+
+    pub fn diff_next_file(&mut self) {
+        if !self.diff_files.is_empty() {
+            self.diff_file_index = (self.diff_file_index + 1) % self.diff_files.len();
+        }
+    }
+
+    pub fn diff_prev_file(&mut self) {
+        if !self.diff_files.is_empty() {
+            self.diff_file_index = self.diff_file_index.checked_sub(1).unwrap_or(self.diff_files.len() - 1);
+        }
+    }
+
+    pub fn diff_scroll_down(&mut self) {
+        let max_scroll = self.diff_content.len().saturating_sub(20);
+        if self.diff_scroll < max_scroll {
+            self.diff_scroll += 1;
+        }
+    }
+
+    pub fn diff_scroll_up(&mut self) {
+        self.diff_scroll = self.diff_scroll.saturating_sub(1);
+    }
+
+    pub fn diff_scroll_top(&mut self) {
+        self.diff_scroll = 0;
+    }
+
+    pub fn diff_scroll_bottom(&mut self) {
+        self.diff_scroll = self.diff_content.len().saturating_sub(20);
+    }
+
+    pub fn refresh_repo_stats(&mut self) {
+        let Some(task_name) = &self.selected_task else {
+            return;
+        };
+
+        let Ok(task) = self.wagner.get_task(task_name) else {
+            return;
+        };
+
+        let base = &self.wagner.config.diff_base;
+        for repo in &task.repos {
+            let stats = crate::git::get_repo_stats(&repo.worktree, base);
+            self.repo_stats.insert(repo.name.clone(), stats);
+        }
     }
 }

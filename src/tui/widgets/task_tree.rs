@@ -62,9 +62,18 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 
         if is_expanded {
             for repo in &task.repos {
+                let stats_str = app.repo_stats.get(&repo.name).map(|s| {
+                    if s.file_count > 0 {
+                        format!(" [+{} -{}]", s.additions, s.deletions)
+                    } else {
+                        String::new()
+                    }
+                }).unwrap_or_default();
+
                 items.push(ListItem::new(Line::from(vec![
                     Span::raw("    "),
                     Span::styled(&repo.name, Style::default().fg(Color::DarkGray)),
+                    Span::styled(stats_str, Style::default().fg(Color::Cyan)),
                 ])));
             }
         }

@@ -14,12 +14,6 @@ pub enum WagnerError {
     #[error("Repository '{0}' not found at {1}")]
     RepoNotFound(String, PathBuf),
 
-    #[error("Branch '{branch}' already checked out in {path}")]
-    BranchInUse { branch: String, path: PathBuf },
-
-    #[error("Session '{0}' not found")]
-    SessionNotFound(String),
-
     #[error("Terminal error: {0}")]
     Terminal(String),
 

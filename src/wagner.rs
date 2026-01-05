@@ -55,8 +55,6 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 }
             }
 
-            self.agent.setup_hooks(&worktree_path)?;
-
             repos.push(TaskRepo {
                 name: spec.name.clone(),
                 source: spec.source.clone(),

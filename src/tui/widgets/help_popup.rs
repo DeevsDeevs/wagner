@@ -91,6 +91,10 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::styled(format!("  {}", fmt_key(&keybindings.send_message)), key_style),
             Span::raw("Send message to pane"),
         ]),
+        Line::from(vec![
+            Span::styled(format!("  {}", fmt_key(&keybindings.open_diff)), key_style),
+            Span::raw("View git diff"),
+        ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("  General", Style::default().add_modifier(Modifier::BOLD)),

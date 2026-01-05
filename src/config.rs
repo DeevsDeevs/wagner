@@ -42,8 +42,11 @@ pub struct Keybindings {
     pub page_up: String,
     #[serde(default = "default_page_down")]
     pub page_down: String,
+    #[serde(default = "default_open_diff")]
+    pub open_diff: String,
 }
 
+fn default_open_diff() -> String { "c".to_string() }
 fn default_quit() -> String { "q".to_string() }
 fn default_help() -> String { "?".to_string() }
 fn default_refresh() -> String { "r".to_string() }
@@ -86,6 +89,7 @@ impl Default for Keybindings {
             scroll_bottom: default_scroll_bottom(),
             page_up: default_page_up(),
             page_down: default_page_down(),
+            open_diff: default_open_diff(),
         }
     }
 }
@@ -104,10 +108,13 @@ pub struct Config {
     pub page_scroll_lines: u16,
     #[serde(default = "default_background_poll_ms")]
     pub background_poll_interval_ms: u64,
+    #[serde(default = "default_diff_base")]
+    pub diff_base: String,
     #[serde(default)]
     pub keybindings: Keybindings,
 }
 
+fn default_diff_base() -> String { "main".to_string() }
 fn default_refresh_ms() -> u64 { 100 }
 fn default_sidebar_width() -> u16 { 28 }
 fn default_page_scroll() -> u16 { 20 }
@@ -123,6 +130,7 @@ impl Default for Config {
             sidebar_width: default_sidebar_width(),
             page_scroll_lines: default_page_scroll(),
             background_poll_interval_ms: default_background_poll_ms(),
+            diff_base: default_diff_base(),
             keybindings: Keybindings::default(),
         }
     }
@@ -158,10 +166,6 @@ impl Config {
 
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.json")
-    }
-
-    pub fn sessions_path() -> PathBuf {
-        Self::config_dir().join("sessions.json")
     }
 }
 

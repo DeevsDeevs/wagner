@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let is_active = app.focus == Focus::Sidebar && app.sidebar_section == SidebarSection::Sessions;
+    let is_active = app.focus == Focus::Sidebar && app.sidebar_section == SidebarSection::Panes;
 
     let border_color = if is_active { Color::Cyan } else { Color::DarkGray };
 

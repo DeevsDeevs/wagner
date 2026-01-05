@@ -2,7 +2,7 @@ use crate::agent::Agent;
 use crate::terminal::Terminal;
 
 use super::app::{App, Focus, InputMode};
-use super::widgets::{help_popup, session_list, settings_popup, task_tree, terminal_view};
+use super::widgets::{diff_view, help_popup, pane_list, settings_popup, task_tree, terminal_view};
 
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -45,7 +45,10 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
         draw_help_popup(frame, area, &app.wagner.config.keybindings);
     }
 
-    if app.input_mode == InputMode::Settings || app.input_mode == InputMode::EditSetting {
+    if app.input_mode == InputMode::DiffFileList || app.input_mode == InputMode::DiffContent {
+        let popup_area = centered_rect(80, 80, area);
+        diff_view::draw(frame, popup_area, app);
+    } else if app.input_mode == InputMode::Settings || app.input_mode == InputMode::EditSetting {
         draw_settings_popup(frame, area, app);
     } else if app.input_mode != InputMode::Normal {
         draw_input_dialog(frame, area, app);
@@ -78,7 +81,7 @@ fn draw_sidebar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<
     frame.render_widget(title, chunks[0]);
 
     task_tree::draw(frame, chunks[1], app);
-    session_list::draw(frame, chunks[2], app);
+    pane_list::draw(frame, chunks[2], app);
 }
 
 fn draw_terminal_view<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

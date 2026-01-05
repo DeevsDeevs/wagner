@@ -41,6 +41,8 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>) -> Result<bool>
             }
             InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
             InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
+            InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
+            InputMode::DiffContent => handle_diff_content_mode(app, key.code),
         }
     }
 
@@ -62,6 +64,7 @@ fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
         (&kb.send_message, "send_message"),
         (&kb.settings, "settings"),
         (&kb.switch_section, "switch_section"),
+        (&kb.open_diff, "open_diff"),
     ];
 
     bindings.iter()
@@ -116,6 +119,7 @@ fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode,
         Some("send_message") => app.start_send_message(),
         Some("settings") => app.open_settings(),
         Some("switch_section") if app.focus == Focus::Sidebar => app.toggle_sidebar_section(),
+        Some("open_diff") => app.open_diff_view(),
         _ => handle_navigation(app, code),
     }
 }
@@ -182,7 +186,7 @@ fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) 
         match app.focus {
             Focus::Sidebar => match app.sidebar_section {
                 SidebarSection::Tasks => app.next_task(),
-                SidebarSection::Sessions => app.next_pane(),
+                SidebarSection::Panes => app.next_pane(),
             },
             Focus::Terminal => app.scroll_terminal_down(),
         }
@@ -193,7 +197,7 @@ fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) 
         match app.focus {
             Focus::Sidebar => match app.sidebar_section {
                 SidebarSection::Tasks => app.prev_task(),
-                SidebarSection::Sessions => app.prev_pane(),
+                SidebarSection::Panes => app.prev_pane(),
             },
             Focus::Terminal => app.scroll_terminal_up(),
         }
@@ -230,7 +234,7 @@ fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) 
     if code == KeyCode::Enter && app.focus == Focus::Sidebar {
         match app.sidebar_section {
             SidebarSection::Tasks => app.toggle_task_expand(),
-            SidebarSection::Sessions => {
+            SidebarSection::Panes => {
                 app.focus = Focus::Terminal;
                 let _ = app.refresh_terminal_output();
             }
@@ -331,6 +335,45 @@ fn handle_edit_setting_mode<T: Terminal, A: Agent>(
                 app.input_mode = InputMode::Settings;
             } else {
                 app.input_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_diff_file_list_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => app.close_diff_view(),
+        KeyCode::Enter => app.select_diff_file(),
+        KeyCode::Char('j') | KeyCode::Down => app.diff_next_file(),
+        KeyCode::Char('k') | KeyCode::Up => app.diff_prev_file(),
+        KeyCode::Char('g') | KeyCode::Home => {
+            app.diff_file_index = 0;
+        }
+        KeyCode::Char('G') | KeyCode::End => {
+            if !app.diff_files.is_empty() {
+                app.diff_file_index = app.diff_files.len() - 1;
+            }
+        }
+        _ => {}
+    }
+}
+
+fn handle_diff_content_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    match code {
+        KeyCode::Esc | KeyCode::Char('q') => app.diff_back_to_list(),
+        KeyCode::Char('j') | KeyCode::Down => app.diff_scroll_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.diff_scroll_up(),
+        KeyCode::Char('g') | KeyCode::Home => app.diff_scroll_top(),
+        KeyCode::Char('G') | KeyCode::End => app.diff_scroll_bottom(),
+        KeyCode::PageDown | KeyCode::Char('f') => {
+            for _ in 0..20 {
+                app.diff_scroll_down();
+            }
+        }
+        KeyCode::PageUp | KeyCode::Char('u') => {
+            for _ in 0..20 {
+                app.diff_scroll_up();
             }
         }
         _ => {}
