@@ -42,7 +42,10 @@ mod tests {
 
     #[test]
     fn test_strip_multiple_codes() {
-        assert_eq!(strip_ansi("\x1b[1;32mbold green\x1b[0m text"), "bold green text");
+        assert_eq!(
+            strip_ansi("\x1b[1;32mbold green\x1b[0m text"),
+            "bold green text"
+        );
     }
 
     #[test]

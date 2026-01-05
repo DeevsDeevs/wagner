@@ -12,8 +12,8 @@ use tracing::warn;
 use crate::terminal::{PaneHandle, Terminal};
 
 pub use ansi::strip_ansi;
-pub use detector::AgentDetector;
-pub use detectors::{ClaudeCodeDetector, TerminalDetector};
+pub use detector::{AgentDetector, IDLE_THRESHOLD};
+pub use detectors::TerminalDetector;
 pub use status::{
     Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, PaneStatus,
     SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
@@ -46,9 +46,9 @@ pub struct StatusMonitor {
 }
 
 impl StatusMonitor {
-    pub fn new() -> Self {
+    pub fn new(detector: Box<dyn AgentDetector>) -> Self {
         Self {
-            detectors: vec![Box::new(ClaudeCodeDetector::new())],
+            detectors: vec![detector],
             sessions: HashMap::new(),
             background_interval: Duration::from_secs(2),
             background_index: 0,
@@ -92,7 +92,10 @@ impl StatusMonitor {
         self.background_index = self.background_index % background.len();
         let (session_name, panes) = &background[self.background_index];
 
-        let session = self.sessions.entry(session_name.clone()).or_insert_with(TrackedSession::new);
+        let session = self
+            .sessions
+            .entry(session_name.clone())
+            .or_insert_with(TrackedSession::new);
         if now.duration_since(session.last_poll) >= self.background_interval {
             self.poll_session(terminal, session_name, panes);
         }
@@ -107,7 +110,9 @@ impl StatusMonitor {
     ) -> Vec<StatusUpdate> {
         let mut updates = vec![];
 
-        self.sessions.entry(session_name.to_string()).or_insert_with(TrackedSession::new);
+        self.sessions
+            .entry(session_name.to_string())
+            .or_insert_with(TrackedSession::new);
 
         for pane in panes {
             let pane_id = pane.0.clone();
@@ -147,8 +152,14 @@ impl StatusMonitor {
                 )
             };
 
-            let agent_type = current_agent.or_else(|| self.detect_agent(&pane_command, &clean_output));
-            let new_status = self.detect_status(agent_type.as_ref(), &clean_output, output_changed, since_change);
+            let agent_type =
+                current_agent.or_else(|| self.detect_agent(&pane_command, &clean_output));
+            let new_status = self.detect_status(
+                agent_type.as_ref(),
+                &clean_output,
+                output_changed,
+                since_change,
+            );
 
             let session = self.sessions.get_mut(session_name).unwrap();
             let tracked = session.panes.get_mut(&pane_id).unwrap();
@@ -164,7 +175,9 @@ impl StatusMonitor {
         }
 
         if let Some(session) = self.sessions.get_mut(session_name) {
-            session.panes.retain(|id, _| panes.iter().any(|p| p.0 == *id));
+            session
+                .panes
+                .retain(|id, _| panes.iter().any(|p| p.0 == *id));
         }
         updates
     }
@@ -216,12 +229,6 @@ impl StatusMonitor {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         hasher.finalize().into()
-    }
-}
-
-impl Default for StatusMonitor {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

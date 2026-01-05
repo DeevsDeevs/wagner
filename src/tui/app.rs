@@ -1,6 +1,7 @@
 use crate::agent::Agent;
 use crate::error::Result;
-use crate::model::{Session, Task};
+use crate::git::{DiffFile, RepoStats};
+use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
 use crate::terminal::{PaneHandle, SessionHandle, Terminal};
 use crate::wagner::{RepoSpec, Wagner};
@@ -18,7 +19,7 @@ pub enum Focus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarSection {
     Tasks,
-    Sessions,
+    Panes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,8 @@ pub enum InputMode {
     Confirm,
     Settings,
     EditSetting,
+    DiffFileList,
+    DiffContent,
 }
 
 pub struct App<T: Terminal, A: Agent> {
@@ -42,7 +45,6 @@ pub struct App<T: Terminal, A: Agent> {
     pub input_mode: InputMode,
 
     pub tasks: Vec<Task>,
-    pub sessions: Vec<Session>,
     pub panes: Vec<PaneHandle>,
     pub pane_statuses: HashMap<String, PaneStatus>,
     pub expanded_tasks: HashSet<String>,
@@ -50,6 +52,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub pane_list_state: ListState,
 
     pub selected_task: Option<String>,
+    pub selected_repo: Option<String>,
     pub selected_pane: Option<String>,
     pub terminal_output: String,
     pub terminal_scroll: u16,
@@ -68,6 +71,14 @@ pub struct App<T: Terminal, A: Agent> {
     pub settings_items: Vec<(String, String)>,
     pub settings_index: usize,
     pub editing_setting_key: Option<String>,
+
+    pub diff_repo_path: Option<std::path::PathBuf>,
+    pub diff_repo_name: Option<String>,
+    pub diff_files: Vec<DiffFile>,
+    pub diff_file_index: usize,
+    pub diff_content: Vec<String>,
+    pub diff_scroll: usize,
+    pub repo_stats: HashMap<String, RepoStats>,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -75,6 +86,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let tasks = wagner.list_tasks().unwrap_or_default();
         let first_task = tasks.first().map(|t| t.name.clone());
         let refresh_interval_ms = wagner.config.refresh_interval_ms;
+        let detector = wagner.agent.detector();
 
         let mut task_list_state = ListState::default();
         if !tasks.is_empty() {
@@ -92,7 +104,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
             input_mode: InputMode::Normal,
 
             tasks,
-            sessions: Vec::new(),
             panes: Vec::new(),
             pane_statuses: HashMap::new(),
             expanded_tasks: HashSet::new(),
@@ -100,6 +111,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             pane_list_state: ListState::default(),
 
             selected_task: first_task,
+            selected_repo: None,
             selected_pane: None,
             terminal_output: String::new(),
             terminal_scroll: 0,
@@ -107,7 +119,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
             auto_refresh: true,
-            status_monitor: StatusMonitor::new(),
+            status_monitor: StatusMonitor::new(detector),
 
             input_buffer: String::new(),
             input_cursor: 0,
@@ -118,33 +130,56 @@ impl<T: Terminal, A: Agent> App<T, A> {
             settings_items: Vec::new(),
             settings_index: 0,
             editing_setting_key: None,
+
+            diff_repo_path: None,
+            diff_repo_name: None,
+            diff_files: Vec::new(),
+            diff_file_index: 0,
+            diff_content: Vec::new(),
+            diff_scroll: 0,
+            repo_stats: HashMap::new(),
         }
     }
 
-    pub fn run(&mut self, terminal: &mut ratatui::Terminal<impl ratatui::backend::Backend + std::io::Write>) -> Result<()> {
+    pub fn run(
+        &mut self,
+        terminal: &mut ratatui::Terminal<impl ratatui::backend::Backend + std::io::Write>,
+    ) -> Result<()> {
         use super::event::handle_events;
         use super::ui::draw;
         use crate::error::WagnerError;
         use crossterm::{
             event::{DisableMouseCapture, EnableMouseCapture},
             execute,
-            terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+            terminal::{
+                EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+            },
         };
 
         self.refresh_data()?;
 
         while !self.should_quit {
             if let Some(task_name) = self.pending_attach.take() {
-                execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)
-                    .map_err(|e| WagnerError::Terminal(e.to_string()))?;
+                execute!(
+                    terminal.backend_mut(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture
+                )
+                .map_err(|e| WagnerError::Terminal(e.to_string()))?;
                 disable_raw_mode().map_err(|e| WagnerError::Terminal(e.to_string()))?;
 
                 let _ = self.wagner.attach(&task_name);
 
                 enable_raw_mode().map_err(|e| WagnerError::Terminal(e.to_string()))?;
-                execute!(terminal.backend_mut(), EnterAlternateScreen, EnableMouseCapture)
+                execute!(
+                    terminal.backend_mut(),
+                    EnterAlternateScreen,
+                    EnableMouseCapture
+                )
+                .map_err(|e| WagnerError::Terminal(e.to_string()))?;
+                terminal
+                    .clear()
                     .map_err(|e| WagnerError::Terminal(e.to_string()))?;
-                terminal.clear().map_err(|e| WagnerError::Terminal(e.to_string()))?;
 
                 self.refresh_data()?;
                 continue;
@@ -178,7 +213,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.panes.clear();
         if let Some(task_name) = &self.selected_task {
             let session_name = format!("wagner_{}", task_name);
-            if let Ok(panes) = self.wagner.terminal.list_panes(&SessionHandle(session_name.clone())) {
+            if let Ok(panes) = self
+                .wagner
+                .terminal
+                .list_panes(&SessionHandle(session_name.clone()))
+            {
                 self.panes = panes;
                 if self.selected_pane.is_none() && !self.panes.is_empty() {
                     self.pane_list_state.select(Some(0));
@@ -188,9 +227,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     self.pane_list_state.select(idx);
                 }
 
-                let updates = self.status_monitor.poll_active(&self.wagner.terminal, &session_name, &self.panes);
+                let updates = self.status_monitor.poll_active(
+                    &self.wagner.terminal,
+                    &session_name,
+                    &self.panes,
+                );
                 for update in updates {
-                    self.pane_statuses.insert(update.pane.0.clone(), update.status);
+                    self.pane_statuses
+                        .insert(update.pane.0.clone(), update.status);
                 }
 
                 self.poll_background_sessions(&session_name);
@@ -199,16 +243,24 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn poll_background_sessions(&mut self, active_session: &str) {
-        let all_sessions: Vec<_> = self.tasks
+        let all_sessions: Vec<_> = self
+            .tasks
             .iter()
             .filter_map(|task| {
                 let session_name = format!("wagner_{}", task.name);
-                self.wagner.terminal.list_panes(&SessionHandle(session_name.clone())).ok()
+                self.wagner
+                    .terminal
+                    .list_panes(&SessionHandle(session_name.clone()))
+                    .ok()
                     .map(|panes| (session_name, panes))
             })
             .collect();
 
-        self.status_monitor.poll_background(&self.wagner.terminal, &all_sessions, Some(active_session));
+        self.status_monitor.poll_background(
+            &self.wagner.terminal,
+            &all_sessions,
+            Some(active_session),
+        );
     }
 
     pub fn get_task_status(&self, task_name: &str) -> SessionAggregateStatus {
@@ -229,19 +281,26 @@ impl<T: Terminal, A: Agent> App<T, A> {
             if let Ok(task) = self.wagner.get_task(task_name) {
                 if !task.repos.is_empty() {
                     let session_name = format!("wagner_{}", task_name);
-                    if let Ok(panes) = self.wagner.terminal.list_panes(&crate::terminal::SessionHandle(session_name)) {
+                    if let Ok(panes) = self
+                        .wagner
+                        .terminal
+                        .list_panes(&crate::terminal::SessionHandle(session_name))
+                    {
                         if let Some(first_pane) = panes.first() {
                             self.selected_pane = Some(first_pane.0.clone());
                             match self.wagner.terminal.capture(first_pane, 500) {
                                 Ok(output) => self.terminal_output = output,
-                                Err(_) => self.terminal_output = String::from("[No output captured]"),
+                                Err(_) => {
+                                    self.terminal_output = String::from("[No output captured]")
+                                }
                             }
                         }
                     }
                 }
             }
         } else {
-            self.terminal_output = String::from("No task selected. Press 'n' to create a new task.");
+            self.terminal_output =
+                String::from("No task selected. Press 'n' to create a new task.");
         }
 
         if self.terminal_output.len() > old_len {
@@ -258,26 +317,15 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.show_help = !self.show_help;
     }
 
-    fn task_index_to_list_pos(&self, task_idx: usize) -> usize {
-        let mut pos = 0;
-        for (i, task) in self.tasks.iter().enumerate() {
-            if i == task_idx {
-                return pos;
-            }
-            pos += 1;
-            if self.expanded_tasks.contains(&task.name) {
-                pos += task.repos.len();
-            }
-        }
-        pos
-    }
-
     pub fn toggle_task_expand(&mut self) {
         if let Some(ref name) = self.selected_task {
             if self.expanded_tasks.contains(name) {
                 self.expanded_tasks.remove(name);
+                self.selected_repo = None;
+                self.update_task_list_selection();
             } else {
                 self.expanded_tasks.insert(name.clone());
+                self.refresh_repo_stats();
             }
         }
     }
@@ -286,15 +334,49 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if self.tasks.is_empty() {
             return;
         }
-        let current_idx = self.tasks.iter().position(|t| Some(&t.name) == self.selected_task.as_ref());
-        let next_idx = match current_idx {
-            Some(i) if i >= self.tasks.len() - 1 => 0,
-            Some(i) => i + 1,
-            None => 0,
+
+        let Some(task_name) = &self.selected_task else {
+            self.selected_task = self.tasks.first().map(|t| t.name.clone());
+            self.task_list_state.select(Some(0));
+            return;
         };
-        self.task_list_state.select(Some(self.task_index_to_list_pos(next_idx)));
-        self.selected_task = self.tasks.get(next_idx).map(|t| t.name.clone());
+
+        let task_idx = self
+            .tasks
+            .iter()
+            .position(|t| &t.name == task_name)
+            .unwrap_or(0);
+        let task = &self.tasks[task_idx];
+        let is_expanded = self.expanded_tasks.contains(&task.name);
+
+        if is_expanded && !task.repos.is_empty() {
+            if let Some(repo_name) = &self.selected_repo {
+                let repo_idx = task
+                    .repos
+                    .iter()
+                    .position(|r| &r.name == repo_name)
+                    .unwrap_or(0);
+                if repo_idx + 1 < task.repos.len() {
+                    self.selected_repo = Some(task.repos[repo_idx + 1].name.clone());
+                    self.update_task_list_selection();
+                    return;
+                }
+            } else {
+                self.selected_repo = Some(task.repos[0].name.clone());
+                self.update_task_list_selection();
+                return;
+            }
+        }
+
+        let next_idx = if task_idx + 1 >= self.tasks.len() {
+            0
+        } else {
+            task_idx + 1
+        };
+        self.selected_task = Some(self.tasks[next_idx].name.clone());
+        self.selected_repo = None;
         self.selected_pane = None;
+        self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
     }
@@ -303,17 +385,85 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if self.tasks.is_empty() {
             return;
         }
-        let current_idx = self.tasks.iter().position(|t| Some(&t.name) == self.selected_task.as_ref());
-        let prev_idx = match current_idx {
-            Some(0) => self.tasks.len() - 1,
-            Some(i) => i - 1,
-            None => 0,
+
+        let Some(task_name) = &self.selected_task else {
+            self.selected_task = self.tasks.last().map(|t| t.name.clone());
+            self.update_task_list_selection();
+            return;
         };
-        self.task_list_state.select(Some(self.task_index_to_list_pos(prev_idx)));
-        self.selected_task = self.tasks.get(prev_idx).map(|t| t.name.clone());
+
+        let task_idx = self
+            .tasks
+            .iter()
+            .position(|t| &t.name == task_name)
+            .unwrap_or(0);
+        let task = &self.tasks[task_idx];
+        let is_expanded = self.expanded_tasks.contains(&task.name);
+
+        if is_expanded && !task.repos.is_empty() {
+            if let Some(repo_name) = &self.selected_repo {
+                let repo_idx = task
+                    .repos
+                    .iter()
+                    .position(|r| &r.name == repo_name)
+                    .unwrap_or(0);
+                if repo_idx > 0 {
+                    self.selected_repo = Some(task.repos[repo_idx - 1].name.clone());
+                    self.update_task_list_selection();
+                    return;
+                } else {
+                    self.selected_repo = None;
+                    self.update_task_list_selection();
+                    return;
+                }
+            }
+        }
+
+        let prev_idx = if task_idx == 0 {
+            self.tasks.len() - 1
+        } else {
+            task_idx - 1
+        };
+        let prev_task = &self.tasks[prev_idx];
+        self.selected_task = Some(prev_task.name.clone());
+
+        if self.expanded_tasks.contains(&prev_task.name) && !prev_task.repos.is_empty() {
+            self.selected_repo = prev_task.repos.last().map(|r| r.name.clone());
+        } else {
+            self.selected_repo = None;
+        }
+
         self.selected_pane = None;
+        self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
+    }
+
+    fn update_task_list_selection(&mut self) {
+        let mut pos = 0;
+        for task in &self.tasks {
+            if Some(&task.name) == self.selected_task.as_ref() {
+                if self.selected_repo.is_none() {
+                    self.task_list_state.select(Some(pos));
+                    return;
+                }
+                pos += 1;
+                if self.expanded_tasks.contains(&task.name) {
+                    for repo in &task.repos {
+                        if Some(&repo.name) == self.selected_repo.as_ref() {
+                            self.task_list_state.select(Some(pos));
+                            return;
+                        }
+                        pos += 1;
+                    }
+                }
+                return;
+            }
+            pos += 1;
+            if self.expanded_tasks.contains(&task.name) {
+                pos += task.repos.len();
+            }
+        }
     }
 
     pub fn next_pane(&mut self) {
@@ -339,7 +489,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if index < self.panes.len() {
             self.pane_list_state.select(Some(index));
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
-            self.sidebar_section = SidebarSection::Sessions;
+            self.sidebar_section = SidebarSection::Panes;
             let _ = self.refresh_terminal_output();
         }
     }
@@ -365,8 +515,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn toggle_sidebar_section(&mut self) {
         self.sidebar_section = match self.sidebar_section {
-            SidebarSection::Tasks => SidebarSection::Sessions,
-            SidebarSection::Sessions => SidebarSection::Tasks,
+            SidebarSection::Tasks => SidebarSection::Panes,
+            SidebarSection::Panes => SidebarSection::Tasks,
         };
     }
 
@@ -413,7 +563,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.input_mode = InputMode::NewTask;
         self.input_buffer.clear();
         self.input_cursor = 0;
-        self.input_label = "New task (format: name repo:path:branch,repo2:path2:branch2)".to_string();
+        self.input_label =
+            "New task (format: name repo:path:branch,repo2:path2:branch2)".to_string();
     }
 
     pub fn start_send_message(&mut self) {
@@ -470,7 +621,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
             InputMode::Confirm => {
                 self.confirm_delete();
             }
-            InputMode::Normal | InputMode::Settings | InputMode::EditSetting => {}
+            InputMode::Normal
+            | InputMode::Settings
+            | InputMode::EditSetting
+            | InputMode::DiffFileList
+            | InputMode::DiffContent => {}
         }
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
@@ -569,7 +724,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn settings_prev(&mut self) {
         if !self.settings_items.is_empty() {
-            self.settings_index = self.settings_index.checked_sub(1).unwrap_or(self.settings_items.len() - 1);
+            self.settings_index = self
+                .settings_index
+                .checked_sub(1)
+                .unwrap_or(self.settings_items.len() - 1);
         }
     }
 
@@ -612,12 +770,22 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let cfg = &self.wagner.config;
         let kb = &cfg.keybindings;
         vec![
-            ("tasks_root".to_string(), cfg.tasks_root.display().to_string()),
-            ("refresh_interval_ms".to_string(), cfg.refresh_interval_ms.to_string()),
+            (
+                "tasks_root".to_string(),
+                cfg.tasks_root.display().to_string(),
+            ),
+            (
+                "refresh_interval_ms".to_string(),
+                cfg.refresh_interval_ms.to_string(),
+            ),
             ("default_agent".to_string(), cfg.default_agent.clone()),
             ("show_hints".to_string(), cfg.show_hints.to_string()),
             ("sidebar_width".to_string(), cfg.sidebar_width.to_string()),
-            ("page_scroll_lines".to_string(), cfg.page_scroll_lines.to_string()),
+            (
+                "page_scroll_lines".to_string(),
+                cfg.page_scroll_lines.to_string(),
+            ),
+            ("diff_base".to_string(), cfg.diff_base.clone()),
             ("key.quit".to_string(), kb.quit.clone()),
             ("key.help".to_string(), kb.help.clone()),
             ("key.refresh".to_string(), kb.refresh.clone()),
@@ -637,6 +805,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             ("key.scroll_bottom".to_string(), kb.scroll_bottom.clone()),
             ("key.page_up".to_string(), kb.page_up.clone()),
             ("key.page_down".to_string(), kb.page_down.clone()),
+            ("key.open_diff".to_string(), kb.open_diff.clone()),
         ]
     }
 
@@ -662,6 +831,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     cfg.page_scroll_lines = v;
                 }
             }
+            "diff_base" => cfg.diff_base = value.to_string(),
             "key.quit" => cfg.keybindings.quit = value.to_string(),
             "key.help" => cfg.keybindings.help = value.to_string(),
             "key.refresh" => cfg.keybindings.refresh = value.to_string(),
@@ -681,6 +851,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             "key.scroll_bottom" => cfg.keybindings.scroll_bottom = value.to_string(),
             "key.page_up" => cfg.keybindings.page_up = value.to_string(),
             "key.page_down" => cfg.keybindings.page_down = value.to_string(),
+            "key.open_diff" => cfg.keybindings.open_diff = value.to_string(),
             _ => {}
         }
     }
@@ -696,7 +867,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.input_cursor -= 1;
             let byte_pos = self.char_to_byte_pos(self.input_cursor);
             if let Some(c) = self.input_buffer.chars().nth(self.input_cursor) {
-                self.input_buffer.replace_range(byte_pos..byte_pos + c.len_utf8(), "");
+                self.input_buffer
+                    .replace_range(byte_pos..byte_pos + c.len_utf8(), "");
             }
         }
     }
@@ -706,7 +878,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if self.input_cursor < char_count {
             let byte_pos = self.char_to_byte_pos(self.input_cursor);
             if let Some(c) = self.input_buffer.chars().nth(self.input_cursor) {
-                self.input_buffer.replace_range(byte_pos..byte_pos + c.len_utf8(), "");
+                self.input_buffer
+                    .replace_range(byte_pos..byte_pos + c.len_utf8(), "");
             }
         }
     }
@@ -728,5 +901,142 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .nth(char_pos)
             .map(|(i, _)| i)
             .unwrap_or(self.input_buffer.len())
+    }
+
+    pub fn open_diff_view(&mut self) {
+        let Some(task_name) = &self.selected_task else {
+            self.set_status("No task selected");
+            return;
+        };
+
+        let Ok(task) = self.wagner.get_task(task_name) else {
+            self.set_status("Task not found");
+            return;
+        };
+
+        let repo = if let Some(repo_name) = &self.selected_repo {
+            task.repos.iter().find(|r| &r.name == repo_name)
+        } else {
+            task.repos.first()
+        };
+
+        let Some(repo) = repo else {
+            self.set_status("No repos in task");
+            return;
+        };
+
+        self.diff_repo_path = Some(repo.worktree.clone());
+        self.diff_repo_name = Some(repo.name.clone());
+        self.load_diff_files();
+        self.input_mode = InputMode::DiffFileList;
+    }
+
+    pub fn open_diff_for_repo(&mut self, repo_name: &str) {
+        let Some(task_name) = &self.selected_task else {
+            return;
+        };
+
+        let Ok(task) = self.wagner.get_task(task_name) else {
+            return;
+        };
+
+        let Some(repo) = task.repos.iter().find(|r| r.name == repo_name) else {
+            return;
+        };
+
+        self.diff_repo_path = Some(repo.worktree.clone());
+        self.diff_repo_name = Some(repo.name.clone());
+        self.load_diff_files();
+        self.input_mode = InputMode::DiffFileList;
+    }
+
+    fn load_diff_files(&mut self) {
+        let Some(repo_path) = &self.diff_repo_path else {
+            return;
+        };
+
+        let base = &self.wagner.config.diff_base;
+        self.diff_files = crate::git::get_diff_files(repo_path, base);
+        self.diff_file_index = 0;
+        self.diff_content.clear();
+        self.diff_scroll = 0;
+    }
+
+    pub fn select_diff_file(&mut self) {
+        let Some(repo_path) = &self.diff_repo_path else {
+            return;
+        };
+
+        let Some(file) = self.diff_files.get(self.diff_file_index) else {
+            return;
+        };
+
+        let base = &self.wagner.config.diff_base;
+        self.diff_content = crate::git::get_diff_content(repo_path, base, &file.path);
+        self.diff_scroll = 0;
+        self.input_mode = InputMode::DiffContent;
+    }
+
+    pub fn close_diff_view(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.diff_files.clear();
+        self.diff_content.clear();
+        self.diff_repo_path = None;
+        self.diff_repo_name = None;
+    }
+
+    pub fn diff_back_to_list(&mut self) {
+        self.input_mode = InputMode::DiffFileList;
+        self.diff_content.clear();
+        self.diff_scroll = 0;
+    }
+
+    pub fn diff_next_file(&mut self) {
+        if !self.diff_files.is_empty() {
+            self.diff_file_index = (self.diff_file_index + 1) % self.diff_files.len();
+        }
+    }
+
+    pub fn diff_prev_file(&mut self) {
+        if !self.diff_files.is_empty() {
+            self.diff_file_index = self
+                .diff_file_index
+                .checked_sub(1)
+                .unwrap_or(self.diff_files.len() - 1);
+        }
+    }
+
+    pub fn diff_scroll_down(&mut self) {
+        if self.diff_scroll < self.diff_content.len().saturating_sub(1) {
+            self.diff_scroll += 1;
+        }
+    }
+
+    pub fn diff_scroll_up(&mut self) {
+        self.diff_scroll = self.diff_scroll.saturating_sub(1);
+    }
+
+    pub fn diff_scroll_top(&mut self) {
+        self.diff_scroll = 0;
+    }
+
+    pub fn diff_scroll_bottom(&mut self) {
+        self.diff_scroll = self.diff_content.len().saturating_sub(1);
+    }
+
+    pub fn refresh_repo_stats(&mut self) {
+        let Some(task_name) = &self.selected_task else {
+            return;
+        };
+
+        let Ok(task) = self.wagner.get_task(task_name) else {
+            return;
+        };
+
+        let base = &self.wagner.config.diff_base;
+        for repo in &task.repos {
+            let stats = crate::git::get_repo_stats(&repo.worktree, base);
+            self.repo_stats.insert(repo.name.clone(), stats);
+        }
     }
 }

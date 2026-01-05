@@ -3,17 +3,21 @@ use crate::terminal::Terminal;
 use crate::tui::app::{App, Focus, SidebarSection};
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem},
-    Frame,
 };
 
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let is_active = app.focus == Focus::Sidebar && app.sidebar_section == SidebarSection::Sessions;
+    let is_active = app.focus == Focus::Sidebar && app.sidebar_section == SidebarSection::Panes;
 
-    let border_color = if is_active { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_active {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
 
     let title = if app.wagner.config.show_hints {
         " Panes [o] "
@@ -51,31 +55,39 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
         };
 
         let name_style = if is_selected {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
 
-        let status_label = status.map(|s| {
-            let label = s.label();
-            if label.chars().count() > 12 {
-                format!("{}…", label.chars().take(11).collect::<String>())
-            } else {
-                label
-            }
-        }).unwrap_or_default();
+        let status_label = status
+            .map(|s| {
+                let label = s.label();
+                if label.chars().count() > 12 {
+                    format!("{}…", label.chars().take(11).collect::<String>())
+                } else {
+                    label
+                }
+            })
+            .unwrap_or_default();
 
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!(" {} ", icon), Style::default().fg(status_color)),
             Span::styled(&pane.1, name_style),
-            Span::styled(format!(" {}", status_label), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(" {}", status_label),
+                Style::default().fg(Color::DarkGray),
+            ),
         ])));
     }
 
     if items.is_empty() {
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled("  No panes", Style::default().fg(Color::DarkGray)),
-        ])));
+        items.push(ListItem::new(Line::from(vec![Span::styled(
+            "  No panes",
+            Style::default().fg(Color::DarkGray),
+        )])));
     }
 
     let highlight_style = if is_active {

@@ -42,27 +42,70 @@ pub struct Keybindings {
     pub page_up: String,
     #[serde(default = "default_page_down")]
     pub page_down: String,
+    #[serde(default = "default_open_diff")]
+    pub open_diff: String,
 }
 
-fn default_quit() -> String { "q".to_string() }
-fn default_help() -> String { "?".to_string() }
-fn default_refresh() -> String { "r".to_string() }
-fn default_attach() -> String { "a".to_string() }
-fn default_new_task() -> String { "n".to_string() }
-fn default_add_pane() -> String { "p".to_string() }
-fn default_delete() -> String { "d".to_string() }
-fn default_send_message() -> String { "s".to_string() }
-fn default_toggle_sidebar() -> String { "Tab".to_string() }
-fn default_switch_section() -> String { "o".to_string() }
-fn default_settings() -> String { "S".to_string() }
-fn default_nav_down() -> String { "j".to_string() }
-fn default_nav_up() -> String { "k".to_string() }
-fn default_nav_left() -> String { "h".to_string() }
-fn default_nav_right() -> String { "l".to_string() }
-fn default_scroll_top() -> String { "g".to_string() }
-fn default_scroll_bottom() -> String { "G".to_string() }
-fn default_page_up() -> String { "u".to_string() }
-fn default_page_down() -> String { "f".to_string() }
+fn default_open_diff() -> String {
+    "c".to_string()
+}
+fn default_quit() -> String {
+    "q".to_string()
+}
+fn default_help() -> String {
+    "?".to_string()
+}
+fn default_refresh() -> String {
+    "r".to_string()
+}
+fn default_attach() -> String {
+    "a".to_string()
+}
+fn default_new_task() -> String {
+    "n".to_string()
+}
+fn default_add_pane() -> String {
+    "p".to_string()
+}
+fn default_delete() -> String {
+    "d".to_string()
+}
+fn default_send_message() -> String {
+    "s".to_string()
+}
+fn default_toggle_sidebar() -> String {
+    "Tab".to_string()
+}
+fn default_switch_section() -> String {
+    "o".to_string()
+}
+fn default_settings() -> String {
+    "S".to_string()
+}
+fn default_nav_down() -> String {
+    "j".to_string()
+}
+fn default_nav_up() -> String {
+    "k".to_string()
+}
+fn default_nav_left() -> String {
+    "h".to_string()
+}
+fn default_nav_right() -> String {
+    "l".to_string()
+}
+fn default_scroll_top() -> String {
+    "g".to_string()
+}
+fn default_scroll_bottom() -> String {
+    "G".to_string()
+}
+fn default_page_up() -> String {
+    "u".to_string()
+}
+fn default_page_down() -> String {
+    "f".to_string()
+}
 
 impl Default for Keybindings {
     fn default() -> Self {
@@ -86,6 +129,7 @@ impl Default for Keybindings {
             scroll_bottom: default_scroll_bottom(),
             page_up: default_page_up(),
             page_down: default_page_down(),
+            open_diff: default_open_diff(),
         }
     }
 }
@@ -104,14 +148,27 @@ pub struct Config {
     pub page_scroll_lines: u16,
     #[serde(default = "default_background_poll_ms")]
     pub background_poll_interval_ms: u64,
+    #[serde(default = "default_diff_base")]
+    pub diff_base: String,
     #[serde(default)]
     pub keybindings: Keybindings,
 }
 
-fn default_refresh_ms() -> u64 { 100 }
-fn default_sidebar_width() -> u16 { 28 }
-fn default_page_scroll() -> u16 { 20 }
-fn default_background_poll_ms() -> u64 { 2000 }
+fn default_diff_base() -> String {
+    "main".to_string()
+}
+fn default_refresh_ms() -> u64 {
+    100
+}
+fn default_sidebar_width() -> u16 {
+    28
+}
+fn default_page_scroll() -> u16 {
+    20
+}
+fn default_background_poll_ms() -> u64 {
+    2000
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -123,6 +180,7 @@ impl Default for Config {
             sidebar_width: default_sidebar_width(),
             page_scroll_lines: default_page_scroll(),
             background_poll_interval_ms: default_background_poll_ms(),
+            diff_base: default_diff_base(),
             keybindings: Keybindings::default(),
         }
     }
@@ -158,10 +216,6 @@ impl Config {
 
     pub fn config_path() -> PathBuf {
         Self::config_dir().join("config.json")
-    }
-
-    pub fn sessions_path() -> PathBuf {
-        Self::config_dir().join("sessions.json")
     }
 }
 

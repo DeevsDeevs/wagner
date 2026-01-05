@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::config::Keybindings;
@@ -15,20 +15,22 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
         .border_style(Style::default().fg(Color::Cyan));
 
     let key_style = Style::default().fg(Color::Yellow);
-    let fmt_key = |k: &str| -> String {
-        format!("{:<15}", k)
-    };
+    let fmt_key = |k: &str| -> String { format!("{:<15}", k) };
 
     let nav_updown = format!("{}/{} ↑/↓", keybindings.nav_down, keybindings.nav_up);
     let nav_page = format!("{}/{} PgUp/Dn", keybindings.page_up, keybindings.page_down);
-    let nav_scroll = format!("{}/{} Home/End", keybindings.scroll_top, keybindings.scroll_bottom);
+    let nav_scroll = format!(
+        "{}/{} Home/End",
+        keybindings.scroll_top, keybindings.scroll_bottom
+    );
     let nav_focus = format!("{}/{} ←/→", keybindings.nav_left, keybindings.nav_right);
 
     let help_text = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Navigation", Style::default().add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "  Navigation",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled(format!("  {}", fmt_key(&nav_updown)), key_style),
@@ -47,11 +49,17 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::raw("Switch focus sidebar/terminal"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {}", fmt_key(&keybindings.switch_section)), key_style),
+            Span::styled(
+                format!("  {}", fmt_key(&keybindings.switch_section)),
+                key_style,
+            ),
             Span::raw("Switch Tasks/Panes section"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {}", fmt_key(&keybindings.toggle_sidebar)), key_style),
+            Span::styled(
+                format!("  {}", fmt_key(&keybindings.toggle_sidebar)),
+                key_style,
+            ),
             Span::raw("Toggle sidebar"),
         ]),
         Line::from(vec![
@@ -63,9 +71,10 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::raw("Quick switch to pane"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("  Actions", Style::default().add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "  Actions",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled(format!("  {}", fmt_key(&keybindings.attach)), key_style),
@@ -88,13 +97,21 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::raw("Delete task"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {}", fmt_key(&keybindings.send_message)), key_style),
+            Span::styled(
+                format!("  {}", fmt_key(&keybindings.send_message)),
+                key_style,
+            ),
             Span::raw("Send message to pane"),
         ]),
-        Line::from(""),
         Line::from(vec![
-            Span::styled("  General", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("  {}", fmt_key(&keybindings.open_diff)), key_style),
+            Span::raw("View git diff"),
         ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            "  General",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled(format!("  {}", fmt_key(&keybindings.settings)), key_style),
@@ -105,7 +122,10 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::raw("Toggle this help"),
         ]),
         Line::from(vec![
-            Span::styled(format!("  {}", fmt_key(&format!("{} / Esc", keybindings.quit))), key_style),
+            Span::styled(
+                format!("  {}", fmt_key(&format!("{} / Esc", keybindings.quit))),
+                key_style,
+            ),
             Span::raw("Quit"),
         ]),
         Line::from(""),

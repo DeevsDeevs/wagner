@@ -1,4 +1,4 @@
-use crate::cli::{print_completions, Cli, Commands};
+use crate::cli::{Cli, Commands, print_completions};
 use tracing::{debug, info};
 use wagner::{Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner};
 
@@ -16,7 +16,11 @@ pub fn run(cli: Cli) -> Result<()> {
     let wagner = Wagner::new(terminal, agent, config);
 
     match cli.command {
-        Some(Commands::New { name, branch, repos }) => cmd_new(&wagner, &name, branch.as_deref(), &repos),
+        Some(Commands::New {
+            name,
+            branch,
+            repos,
+        }) => cmd_new(&wagner, &name, branch.as_deref(), &repos),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
         Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
@@ -68,7 +72,12 @@ fn cmd_new<T: Terminal, A: Agent>(
     println!("Created task: {}", task.name);
     println!("  Path: {}", task.path.display());
     for repo in &task.repos {
-        println!("  {} ({}) -> {}", repo.name, repo.branch, repo.worktree.display());
+        println!(
+            "  {} ({}) -> {}",
+            repo.name,
+            repo.branch,
+            repo.worktree.display()
+        );
     }
     println!();
     println!("Run: wagner attach {}", task.name);
@@ -86,14 +95,9 @@ fn detect_git_repo() -> Option<(std::path::PathBuf, String)> {
         return None;
     }
 
-    let repo_path = std::path::PathBuf::from(
-        String::from_utf8_lossy(&output.stdout).trim()
-    );
+    let repo_path = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
 
-    let repo_name = repo_path
-        .file_name()?
-        .to_string_lossy()
-        .to_string();
+    let repo_name = repo_path.file_name()?.to_string_lossy().to_string();
 
     Some((repo_path, repo_name))
 }
@@ -151,11 +155,7 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_delete<T: Terminal, A: Agent>(
-    wagner: &Wagner<T, A>,
-    name: &str,
-    force: bool,
-) -> Result<()> {
+fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: bool) -> Result<()> {
     debug!(task = %name, force = %force, "Deleting task");
 
     if !force {

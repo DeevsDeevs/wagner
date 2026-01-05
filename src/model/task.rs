@@ -53,10 +53,6 @@ impl RepoSource {
             Self::Local(PathBuf::from(expanded.as_ref()))
         }
     }
-
-    pub fn is_remote(&self) -> bool {
-        matches!(self, Self::Remote(_))
-    }
 }
 
 impl std::fmt::Display for RepoSource {

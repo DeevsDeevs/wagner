@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::error::{Result, WagnerError};
-use crate::model::{Session, Task};
+use crate::model::Task;
 
 pub struct Store {
     config: Config,
@@ -75,27 +75,5 @@ impl Store {
     pub fn task_exists(&self, name: &str) -> bool {
         let task_path = self.config.tasks_root.join(name);
         task_path.join(".wagner").join("task.json").exists()
-    }
-
-    pub fn save_sessions(&self, sessions: &[Session]) -> Result<()> {
-        let path = Config::sessions_path();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let content = serde_json::to_string_pretty(&sessions)?;
-        std::fs::write(path, content)?;
-        Ok(())
-    }
-
-    pub fn load_sessions(&self) -> Result<Vec<Session>> {
-        let path = Config::sessions_path();
-
-        if !path.exists() {
-            return Ok(vec![]);
-        }
-
-        let content = std::fs::read_to_string(&path)?;
-        Ok(serde_json::from_str(&content)?)
     }
 }
