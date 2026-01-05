@@ -45,12 +45,12 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
         draw_help_popup(frame, area, &app.wagner.config.keybindings);
     }
 
-    if app.input_mode == InputMode::DiffFileList || app.input_mode == InputMode::DiffContent {
-        let popup_area = centered_rect(80, 80, area);
-        diff_view::draw(frame, popup_area, app);
-    } else if app.input_mode == InputMode::Settings || app.input_mode == InputMode::EditSetting {
+    if app.input_mode == InputMode::Settings || app.input_mode == InputMode::EditSetting {
         draw_settings_popup(frame, area, app);
-    } else if app.input_mode != InputMode::Normal {
+    } else if !matches!(
+        app.input_mode,
+        InputMode::Normal | InputMode::DiffFileList | InputMode::DiffContent
+    ) {
         draw_input_dialog(frame, area, app);
     }
 }
@@ -87,30 +87,58 @@ fn draw_sidebar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<
 }
 
 fn draw_terminal_view<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
+    let is_diff_mode =
+        app.input_mode == InputMode::DiffFileList || app.input_mode == InputMode::DiffContent;
+
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
 
-    let title = if let Some(task) = &app.selected_task {
-        format!(" {} ", task)
+    let (title, header_style) = if is_diff_mode {
+        let repo_name = app.diff_repo_name.as_deref().unwrap_or("unknown");
+        let mode_hint = if app.input_mode == InputMode::DiffFileList {
+            "files"
+        } else {
+            "content"
+        };
+        (
+            format!(" Diff: {} ({}) ", repo_name, mode_hint),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if let Some(task) = &app.selected_task {
+        let style = if app.focus == Focus::Terminal {
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        (format!(" {} ", task), style)
     } else {
-        " No task selected ".to_string()
+        (
+            " No task selected ".to_string(),
+            Style::default().fg(Color::DarkGray),
+        )
     };
 
-    let header_style = if app.focus == Focus::Terminal {
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD)
+    let hints = if is_diff_mode {
+        " [q] Close [?] Help"
     } else {
-        Style::default().fg(Color::DarkGray)
+        " [?] Help"
     };
 
     let header = Paragraph::new(Line::from(vec![
         Span::styled(title, header_style),
-        Span::styled(" [?] Help", Style::default().fg(Color::DarkGray)),
+        Span::styled(hints, Style::default().fg(Color::DarkGray)),
     ]))
     .block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(header, chunks[0]);
 
-    terminal_view::draw(frame, chunks[1], app);
+    if is_diff_mode {
+        diff_view::draw(frame, chunks[1], app);
+    } else {
+        terminal_view::draw(frame, chunks[1], app);
+    }
 }
 
 fn draw_help_popup(frame: &mut Frame, area: Rect, keybindings: &crate::config::Keybindings) {

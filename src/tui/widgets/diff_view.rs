@@ -4,11 +4,11 @@ use crate::tui::app::{App, InputMode};
 
 use ansi_to_tui::IntoText;
 use ratatui::{
-    Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{List, ListItem, Paragraph, Wrap},
+    Frame,
 };
 
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
@@ -20,23 +20,21 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 }
 
 fn draw_file_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    frame.render_widget(Clear, area);
-
-    let repo_name = app.diff_repo_name.as_deref().unwrap_or("unknown");
     let base = &app.wagner.config.diff_base;
-    let title = format!(" Diff: {} ({}..HEAD) ", repo_name, base);
-
-    let block = Block::default()
-        .title(title)
-        .title_bottom(" [j/k] navigate  [Enter] view  [q] close ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
+    let info = Paragraph::new(Line::from(vec![
+        Span::styled(" Base: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(base, Style::default().fg(Color::Cyan)),
+        Span::styled(
+            "  [j/k] navigate  [Enter] view  [q] close",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    frame.render_widget(info, chunks[0]);
 
     if app.diff_files.is_empty() {
-        let msg = Paragraph::new("No changes")
-            .block(block)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(msg, area);
+        let msg = Paragraph::new("  No changes").style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(msg, chunks[1]);
         return;
     }
 
@@ -77,38 +75,34 @@ fn draw_file_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().bg(Color::DarkGray));
+    let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray));
 
-    frame.render_widget(list, area);
+    frame.render_widget(list, chunks[1]);
 }
 
 fn draw_diff_content<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    frame.render_widget(Clear, area);
-
     let file_name = app
         .diff_files
         .get(app.diff_file_index)
         .map(|f| f.path.as_str())
         .unwrap_or("unknown");
 
-    let title = format!(" {} ", file_name);
-
-    let block = Block::default()
-        .title(title)
-        .title_bottom(" [j/k] scroll  [g/G] top/bottom  [q] back ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
+    let info = Paragraph::new(Line::from(vec![
+        Span::styled(" File: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(file_name, Style::default().fg(Color::Yellow)),
+        Span::styled(
+            "  [j/k] scroll  [g/G] top/bottom  [q] back",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+    frame.render_widget(info, chunks[0]);
 
     let visible_lines: Vec<&str> = app
         .diff_content
         .iter()
         .skip(app.diff_scroll)
-        .take(inner.height as usize)
+        .take(chunks[1].height as usize)
         .map(|s| s.as_str())
         .collect();
 
@@ -118,5 +112,5 @@ fn draw_diff_content<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
 
     let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
 
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(paragraph, chunks[1]);
 }
