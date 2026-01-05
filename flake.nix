@@ -44,8 +44,7 @@
           buildInputs = with pkgs; [
             openssl
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.darwin.apple_sdk.frameworks.Security
-            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+            pkgs.libiconv
           ];
 
           meta = with pkgs.lib; {
@@ -74,8 +73,7 @@
             openssl
             rust-analyzer
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            pkgs.darwin.apple_sdk.frameworks.Security
-            pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+            pkgs.libiconv
           ];
 
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
