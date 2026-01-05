@@ -28,4 +28,4 @@ target
 .devbox/
 .rustup/
 .claude/
-result/
+/result
