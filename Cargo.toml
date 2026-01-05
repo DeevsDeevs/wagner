@@ -1,6 +1,6 @@
 [package]
 name = "wagner"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "AI agent monitoring CLI tool with TUI"
@@ -17,6 +17,7 @@ ansi-to-tui = "8.0.0"
 anyhow = "1.0.100"
 chrono = { version = "0.4.42", features = ["serde"] }
 clap = { version = "4.5.54", features = ["derive"] }
+clap_complete = "4.5"
 crossterm = "0.29.0"
 directories = "6.0.0"
 ratatui = "0.30.0"

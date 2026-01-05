@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crate::terminal::PaneHandle;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentType {
     ClaudeCode,
 }
@@ -94,7 +94,7 @@ impl AgentStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalStatus {
     Active,
     Idle,
@@ -120,7 +120,7 @@ impl TerminalStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitReason {
     Approval,
     Question,
@@ -139,7 +139,7 @@ impl WaitReason {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Activity {
     pub kind: ActivityKind,
 }
@@ -162,7 +162,7 @@ impl Activity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ActivityKind {
     Generic(GenericActivity),
     Claude(ClaudeActivity),
@@ -184,7 +184,7 @@ impl ActivityKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GenericActivity {
     Working,
 }
@@ -203,7 +203,7 @@ impl GenericActivity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaudeActivity {
     Thinking,
     Exploring,
@@ -273,7 +273,7 @@ impl TrackedPane {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionAggregateStatus {
     NeedsAttention,
     Working,

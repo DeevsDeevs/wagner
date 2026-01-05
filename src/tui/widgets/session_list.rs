@@ -58,8 +58,8 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 
         let status_label = status.map(|s| {
             let label = s.label();
-            if label.len() > 12 {
-                format!("{}…", &label[..11])
+            if label.chars().count() > 12 {
+                format!("{}…", label.chars().take(11).collect::<String>())
             } else {
                 label
             }

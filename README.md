@@ -13,25 +13,37 @@ Wagner solves the problem of managing multiple Claude Code sessions when working
 
 ## Installation
 
-### With devbox (recommended)
+### Quick install (Linux/macOS)
 
 ```bash
-git clone https://github.com/youruser/wagner.git
-cd wagner
-devbox shell
-cargo build --release
+curl -fsSL https://raw.githubusercontent.com/DeevsDeevs/wagner/main/install.sh | sh
 ```
 
-### With Cargo
+### From crates.io
 
 ```bash
-cargo install --path .
+cargo install wagner
+```
+
+### With Nix
+
+```bash
+nix profile install github:DeevsDeevs/wagner
+```
+
+### With devbox
+
+Add to your `devbox.json`:
+```json
+{
+  "packages": ["github:DeevsDeevs/wagner"]
+}
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/youruser/wagner.git
+git clone https://github.com/DeevsDeevs/wagner.git
 cd wagner
 cargo build --release
 # Binary at ./target/release/wagner
@@ -173,6 +185,17 @@ When you create a task, Wagner creates:
 | `wagner attach [task]` | Attach to tmux session (auto-detects from cwd) |
 | `wagner add [task] [repo]` | Add Claude pane (auto-detects from cwd) |
 | `wagner delete <task> [--force]` | Delete task (--force removes branches) |
+| `wagner completions zsh` | Generate zsh completions |
+
+## Shell Completions
+
+Add to your `~/.zshrc`:
+
+```zsh
+eval "$(wagner completions zsh)"
+```
+
+This enables tab completion for commands and task names (dynamically fetched).
 
 ## Workflow Example
 

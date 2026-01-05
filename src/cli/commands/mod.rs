@@ -1,8 +1,13 @@
-use crate::cli::{Cli, Commands};
+use crate::cli::{print_completions, Cli, Commands};
 use tracing::{debug, info};
 use wagner::{Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner};
 
 pub fn run(cli: Cli) -> Result<()> {
+    if let Some(Commands::Completions { shell }) = &cli.command {
+        print_completions(*shell);
+        return Ok(());
+    }
+
     let config = Config::load()?;
     debug!("Loaded config from {:?}", Config::config_path());
 
@@ -16,6 +21,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
         Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
         Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
+        Some(Commands::Completions { .. }) => unreachable!(),
         None => cmd_tui(wagner),
     }
 }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::monitor::detector::AgentDetector;
+use crate::monitor::detector::{AgentDetector, IDLE_THRESHOLD};
 use crate::monitor::status::{Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, WaitReason};
 
 const BRAILLE_SPINNERS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -39,23 +39,22 @@ impl ClaudeCodeDetector {
     }
 
     fn has_active_status(output: &str) -> bool {
-        let tail: String = output.lines().rev().take(5).collect::<Vec<_>>().join("\n");
-        tail.contains("…") || tail.contains("tokens)")
+        output.lines().rev().take(5).any(|line| line.contains("…") || line.contains("tokens)"))
     }
 
     fn detect_tool(output: &str) -> Option<ClaudeActivity> {
-        let tail: String = output.lines().rev().take(20).collect::<Vec<_>>().join("\n");
+        let tail_lines: Vec<&str> = output.lines().rev().take(20).collect();
         TOOL_PATTERNS
             .iter()
-            .find(|(patterns, _)| patterns.iter().any(|p| tail.contains(p)))
-            .map(|(_, activity)| activity.clone())
+            .find(|(patterns, _)| patterns.iter().any(|p| tail_lines.iter().any(|line| line.contains(p))))
+            .map(|(_, activity)| *activity)
     }
 
     fn detect_wait(output: &str) -> Option<WaitReason> {
         WAIT_PATTERNS
             .iter()
             .find(|(patterns, _)| patterns.iter().any(|p| output.contains(p)))
-            .map(|(_, reason)| reason.clone())
+            .map(|(_, reason)| *reason)
     }
 }
 
@@ -89,7 +88,7 @@ impl AgentDetector for ClaudeCodeDetector {
             return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
         }
 
-        if since_change > Duration::from_secs(2) {
+        if since_change > IDLE_THRESHOLD {
             AgentStatus::Idle
         } else {
             AgentStatus::Active(Activity::generic_working())

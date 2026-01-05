@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
+use tracing::warn;
 
 use crate::terminal::{PaneHandle, Terminal};
 
@@ -94,8 +95,8 @@ impl StatusMonitor {
         let session = self.sessions.entry(session_name.clone()).or_insert_with(TrackedSession::new);
         if now.duration_since(session.last_poll) >= self.background_interval {
             self.poll_session(terminal, session_name, panes);
-            self.background_index = (self.background_index + 1) % background.len();
         }
+        self.background_index = (self.background_index + 1) % background.len();
     }
 
     fn poll_session<T: Terminal>(
@@ -113,7 +114,10 @@ impl StatusMonitor {
 
             let output = match terminal.capture(pane, 100) {
                 Ok(o) => o,
-                Err(_) => continue,
+                Err(e) => {
+                    warn!(pane = %pane_id, error = %e, "failed to capture pane output");
+                    continue;
+                }
             };
 
             let pane_command = terminal.get_pane_command(pane).unwrap_or_default();
