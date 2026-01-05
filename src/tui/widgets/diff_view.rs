@@ -75,9 +75,7 @@ fn draw_file_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
         })
         .collect();
 
-    let list = List::new(items).highlight_style(Style::default().bg(Color::DarkGray));
-
-    frame.render_widget(list, chunks[1]);
+    frame.render_widget(List::new(items), chunks[1]);
 }
 
 fn draw_diff_content<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
@@ -98,19 +96,14 @@ fn draw_diff_content<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
     ]));
     frame.render_widget(info, chunks[0]);
 
-    let visible_lines: Vec<&str> = app
-        .diff_content
-        .iter()
-        .skip(app.diff_scroll)
-        .take(chunks[1].height as usize)
-        .map(|s| s.as_str())
-        .collect();
+    let content = app.diff_content.join("\n");
+    let text = content
+        .into_text()
+        .unwrap_or_else(|_| ratatui::text::Text::raw(&content));
 
-    let content = visible_lines.join("\n");
-
-    let text = content.into_text().unwrap_or_default();
-
-    let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(text)
+        .wrap(Wrap { trim: false })
+        .scroll((app.diff_scroll as u16, 0));
 
     frame.render_widget(paragraph, chunks[1]);
 }

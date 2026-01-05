@@ -16,14 +16,36 @@ pub struct RepoStats {
     pub file_count: usize,
 }
 
+fn resolve_base_ref(repo_path: &Path, base: &str) -> String {
+    let check_ref = |r: &str| -> bool {
+        Command::new("git")
+            .args(["-C", &repo_path.to_string_lossy(), "rev-parse", "--verify", r])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+
+    if check_ref(base) {
+        return base.to_string();
+    }
+
+    let origin_ref = format!("origin/{}", base);
+    if check_ref(&origin_ref) {
+        return origin_ref;
+    }
+
+    base.to_string()
+}
+
 pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
+    let base_ref = resolve_base_ref(repo_path, base);
     let output = Command::new("git")
         .args([
             "-C",
             &repo_path.to_string_lossy(),
             "diff",
             "--numstat",
-            &format!("{}..HEAD", base),
+            &format!("{}..HEAD", base_ref),
         ])
         .output();
 
@@ -44,7 +66,7 @@ pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
             let deletions = parts[1].parse().unwrap_or(0);
             let path = parts[2].to_string();
 
-            let status = get_file_status(repo_path, base, &path);
+            let status = get_file_status(repo_path, &base_ref, &path);
 
             files.push(DiffFile {
                 path,
@@ -58,14 +80,14 @@ pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
     files
 }
 
-fn get_file_status(repo_path: &Path, base: &str, file_path: &str) -> char {
+fn get_file_status(repo_path: &Path, base_ref: &str, file_path: &str) -> char {
     let output = Command::new("git")
         .args([
             "-C",
             &repo_path.to_string_lossy(),
             "diff",
             "--name-status",
-            &format!("{}..HEAD", base),
+            &format!("{}..HEAD", base_ref),
             "--",
             file_path,
         ])
@@ -81,13 +103,14 @@ fn get_file_status(repo_path: &Path, base: &str, file_path: &str) -> char {
 }
 
 pub fn get_repo_stats(repo_path: &Path, base: &str) -> RepoStats {
+    let base_ref = resolve_base_ref(repo_path, base);
     let output = Command::new("git")
         .args([
             "-C",
             &repo_path.to_string_lossy(),
             "diff",
             "--shortstat",
-            &format!("{}..HEAD", base),
+            &format!("{}..HEAD", base_ref),
         ])
         .output();
 
@@ -126,13 +149,14 @@ fn parse_shortstat(s: &str) -> RepoStats {
 }
 
 pub fn get_diff_content(repo_path: &Path, base: &str, file_path: &str) -> Vec<String> {
+    let base_ref = resolve_base_ref(repo_path, base);
     let output = Command::new("git")
         .args([
             "-C",
             &repo_path.to_string_lossy(),
             "diff",
             "--color=always",
-            &format!("{}..HEAD", base),
+            &format!("{}..HEAD", base_ref),
             "--",
             file_path,
         ])

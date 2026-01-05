@@ -1007,8 +1007,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn diff_scroll_down(&mut self) {
-        let max_scroll = self.diff_content.len().saturating_sub(20);
-        if self.diff_scroll < max_scroll {
+        if self.diff_scroll < self.diff_content.len().saturating_sub(1) {
             self.diff_scroll += 1;
         }
     }
@@ -1022,7 +1021,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn diff_scroll_bottom(&mut self) {
-        self.diff_scroll = self.diff_content.len().saturating_sub(20);
+        self.diff_scroll = self.diff_content.len().saturating_sub(1);
     }
 
     pub fn refresh_repo_stats(&mut self) {
