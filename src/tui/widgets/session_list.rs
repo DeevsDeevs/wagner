@@ -1,5 +1,4 @@
 use crate::agent::Agent;
-use crate::monitor::PaneStatus;
 use crate::terminal::Terminal;
 use crate::tui::app::{App, Focus, SidebarSection};
 
@@ -38,10 +37,16 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
         let status = app.pane_statuses.get(&pane.0);
 
         let (icon, status_color) = match status {
-            Some(PaneStatus::Agent { status, .. }) if status.is_waiting() => ('◉', Color::Yellow),
-            Some(PaneStatus::Agent { status, .. }) if status.is_active() => ('●', Color::Green),
-            Some(PaneStatus::Terminal(ts)) if ts.is_active() => ('●', Color::Blue),
-            Some(_) => ('○', Color::DarkGray),
+            Some(s) => {
+                let color = if s.is_waiting() {
+                    Color::Yellow
+                } else if s.is_active() {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                };
+                (s.icon(), color)
+            }
             None => ('?', Color::DarkGray),
         };
 
@@ -51,7 +56,14 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
             Style::default().fg(Color::White)
         };
 
-        let status_label = status.map(|s| s.label()).unwrap_or_default();
+        let status_label = status.map(|s| {
+            let label = s.label();
+            if label.len() > 12 {
+                format!("{}…", &label[..11])
+            } else {
+                label
+            }
+        }).unwrap_or_default();
 
         items.push(ListItem::new(Line::from(vec![
             Span::styled(format!(" {} ", icon), Style::default().fg(status_color)),

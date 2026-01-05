@@ -1,76 +1,61 @@
-use crate::monitor::detector::{ActivityPattern, AgentDetector, WaitPattern};
-use crate::monitor::status::{ActivityKind, AgentType, ClaudeActivity, WaitReason};
+use std::time::Duration;
 
-pub struct ClaudeCodeDetector {
-    activity_patterns: Vec<ActivityPattern>,
-    waiting_patterns: Vec<WaitPattern>,
-}
+use crate::monitor::detector::AgentDetector;
+use crate::monitor::status::{Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, WaitReason};
+
+const BRAILLE_SPINNERS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const ACTIVITY_SPINNER: char = '✻';
+
+const TOOL_PATTERNS: &[(&[&str], ClaudeActivity)] = &[
+    (&["● Bash"], ClaudeActivity::ToolBash),
+    (&["● Read"], ClaudeActivity::ToolRead),
+    (&["● Edit", "● Update"], ClaudeActivity::ToolEdit),
+    (&["● Write"], ClaudeActivity::ToolWrite),
+    (&["● Glob", "● Grep", "● Search"], ClaudeActivity::Exploring),
+    (&["● WebSearch"], ClaudeActivity::WebSearch),
+    (&["● WebFetch"], ClaudeActivity::WebFetch),
+    (&["● Plan", "● Task"], ClaudeActivity::Subagent),
+    (&["● TodoWrite", "● Updated plan"], ClaudeActivity::TodoUpdate),
+];
+
+const WAIT_PATTERNS: &[(&[&str], WaitReason)] = &[
+    (&["Enter to select", "Tab/Arrow keys to navigate", "Esc to cancel"], WaitReason::Question),
+    (&["How is Claude doing this session?"], WaitReason::Input),
+    (&["Interrupted · What should Claude do instead?", "What should Claude do instead?"], WaitReason::Input),
+    (&["[Y/n]", "[y/N]", "Do you want to proceed"], WaitReason::Approval),
+    (&["No, and tell Claude what to do differently"], WaitReason::Approval),
+    (&["Permission denied", "requires permission"], WaitReason::Permission),
+];
+
+pub struct ClaudeCodeDetector;
 
 impl ClaudeCodeDetector {
     pub fn new() -> Self {
-        Self {
-            activity_patterns: vec![
-                ActivityPattern::any_of(
-                    &["Task tool", "Spawning", "subagent"],
-                    ActivityKind::Claude(ClaudeActivity::Subagent),
-                ),
-                ActivityPattern::any_of(
-                    &["WebSearch", "Searching web"],
-                    ActivityKind::Claude(ClaudeActivity::WebSearch),
-                ),
-                ActivityPattern::any_of(
-                    &["WebFetch", "Fetching"],
-                    ActivityKind::Claude(ClaudeActivity::WebFetch),
-                ),
-                ActivityPattern::any_of(
-                    &["Glob", "Grep", "Searching", "Finding files"],
-                    ActivityKind::Claude(ClaudeActivity::Exploring),
-                ),
-                ActivityPattern::any_of(
-                    &["Read", "Reading file"],
-                    ActivityKind::Claude(ClaudeActivity::ToolRead),
-                ),
-                ActivityPattern::any_of(
-                    &["Edit", "Editing"],
-                    ActivityKind::Claude(ClaudeActivity::ToolEdit),
-                ),
-                ActivityPattern::any_of(
-                    &["Write", "Writing file", "Creating file"],
-                    ActivityKind::Claude(ClaudeActivity::ToolWrite),
-                ),
-                ActivityPattern::any_of(
-                    &["Bash", "Running command", "$ "],
-                    ActivityKind::Claude(ClaudeActivity::ToolBash),
-                ),
-                ActivityPattern::any_of(
-                    &["TodoWrite", "todo"],
-                    ActivityKind::Claude(ClaudeActivity::TodoUpdate),
-                ),
-                ActivityPattern::any_of(
-                    &["EnterPlanMode", "Planning"],
-                    ActivityKind::Claude(ClaudeActivity::Planning),
-                ),
-                ActivityPattern::any_of(
-                    &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", "...", "Thinking"],
-                    ActivityKind::Claude(ClaudeActivity::Thinking),
-                ),
-            ],
-            waiting_patterns: vec![
-                WaitPattern::any_of(
-                    &["[Y/n]", "[y/N]", "Do you want to proceed"],
-                    WaitReason::Approval,
-                ),
-                WaitPattern::contains(
-                    "No, and tell Claude what to do differently",
-                    WaitReason::Approval,
-                ),
-                WaitPattern::any_of(
-                    &["Permission denied", "requires permission"],
-                    WaitReason::Permission,
-                ),
-                WaitPattern::contains("?", WaitReason::Question),
-            ],
-        }
+        Self
+    }
+
+    fn has_spinner(output: &str) -> bool {
+        output.contains(ACTIVITY_SPINNER) || BRAILLE_SPINNERS.iter().any(|&c| output.contains(c))
+    }
+
+    fn has_active_status(output: &str) -> bool {
+        let tail: String = output.lines().rev().take(5).collect::<Vec<_>>().join("\n");
+        tail.contains("…") || tail.contains("tokens)")
+    }
+
+    fn detect_tool(output: &str) -> Option<ClaudeActivity> {
+        let tail: String = output.lines().rev().take(20).collect::<Vec<_>>().join("\n");
+        TOOL_PATTERNS
+            .iter()
+            .find(|(patterns, _)| patterns.iter().any(|p| tail.contains(p)))
+            .map(|(_, activity)| activity.clone())
+    }
+
+    fn detect_wait(output: &str) -> Option<WaitReason> {
+        WAIT_PATTERNS
+            .iter()
+            .find(|(patterns, _)| patterns.iter().any(|p| output.contains(p)))
+            .map(|(_, reason)| reason.clone())
     }
 }
 
@@ -85,10 +70,6 @@ impl AgentDetector for ClaudeCodeDetector {
         AgentType::ClaudeCode
     }
 
-    fn launch_command(&self) -> &'static str {
-        "claude"
-    }
-
     fn detect_agent(&self, pane_command: &str, output: &str) -> bool {
         pane_command.contains("claude")
             || output.contains("Claude Code")
@@ -96,11 +77,22 @@ impl AgentDetector for ClaudeCodeDetector {
             || output.contains("Anthropic")
     }
 
-    fn activity_patterns(&self) -> &[ActivityPattern] {
-        &self.activity_patterns
-    }
+    fn detect_status(&self, output: &str, output_changed: bool, since_change: Duration) -> AgentStatus {
+        if let Some(reason) = Self::detect_wait(output) {
+            return AgentStatus::Waiting(reason);
+        }
 
-    fn waiting_patterns(&self) -> &[WaitPattern] {
-        &self.waiting_patterns
+        let is_active = Self::has_spinner(output) || (output_changed && Self::has_active_status(output));
+
+        if is_active {
+            let activity = Self::detect_tool(output).unwrap_or(ClaudeActivity::Thinking);
+            return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
+        }
+
+        if since_change > Duration::from_secs(2) {
+            AgentStatus::Idle
+        } else {
+            AgentStatus::Active(Activity::generic_working())
+        }
     }
 }

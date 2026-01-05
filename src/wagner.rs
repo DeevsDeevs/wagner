@@ -89,16 +89,54 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         }
 
         for repo in &task.repos {
+            let main_repo = self.get_main_repo(&repo.worktree, &repo.source);
+
             if repo.worktree.exists() {
-                self.remove_worktree(&repo.worktree)?;
+                self.remove_worktree(&main_repo, &repo.worktree)?;
             }
 
+            self.prune_worktrees(&main_repo);
+
             if force {
-                self.delete_branch(&repo.worktree, &repo.branch)?;
+                self.delete_branch(&main_repo, &repo.branch)?;
             }
         }
 
         self.store.delete_task(name)
+    }
+
+    fn get_main_repo(&self, worktree: &PathBuf, source: &RepoSource) -> PathBuf {
+        if worktree.exists() {
+            let output = Command::new("git")
+                .args(["-C", &worktree.to_string_lossy(), "rev-parse", "--git-common-dir"])
+                .output();
+
+            if let Ok(output) = output {
+                if output.status.success() {
+                    let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let git_path = PathBuf::from(&git_dir);
+                    if let Some(parent) = git_path.parent() {
+                        if parent.join(".git").exists() || parent.join("HEAD").exists() {
+                            return parent.to_path_buf();
+                        }
+                    }
+                }
+            }
+        }
+
+        match source {
+            RepoSource::Local(path) => path.clone(),
+            RepoSource::Remote(_) => {
+                if let Some(task_dir) = worktree.parent() {
+                    let repo_name = worktree.file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    task_dir.join(format!(".{}_clone", repo_name))
+                } else {
+                    worktree.clone()
+                }
+            }
+        }
     }
 
     pub fn add_pane(&self, task_name: &str, repo_name: Option<&str>) -> Result<PaneHandle> {
@@ -159,17 +197,45 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(())
     }
 
-    fn remove_worktree(&self, worktree: &PathBuf) -> Result<()> {
-        Command::new("git")
-            .args(["worktree", "remove", "--force", &worktree.to_string_lossy()])
+    fn remove_worktree(&self, main_repo: &PathBuf, worktree: &PathBuf) -> Result<()> {
+        let output = Command::new("git")
+            .args([
+                "-C",
+                &main_repo.to_string_lossy(),
+                "worktree",
+                "remove",
+                "--force",
+                &worktree.to_string_lossy(),
+            ])
             .output()?;
+
+        if !output.status.success() {
+            if worktree.exists() {
+                std::fs::remove_dir_all(worktree)?;
+            }
+        }
+
         Ok(())
     }
 
-    fn delete_branch(&self, worktree: &PathBuf, branch: &str) -> Result<()> {
-        Command::new("git")
-            .args(["-C", &worktree.to_string_lossy(), "branch", "-D", branch])
+    fn prune_worktrees(&self, main_repo: &PathBuf) {
+        let _ = Command::new("git")
+            .args(["-C", &main_repo.to_string_lossy(), "worktree", "prune"])
+            .output();
+    }
+
+    fn delete_branch(&self, main_repo: &PathBuf, branch: &str) -> Result<()> {
+        let output = Command::new("git")
+            .args(["-C", &main_repo.to_string_lossy(), "branch", "-D", branch])
             .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("not found") {
+                return Err(WagnerError::Git(format!("Failed to delete branch '{}': {}", branch, stderr)));
+            }
+        }
+
         Ok(())
     }
 

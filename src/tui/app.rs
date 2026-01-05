@@ -1,8 +1,8 @@
 use crate::agent::Agent;
 use crate::error::Result;
 use crate::model::{Session, Task};
-use crate::monitor::{PaneStatus, StatusMonitor};
-use crate::terminal::{PaneHandle, Terminal};
+use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal};
 use crate::wagner::{RepoSpec, Wagner};
 
 use ratatui::widgets::ListState;
@@ -176,7 +176,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.panes.clear();
         if let Some(task_name) = &self.selected_task {
             let session_name = format!("wagner_{}", task_name);
-            if let Ok(panes) = self.wagner.terminal.list_panes(&crate::terminal::SessionHandle(session_name)) {
+            if let Ok(panes) = self.wagner.terminal.list_panes(&SessionHandle(session_name.clone())) {
                 self.panes = panes;
                 if self.selected_pane.is_none() && !self.panes.is_empty() {
                     self.pane_list_state.select(Some(0));
@@ -186,12 +186,32 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     self.pane_list_state.select(idx);
                 }
 
-                let updates = self.status_monitor.poll(&self.wagner.terminal, &self.panes);
+                let updates = self.status_monitor.poll_active(&self.wagner.terminal, &session_name, &self.panes);
                 for update in updates {
                     self.pane_statuses.insert(update.pane.0.clone(), update.status);
                 }
+
+                self.poll_background_sessions(&session_name);
             }
         }
+    }
+
+    fn poll_background_sessions(&mut self, active_session: &str) {
+        let all_sessions: Vec<_> = self.tasks
+            .iter()
+            .filter_map(|task| {
+                let session_name = format!("wagner_{}", task.name);
+                self.wagner.terminal.list_panes(&SessionHandle(session_name.clone())).ok()
+                    .map(|panes| (session_name, panes))
+            })
+            .collect();
+
+        self.status_monitor.poll_background(&self.wagner.terminal, &all_sessions, Some(active_session));
+    }
+
+    pub fn get_task_status(&self, task_name: &str) -> SessionAggregateStatus {
+        let session_name = format!("wagner_{}", task_name);
+        self.status_monitor.get_session_status(&session_name)
     }
 
     pub fn refresh_terminal_output(&mut self) -> Result<()> {

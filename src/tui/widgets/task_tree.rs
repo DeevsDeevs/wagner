@@ -1,4 +1,5 @@
 use crate::agent::Agent;
+use crate::monitor::SessionAggregateStatus;
 use crate::terminal::Terminal;
 use crate::tui::app::{App, Focus, SidebarSection};
 
@@ -36,8 +37,17 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
             Style::default()
         };
 
+        let status = app.get_task_status(&task.name);
+        let (status_icon, status_color) = match status {
+            SessionAggregateStatus::NeedsAttention => ('◉', Color::Yellow),
+            SessionAggregateStatus::Working => ('●', Color::Green),
+            SessionAggregateStatus::Idle => ('○', Color::DarkGray),
+            SessionAggregateStatus::Empty => ('◌', Color::DarkGray),
+        };
+
         items.push(ListItem::new(Line::from(vec![
             Span::raw(prefix),
+            Span::styled(format!("{} ", status_icon), Style::default().fg(status_color)),
             Span::styled(&task.name, style),
         ])));
 

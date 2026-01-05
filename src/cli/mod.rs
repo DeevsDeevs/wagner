@@ -14,11 +14,18 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Create a new task with worktrees
+    ///
+    /// When run inside a git repo, automatically uses that repo.
+    /// Otherwise, specify repos with --repos.
     New {
         /// Task name
         name: String,
 
-        /// Repo specifications (name:source:branch)
+        /// Branch name (defaults to task/<name>)
+        #[arg(short, long)]
+        branch: Option<String>,
+
+        /// Repo specifications (name:source:branch) for multi-repo tasks
         #[arg(short, long, value_delimiter = ',')]
         repos: Vec<String>,
     },
@@ -37,8 +44,10 @@ pub enum Commands {
     },
 
     /// Add a new Claude pane to a task
+    ///
+    /// Auto-detects task when run from inside a task directory.
     Add {
-        /// Task name (defaults to current directory)
+        /// Task name (auto-detected if inside task dir)
         task: Option<String>,
 
         /// Repo name within task
@@ -46,28 +55,13 @@ pub enum Commands {
     },
 
     /// Attach to a task's tmux session
+    ///
+    /// Auto-detects task when run from inside a task directory.
     Attach {
-        /// Task name
-        task: String,
-    },
-
-    /// Send a message to a session
-    Send {
-        /// Session identifier (task/repo)
-        session: String,
-
-        /// Message to send
-        message: String,
-    },
-
-    /// List chains for a task/repo
-    Chains {
-        /// Task name
+        /// Task name (auto-detected if inside task dir)
         task: Option<String>,
-
-        /// Repo name
-        repo: Option<String>,
     },
+
 }
 
 pub use commands::run;

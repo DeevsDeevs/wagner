@@ -1,6 +1,6 @@
 use crate::cli::{Cli, Commands};
-use tracing::{debug, info, warn};
-use wagner::{Agent, ClaudeCode, Config, RepoSpec, Result, Terminal, Tmux, Wagner};
+use tracing::{debug, info};
+use wagner::{Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner};
 
 pub fn run(cli: Cli) -> Result<()> {
     let config = Config::load()?;
@@ -11,13 +11,11 @@ pub fn run(cli: Cli) -> Result<()> {
     let wagner = Wagner::new(terminal, agent, config);
 
     match cli.command {
-        Some(Commands::New { name, repos }) => cmd_new(&wagner, &name, &repos),
+        Some(Commands::New { name, branch, repos }) => cmd_new(&wagner, &name, branch.as_deref(), &repos),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
-        Some(Commands::Add { task, repo }) => cmd_add(&wagner, task.as_deref(), repo.as_deref()),
-        Some(Commands::Attach { task }) => cmd_attach(&wagner, &task),
-        Some(Commands::Send { session, message }) => cmd_send(&wagner, &session, &message),
-        Some(Commands::Chains { task, repo }) => cmd_chains(&wagner, task.as_deref(), repo.as_deref()),
+        Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
+        Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
         None => cmd_tui(wagner),
     }
 }
@@ -25,21 +23,37 @@ pub fn run(cli: Cli) -> Result<()> {
 fn cmd_new<T: Terminal, A: Agent>(
     wagner: &Wagner<T, A>,
     name: &str,
+    branch: Option<&str>,
     repos: &[String],
 ) -> Result<()> {
-    debug!("Creating task '{}' with {} repos", name, repos.len());
+    let specs: Vec<RepoSpec> = if repos.is_empty() {
+        match detect_git_repo() {
+            Some((repo_path, repo_name)) => {
+                let branch_name = branch
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("task/{}", name));
+                debug!(repo = %repo_name, branch = %branch_name, "Auto-detected repo");
+                vec![RepoSpec {
+                    name: repo_name,
+                    source: RepoSource::Local(repo_path),
+                    branch: branch_name,
+                }]
+            }
+            None => {
+                eprintln!("Error: Not in a git repository");
+                eprintln!("Either run from inside a git repo, or specify --repos");
+                eprintln!("Usage: wagner new <name> --repos name:path:branch");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        repos
+            .iter()
+            .map(|s| RepoSpec::parse(s))
+            .collect::<Result<Vec<_>>>()?
+    };
 
-    let specs: Vec<RepoSpec> = repos
-        .iter()
-        .map(|s| RepoSpec::parse(s))
-        .collect::<Result<Vec<_>>>()?;
-
-    if specs.is_empty() {
-        warn!("No repos specified");
-        eprintln!("Error: At least one repo is required");
-        eprintln!("Usage: wagner new <name> --repos name:path:branch");
-        std::process::exit(1);
-    }
+    debug!("Creating task '{}' with {} repos", name, specs.len());
 
     let task = wagner.create_task(name, &specs)?;
 
@@ -47,14 +61,54 @@ fn cmd_new<T: Terminal, A: Agent>(
 
     println!("Created task: {}", task.name);
     println!("  Path: {}", task.path.display());
-    println!("  Repos:");
     for repo in &task.repos {
-        println!("    {} -> {} ({})", repo.name, repo.worktree.display(), repo.branch);
+        println!("  {} ({}) -> {}", repo.name, repo.branch, repo.worktree.display());
     }
     println!();
-    println!("Attach with: wagner attach {}", task.name);
+    println!("Run: wagner attach {}", task.name);
 
     Ok(())
+}
+
+fn detect_git_repo() -> Option<(std::path::PathBuf, String)> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let repo_path = std::path::PathBuf::from(
+        String::from_utf8_lossy(&output.stdout).trim()
+    );
+
+    let repo_name = repo_path
+        .file_name()?
+        .to_string_lossy()
+        .to_string();
+
+    Some((repo_path, repo_name))
+}
+
+fn detect_task_from_cwd(config: &Config) -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    let tasks_root = &config.tasks_root;
+
+    if !cwd.starts_with(tasks_root) {
+        return None;
+    }
+
+    let relative = cwd.strip_prefix(tasks_root).ok()?;
+    let task_name = relative.components().next()?;
+
+    let task_dir = tasks_root.join(task_name);
+    if task_dir.join(".wagner").join("task.json").exists() {
+        Some(task_name.as_os_str().to_string_lossy().to_string())
+    } else {
+        None
+    }
 }
 
 fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
@@ -117,47 +171,37 @@ fn cmd_delete<T: Terminal, A: Agent>(
 
 fn cmd_add<T: Terminal, A: Agent>(
     wagner: &Wagner<T, A>,
-    task: Option<&str>,
+    task: Option<String>,
     repo: Option<&str>,
 ) -> Result<()> {
-    let task_name = task.unwrap_or_else(|| {
-        warn!("Task name not provided");
-        eprintln!("Error: Task name required (or run from within a task directory)");
-        std::process::exit(1);
-    });
+    let task_name = task
+        .or_else(|| detect_task_from_cwd(&wagner.config))
+        .unwrap_or_else(|| {
+            eprintln!("Error: Not inside a task directory");
+            eprintln!("Either cd into a task, or specify: wagner add <task>");
+            std::process::exit(1);
+        });
 
     debug!(task = %task_name, repo = ?repo, "Adding pane");
 
-    let pane = wagner.add_pane(task_name, repo)?;
+    let pane = wagner.add_pane(&task_name, repo)?;
     info!(task = %task_name, pane = %pane.0, "Pane created");
     println!("Created pane: {}", pane.0);
 
     Ok(())
 }
 
-fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: &str) -> Result<()> {
-    debug!(task = %task, "Attaching to session");
-    wagner.attach(task)
-}
+fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>) -> Result<()> {
+    let task_name = task
+        .or_else(|| detect_task_from_cwd(&wagner.config))
+        .unwrap_or_else(|| {
+            eprintln!("Error: Not inside a task directory");
+            eprintln!("Either cd into a task, or specify: wagner attach <task>");
+            std::process::exit(1);
+        });
 
-fn cmd_send<T: Terminal, A: Agent>(
-    _wagner: &Wagner<T, A>,
-    _session: &str,
-    _message: &str,
-) -> Result<()> {
-    warn!("Send command not yet implemented");
-    println!("Send command not yet implemented");
-    Ok(())
-}
-
-fn cmd_chains<T: Terminal, A: Agent>(
-    _wagner: &Wagner<T, A>,
-    _task: Option<&str>,
-    _repo: Option<&str>,
-) -> Result<()> {
-    warn!("Chains command not yet implemented");
-    println!("Chains command not yet implemented");
-    Ok(())
+    debug!(task = %task_name, "Attaching to session");
+    wagner.attach(&task_name)
 }
 
 fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {
