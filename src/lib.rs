@@ -2,6 +2,7 @@ pub mod agent;
 pub mod config;
 pub mod error;
 pub mod model;
+pub mod monitor;
 pub mod store;
 pub mod terminal;
 pub mod tui;

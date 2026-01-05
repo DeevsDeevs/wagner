@@ -1,4 +1,5 @@
 use crate::agent::Agent;
+use crate::monitor::PaneStatus;
 use crate::terminal::Terminal;
 use crate::tui::app::{App, Focus, SidebarSection};
 
@@ -32,18 +33,30 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 
     let mut items: Vec<ListItem> = Vec::new();
 
-    for (i, pane) in app.panes.iter().enumerate() {
+    for pane in app.panes.iter() {
         let is_selected = app.selected_pane.as_ref() == Some(&pane.0);
-        let symbol = if is_selected { "●" } else { "○" };
-        let style = if is_selected {
+        let status = app.pane_statuses.get(&pane.0);
+
+        let (icon, status_color) = match status {
+            Some(PaneStatus::Agent { status, .. }) if status.is_waiting() => ('◉', Color::Yellow),
+            Some(PaneStatus::Agent { status, .. }) if status.is_active() => ('●', Color::Green),
+            Some(PaneStatus::Terminal(ts)) if ts.is_active() => ('●', Color::Blue),
+            Some(_) => ('○', Color::DarkGray),
+            None => ('?', Color::DarkGray),
+        };
+
+        let name_style = if is_selected {
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
 
+        let status_label = status.map(|s| s.label()).unwrap_or_default();
+
         items.push(ListItem::new(Line::from(vec![
-            Span::styled(format!(" {} ", symbol), style),
-            Span::styled(format!("pane:{}", i), style),
+            Span::styled(format!(" {} ", icon), Style::default().fg(status_color)),
+            Span::styled(&pane.1, name_style),
+            Span::styled(format!(" {}", status_label), Style::default().fg(Color::DarkGray)),
         ])));
     }
 

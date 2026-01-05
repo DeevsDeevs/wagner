@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "wagner")]
-#[command(about = "Multi-repo task manager for Claude Code sessions")]
+#[command(about = "Multi-repo task manager for agents sessions")]
 #[command(version)]
 pub struct Cli {
     #[command(subcommand)]

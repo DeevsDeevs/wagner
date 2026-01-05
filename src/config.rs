@@ -26,6 +26,22 @@ pub struct Keybindings {
     pub switch_section: String,
     #[serde(default = "default_settings")]
     pub settings: String,
+    #[serde(default = "default_nav_down")]
+    pub nav_down: String,
+    #[serde(default = "default_nav_up")]
+    pub nav_up: String,
+    #[serde(default = "default_nav_left")]
+    pub nav_left: String,
+    #[serde(default = "default_nav_right")]
+    pub nav_right: String,
+    #[serde(default = "default_scroll_top")]
+    pub scroll_top: String,
+    #[serde(default = "default_scroll_bottom")]
+    pub scroll_bottom: String,
+    #[serde(default = "default_page_up")]
+    pub page_up: String,
+    #[serde(default = "default_page_down")]
+    pub page_down: String,
 }
 
 fn default_quit() -> String { "q".to_string() }
@@ -39,6 +55,14 @@ fn default_send_message() -> String { "s".to_string() }
 fn default_toggle_sidebar() -> String { "Tab".to_string() }
 fn default_switch_section() -> String { "o".to_string() }
 fn default_settings() -> String { "S".to_string() }
+fn default_nav_down() -> String { "j".to_string() }
+fn default_nav_up() -> String { "k".to_string() }
+fn default_nav_left() -> String { "h".to_string() }
+fn default_nav_right() -> String { "l".to_string() }
+fn default_scroll_top() -> String { "g".to_string() }
+fn default_scroll_bottom() -> String { "G".to_string() }
+fn default_page_up() -> String { "u".to_string() }
+fn default_page_down() -> String { "f".to_string() }
 
 impl Default for Keybindings {
     fn default() -> Self {
@@ -54,6 +78,14 @@ impl Default for Keybindings {
             toggle_sidebar: default_toggle_sidebar(),
             switch_section: default_switch_section(),
             settings: default_settings(),
+            nav_down: default_nav_down(),
+            nav_up: default_nav_up(),
+            nav_left: default_nav_left(),
+            nav_right: default_nav_right(),
+            scroll_top: default_scroll_top(),
+            scroll_bottom: default_scroll_bottom(),
+            page_up: default_page_up(),
+            page_down: default_page_down(),
         }
     }
 }
@@ -66,13 +98,17 @@ pub struct Config {
     pub refresh_interval_ms: u64,
     #[serde(default)]
     pub show_hints: bool,
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: u16,
+    #[serde(default = "default_page_scroll")]
+    pub page_scroll_lines: u16,
     #[serde(default)]
     pub keybindings: Keybindings,
 }
 
-fn default_refresh_ms() -> u64 {
-    100
-}
+fn default_refresh_ms() -> u64 { 100 }
+fn default_sidebar_width() -> u16 { 28 }
+fn default_page_scroll() -> u16 { 20 }
 
 impl Default for Config {
     fn default() -> Self {
@@ -81,6 +117,8 @@ impl Default for Config {
             default_agent: "claude".to_string(),
             refresh_interval_ms: default_refresh_ms(),
             show_hints: false,
+            sidebar_width: default_sidebar_width(),
+            page_scroll_lines: default_page_scroll(),
             keybindings: Keybindings::default(),
         }
     }

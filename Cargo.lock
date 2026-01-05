@@ -1804,6 +1804,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "sha2",
  "shellexpand",
  "thiserror 2.0.17",
  "tokio",

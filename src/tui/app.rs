@@ -1,10 +1,12 @@
 use crate::agent::Agent;
 use crate::error::Result;
 use crate::model::{Session, Task};
+use crate::monitor::{PaneStatus, StatusMonitor};
 use crate::terminal::{PaneHandle, Terminal};
 use crate::wagner::{RepoSpec, Wagner};
 
 use ratatui::widgets::ListState;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +44,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub tasks: Vec<Task>,
     pub sessions: Vec<Session>,
     pub panes: Vec<PaneHandle>,
+    pub pane_statuses: HashMap<String, PaneStatus>,
     pub task_list_state: ListState,
     pub pane_list_state: ListState,
 
@@ -53,6 +56,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
+    status_monitor: StatusMonitor,
 
     pub input_buffer: String,
     pub input_cursor: usize,
@@ -89,6 +93,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             tasks,
             sessions: Vec::new(),
             panes: Vec::new(),
+            pane_statuses: HashMap::new(),
             task_list_state,
             pane_list_state: ListState::default(),
 
@@ -100,6 +105,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
             auto_refresh: true,
+            status_monitor: StatusMonitor::new(),
 
             input_buffer: String::new(),
             input_cursor: 0,
@@ -179,13 +185,20 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     let idx = self.panes.iter().position(|p| &p.0 == pane_id);
                     self.pane_list_state.select(idx);
                 }
+
+                let updates = self.status_monitor.poll(&self.wagner.terminal, &self.panes);
+                for update in updates {
+                    self.pane_statuses.insert(update.pane.0.clone(), update.status);
+                }
             }
         }
     }
 
     pub fn refresh_terminal_output(&mut self) -> Result<()> {
+        let old_len = self.terminal_output.len();
+
         if let Some(pane_id) = &self.selected_pane {
-            let pane_handle = crate::terminal::PaneHandle(pane_id.clone());
+            let pane_handle = crate::terminal::PaneHandle(pane_id.clone(), String::new());
             match self.wagner.terminal.capture(&pane_handle, 500) {
                 Ok(output) => self.terminal_output = output,
                 Err(_) => self.terminal_output = String::from("[No output captured]"),
@@ -208,7 +221,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
         } else {
             self.terminal_output = String::from("No task selected. Press 'n' to create a new task.");
         }
-        self.scroll_terminal_bottom();
+
+        if self.terminal_output.len() > old_len {
+            self.scroll_terminal_bottom();
+        }
         Ok(())
     }
 
@@ -279,6 +295,15 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
         let _ = self.refresh_terminal_output();
+    }
+
+    pub fn select_pane(&mut self, index: usize) {
+        if index < self.panes.len() {
+            self.pane_list_state.select(Some(index));
+            self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
+            self.sidebar_section = SidebarSection::Sessions;
+            let _ = self.refresh_terminal_output();
+        }
     }
 
     pub fn prev_pane(&mut self) {
@@ -450,7 +475,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     fn send_message_from_input(&mut self) {
         if let Some(pane_id) = &self.selected_pane.clone() {
-            let pane = crate::terminal::PaneHandle(pane_id.clone());
+            let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
             match self.wagner.terminal.send_keys(&pane, &self.input_buffer) {
                 Ok(_) => {
                     self.set_status("Message sent");
@@ -553,6 +578,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             ("refresh_interval_ms".to_string(), cfg.refresh_interval_ms.to_string()),
             ("default_agent".to_string(), cfg.default_agent.clone()),
             ("show_hints".to_string(), cfg.show_hints.to_string()),
+            ("sidebar_width".to_string(), cfg.sidebar_width.to_string()),
+            ("page_scroll_lines".to_string(), cfg.page_scroll_lines.to_string()),
             ("key.quit".to_string(), kb.quit.clone()),
             ("key.help".to_string(), kb.help.clone()),
             ("key.refresh".to_string(), kb.refresh.clone()),
@@ -564,6 +591,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
             ("key.toggle_sidebar".to_string(), kb.toggle_sidebar.clone()),
             ("key.switch_section".to_string(), kb.switch_section.clone()),
             ("key.settings".to_string(), kb.settings.clone()),
+            ("key.nav_down".to_string(), kb.nav_down.clone()),
+            ("key.nav_up".to_string(), kb.nav_up.clone()),
+            ("key.nav_left".to_string(), kb.nav_left.clone()),
+            ("key.nav_right".to_string(), kb.nav_right.clone()),
+            ("key.scroll_top".to_string(), kb.scroll_top.clone()),
+            ("key.scroll_bottom".to_string(), kb.scroll_bottom.clone()),
+            ("key.page_up".to_string(), kb.page_up.clone()),
+            ("key.page_down".to_string(), kb.page_down.clone()),
         ]
     }
 
@@ -579,6 +614,16 @@ impl<T: Terminal, A: Agent> App<T, A> {
             }
             "default_agent" => cfg.default_agent = value.to_string(),
             "show_hints" => cfg.show_hints = value == "true",
+            "sidebar_width" => {
+                if let Ok(v) = value.parse() {
+                    cfg.sidebar_width = v;
+                }
+            }
+            "page_scroll_lines" => {
+                if let Ok(v) = value.parse() {
+                    cfg.page_scroll_lines = v;
+                }
+            }
             "key.quit" => cfg.keybindings.quit = value.to_string(),
             "key.help" => cfg.keybindings.help = value.to_string(),
             "key.refresh" => cfg.keybindings.refresh = value.to_string(),
@@ -590,6 +635,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
             "key.toggle_sidebar" => cfg.keybindings.toggle_sidebar = value.to_string(),
             "key.switch_section" => cfg.keybindings.switch_section = value.to_string(),
             "key.settings" => cfg.keybindings.settings = value.to_string(),
+            "key.nav_down" => cfg.keybindings.nav_down = value.to_string(),
+            "key.nav_up" => cfg.keybindings.nav_up = value.to_string(),
+            "key.nav_left" => cfg.keybindings.nav_left = value.to_string(),
+            "key.nav_right" => cfg.keybindings.nav_right = value.to_string(),
+            "key.scroll_top" => cfg.keybindings.scroll_top = value.to_string(),
+            "key.scroll_bottom" => cfg.keybindings.scroll_bottom = value.to_string(),
+            "key.page_up" => cfg.keybindings.page_up = value.to_string(),
+            "key.page_down" => cfg.keybindings.page_down = value.to_string(),
             _ => {}
         }
     }

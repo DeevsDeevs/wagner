@@ -58,7 +58,7 @@ impl Terminal for Tmux {
         let cwd_str = cwd.to_string_lossy();
 
         let pane_id = self.run(&[
-            "split-window",
+            "new-window",
             "-t",
             &session.0,
             "-c",
@@ -68,7 +68,12 @@ impl Terminal for Tmux {
             "#{pane_id}",
         ])?;
 
-        Ok(PaneHandle(pane_id))
+        let title = cwd
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| cwd_str.to_string());
+
+        Ok(PaneHandle(pane_id, title))
     }
 
     fn capture(&self, pane: &PaneHandle, lines: usize) -> Result<String> {
@@ -86,6 +91,16 @@ impl Terminal for Tmux {
     fn send_keys(&self, pane: &PaneHandle, keys: &str) -> Result<()> {
         self.run(&["send-keys", "-t", &pane.0, "-l", keys])?;
         self.run(&["send-keys", "-t", &pane.0, "Enter"])?;
+        Ok(())
+    }
+
+    fn send_key(&self, pane: &PaneHandle, key: &str) -> Result<()> {
+        self.run(&["send-keys", "-t", &pane.0, key])?;
+        Ok(())
+    }
+
+    fn send_literal(&self, pane: &PaneHandle, text: &str) -> Result<()> {
+        self.run(&["send-keys", "-t", &pane.0, "-l", text])?;
         Ok(())
     }
 
@@ -109,13 +124,22 @@ impl Terminal for Tmux {
             "-t",
             &session.0,
             "-F",
-            "#{pane_id}",
+            "#{pane_id}\t#{pane_current_path}",
         ])?;
 
         Ok(output
             .lines()
             .filter(|s| !s.is_empty())
-            .map(|s| PaneHandle(s.to_string()))
+            .map(|line| {
+                let mut parts = line.splitn(2, '\t');
+                let id = parts.next().unwrap_or("").to_string();
+                let path = parts.next().unwrap_or("");
+                let title = std::path::Path::new(path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string());
+                PaneHandle(id, title)
+            })
             .collect())
     }
 
@@ -133,5 +157,9 @@ impl Terminal for Tmux {
         let session_name = self.session_name(name);
         let result = self.run(&["has-session", "-t", &session_name]);
         Ok(result.is_ok())
+    }
+
+    fn get_pane_command(&self, pane: &PaneHandle) -> Result<String> {
+        self.run(&["display", "-p", "-t", &pane.0, "#{pane_current_command}"])
     }
 }

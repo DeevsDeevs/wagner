@@ -1,6 +1,6 @@
 # Wagner
 
-Multi-repo task manager for Claude Code sessions. Orchestrates multiple Claude instances across git worktrees with tmux.
+Multi-repo task manager for agents sessions. Orchestrates multiple Claude instances across git worktrees with tmux.
 
 ## Overview
 

@@ -13,8 +13,6 @@ use ratatui::{
 };
 use std::time::Duration;
 
-const SIDEBAR_WIDTH: u16 = 28;
-
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
     let area = frame.area();
 
@@ -28,7 +26,7 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
 
     let (sidebar_area, terminal_area) = if app.show_sidebar {
         let chunks = Layout::horizontal([
-            Constraint::Length(SIDEBAR_WIDTH),
+            Constraint::Length(app.wagner.config.sidebar_width),
             Constraint::Min(0),
         ])
         .split(main_area);
@@ -44,7 +42,7 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
     }
 
     if app.show_help {
-        draw_help_popup(frame, area);
+        draw_help_popup(frame, area, &app.wagner.config.keybindings);
     }
 
     if app.input_mode == InputMode::Settings || app.input_mode == InputMode::EditSetting {
@@ -110,10 +108,10 @@ fn draw_terminal_view<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app:
     terminal_view::draw(frame, chunks[1], app);
 }
 
-fn draw_help_popup(frame: &mut Frame, area: Rect) {
+fn draw_help_popup(frame: &mut Frame, area: Rect, keybindings: &crate::config::Keybindings) {
     let popup_area = centered_rect(60, 70, area);
     frame.render_widget(Clear, popup_area);
-    help_popup::draw(frame, popup_area);
+    help_popup::draw(frame, popup_area, keybindings);
 }
 
 fn draw_input_dialog<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

@@ -1,6 +1,6 @@
 # Wagner Architecture
 
-Multi-repo task manager for Claude Code sessions with chain integration.
+Multi-repo task manager for agents sessions with chain integration.
 
 ## Problem Statement
 
@@ -38,17 +38,21 @@ Each repo can have its own Claude sessions and chains. Wagner shows them unified
 
 Claude Squad is session-centric (1 repo = 1 session = 1 branch). Wagner is task-centric (1 task = N repos). Different mental models, different tools.
 
-### Status Detection: Hooks vs Polling
+### Status Detection: Polling
 
-**Polling (claude-squad approach)**: Parse tmux output for prompts.
-- Pros: Works with any CLI agent
-- Cons: Fragile, false positives, CPU overhead
+After studying claude-squad's implementation, we chose **polling** for status detection:
 
-**Hooks (wagner approach)**: Claude Code fires hooks on events.
-- Pros: Accurate, no parsing, explicit intent
-- Cons: Claude Code only, requires hook setup
+- Captures tmux pane output periodically
+- Hashes content to detect changes (output changed = running)
+- Pattern-matches for agent-specific prompts (waiting for input)
+- Works with any CLI agent (Claude, Aider, OpenCode, Gemini, Amp)
+- No agent-side setup required
 
-Decision: **Hooks**. V1 is Claude Code only. Accuracy matters more than agent flexibility.
+Key improvements over claude-squad:
+- **Pane-level status** (not just session-level)
+- **Agent detection** (distinguish agent panes from plain terminals)
+- **Adapter pattern** (easy to add new agents)
+- **ANSI stripping** (consistent hashing)
 
 ### Session Ownership
 
@@ -62,7 +66,7 @@ Option B: User spawns Claude manually
 - Pros: Simple, flexible, user controls prompts
 - Cons: Extra step
 
-Decision: **Option B**. Wagner creates the tmux session/panes. User runs `claude` when ready. Wagner observes via hooks.
+Decision: **Option B**. Wagner creates the tmux session/panes. User runs `claude` (or any agent) when ready. Wagner observes via polling.
 
 ### Worktree Location
 
@@ -98,21 +102,25 @@ struct TaskRepo {
     branch: String,         // "feature/oauth"
 }
 
-struct Session {
-    id: String,             // uuid
-    task: String,           // task name
-    repo: String,           // repo name (within task)
-    tmux_pane: String,      // tmux pane id
-    status: SessionStatus,
-    last_activity: DateTime,
+struct TrackedPane {
+    handle: PaneHandle,             // tmux pane id
+    agent_type: Option<AgentType>,  // None = plain terminal
+    status: PaneStatus,
+    output_hash: [u8; 32],
+    last_change: Instant,
 }
 
-enum SessionStatus {
-    Started,    // hook: SessionStart
-    Running,    // hook: PostToolUse (recent)
-    Waiting,    // hook: Notification
-    Stopped,    // hook: Stop
-    Stale,      // no activity for N minutes
+enum PaneStatus {
+    // Agent statuses
+    AgentStarting,
+    AgentRunning,
+    AgentWaiting,
+    AgentIdle,
+    AgentError(String),
+    // Terminal statuses
+    TerminalActive,
+    TerminalIdle,
+    Unknown,
 }
 ```
 
@@ -180,10 +188,16 @@ wagner/
 │   │   └── tmux.rs              # impl Terminal for Tmux
 │   │   └── (ghostty.rs)         # future
 │   │
-│   ├── agent/                   # Agent status detection
-│   │   ├── mod.rs               # pub trait Agent
-│   │   └── claude.rs            # impl Agent for ClaudeCode
+│   ├── agent/                   # Agent detection (polling-based)
+│   │   ├── mod.rs               # pub trait AgentDetector
+│   │   ├── claude.rs            # ClaudeCodeDetector
+│   │   ├── aider.rs             # AiderDetector
+│   │   ├── terminal.rs          # TerminalDetector (fallback)
 │   │   └── (opencode.rs)        # future
+│   │
+│   ├── monitor/                 # Status monitoring
+│   │   ├── mod.rs               # StatusMonitor
+│   │   └── ansi.rs              # ANSI stripping utility
 │   │
 │   ├── store.rs                 # JSON persistence
 │   │
@@ -210,9 +224,6 @@ wagner/
 │           ├── sessions.rs
 │           ├── preview.rs       # Renders tmux capture
 │           └── chains.rs
-│
-└── assets/
-    └── wagner-hook.sh           # Claude Code hook script template
 ```
 
 ### Runtime Data
@@ -278,97 +289,180 @@ pub trait Terminal: Send + Sync {
 - `Tmux` - shells out to `tmux` CLI
 - `Ghostty` (future) - uses Ghostty's scripting API
 
-### Agent Trait
+### AgentDetector Trait
 
-Abstracts AI coding agent (claude-code now, others later):
+Abstracts agent-specific status detection via polling:
 
 ```rust
-/// Agent status derived from hooks or output parsing
+/// Type of AI coding agent
 #[derive(Clone, Debug, PartialEq)]
-pub enum AgentStatus {
-    Starting,
-    Running,
-    WaitingForInput,   // Needs user approval
-    Idle,              // Waiting for prompt
-    Stopped,
-    Error(String),
+pub enum AgentType {
+    ClaudeCode,
+    Aider,
+    OpenCode,
+    Gemini,
+    Amp,
+    Unknown(String),
 }
 
-/// AI coding agent abstraction
-pub trait Agent: Send + Sync {
-    /// Agent name for display
-    fn name(&self) -> &str;
+/// Status of a single pane
+#[derive(Clone, Debug, PartialEq)]
+pub enum PaneStatus {
+    // Agent statuses
+    AgentStarting,      // Agent detected, initializing
+    AgentRunning,       // Output changing (working)
+    AgentWaiting,       // Prompt detected (needs input)
+    AgentIdle,          // Stable output, ready for prompt
+    AgentError(String),
 
-    /// Command to launch agent (e.g., "claude")
+    // Terminal (no agent detected)
+    TerminalActive,     // Recent output changes
+    TerminalIdle,       // No recent changes
+
+    Unknown,
+}
+
+/// Agent detection and status parsing
+pub trait AgentDetector: Send + Sync {
+    /// Agent type identifier
+    fn agent_type(&self) -> AgentType;
+
+    /// Command that launches this agent
     fn launch_command(&self) -> &str;
 
-    /// Setup hooks in worktree for status detection
-    fn setup_hooks(&self, worktree: &Path) -> Result<()>;
+    /// Check if this agent is running in pane
+    fn detect_agent(&self, pane_command: &str, output: &str) -> bool;
 
-    /// Parse status from hook event
-    fn parse_hook_event(&self, event: &str) -> Option<AgentStatus>;
+    /// Detect status from pane output
+    fn detect_status(&self, output: &str, output_changed: bool, since_change: Duration) -> PaneStatus;
 
-    /// Fallback: detect status from captured output
-    fn detect_status(&self, output: &str) -> AgentStatus;
+    /// Patterns indicating "waiting for input"
+    fn waiting_patterns(&self) -> &[&str];
+
+    /// Patterns indicating "running/thinking"
+    fn running_patterns(&self) -> &[&str];
 }
 ```
 
 **Implementations:**
-- `ClaudeCode` - uses Claude Code hooks (SessionStart, Notification, Stop, etc.)
-- `OpenCode` (future) - uses OpenCode plugin system
-- `Amp` (future) - uses Amp toolboxes
+- `ClaudeCodeDetector` - detects Claude Code prompts and spinner
+- `AiderDetector` - detects Aider confirmation prompts
+- `OpenCodeDetector` - detects OpenCode patterns
+- `GeminiDetector` - detects Gemini CLI patterns
+- `TerminalDetector` - fallback for plain shells
 
-## Hook Integration
+## Status Monitoring
 
-### Hook Script
+Wagner monitors pane status via polling. This works for:
+- **AI agents** (Claude, Aider, OpenCode, etc.) - detects waiting/running/idle
+- **Plain terminals** - tracks activity for any process (build servers, logs, etc.)
 
-Claude Code runs hooks at specific events. Wagner provides a hook script:
+Wagner can be used purely as a terminal/pane manager without any AI agents.
 
-```bash
-#!/bin/bash
-# ~/.claude/hooks/wagner-hook.sh
+### Architecture
 
-EVENT="$1"
-HOOK_DATA="$CLAUDE_HOOK_DATA"
-
-case "$EVENT" in
-    SessionStart|PostToolUse|Notification|Stop)
-        echo "$EVENT:$PWD:$(date +%s)" >> /tmp/wagner-events.sock
-        ;;
-esac
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      StatusMonitor                          │
+│  - polls panes every N ms (configurable: status_poll_ms)    │
+│  - maintains pane state cache                               │
+│  - strips ANSI before hashing                               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+       ┌──────────┐    ┌──────────┐    ┌──────────┐
+       │  Claude  │    │  Aider   │    │ Terminal │
+       │ Detector │    │ Detector │    │ Detector │
+       └──────────┘    └──────────┘    └──────────┘
 ```
 
-### Event Processing
-
-Wagner watches `/tmp/wagner-events.sock` (or uses a proper Unix socket):
+### Configuration
 
 ```rust
-struct HookEvent {
-    event_type: HookEventType,
-    cwd: PathBuf,
-    timestamp: u64,
-}
-
-enum HookEventType {
-    SessionStart,
-    PostToolUse,
-    Notification,
-    Stop,
+// In config.rs
+pub struct Config {
+    // ...
+    #[serde(default = "default_status_poll_ms")]
+    pub status_poll_ms: u64,  // Default: 500ms
 }
 ```
 
-Match `cwd` to task/repo worktree path to identify which session fired.
+Configurable via settings popup or `~/.config/wagner/config.json`.
+
+### Pane Tracking
+
+```rust
+/// Extended pane info with status
+pub struct TrackedPane {
+    pub handle: PaneHandle,
+    pub agent_type: Option<AgentType>,  // None = plain terminal
+    pub status: PaneStatus,
+    pub output_hash: [u8; 32],
+    pub last_change: Instant,
+}
+
+/// Session aggregate status (derived from panes)
+pub enum SessionAggregateStatus {
+    NeedsAttention,  // At least one pane waiting for input
+    Working,         // At least one pane running, none waiting
+    Idle,            // All panes idle
+    Empty,           // No panes
+}
+```
+
+### Detection Flow
+
+1. **Capture**: `tmux capture-pane` gets pane content
+2. **Strip ANSI**: Remove color codes for consistent hashing
+3. **Hash**: SHA256 of cleaned output
+4. **Compare**: Changed hash = activity detected
+5. **Detect Agent**: Check pane command + output patterns
+6. **Detect Status**: Agent-specific pattern matching
+7. **Update Cache**: Store new status and hash
+
+### Agent Detection Order
+
+Detectors are checked in priority order until one matches:
+
+1. ClaudeCode (looks for `claude` command, `╭─` TUI border)
+2. Aider (looks for `aider` command)
+3. OpenCode (looks for `opencode` command)
+4. Gemini (looks for `gemini` command)
+5. Amp (looks for `amp` command)
+6. **Fallback**: Plain terminal (no agent)
+
+### Detection Patterns
+
+| Agent | Waiting Patterns | Running Patterns |
+|-------|------------------|------------------|
+| Claude | `[Y/n]`, `[y/N]`, `No, and tell Claude what to do differently` | `⠋⠙⠹⠸`, `...`, `Thinking` |
+| Aider | `(Y)es/(N)o/(D)on't ask again` | Output changing |
+| Gemini | `Yes, allow once` | Output changing |
+| Terminal | N/A | Output changing |
 
 ### Status State Machine
 
 ```
-[not running] --SessionStart--> Started
-Started --PostToolUse--> Running
-Running --PostToolUse--> Running (reset timer)
-Running --Notification--> Waiting
-Running/Waiting --Stop--> Stopped
-Running --timeout(5min)--> Stale
-Waiting --PostToolUse--> Running
+[pane created] ──────────────────► Unknown
+                                      │
+              ┌───────────────────────┼───────────────────────┐
+              │ agent detected        │ no agent              │
+              ▼                       ▼                       │
+         AgentStarting          TerminalIdle                  │
+              │                       │                       │
+              │ output changed        │ output changed        │
+              ▼                       ▼                       │
+         AgentRunning           TerminalActive                │
+              │                       │                       │
+              ├─► waiting pattern ──► AgentWaiting            │
+              │                            │                  │
+              │ no change for N sec        │ output changed   │
+              ▼                            ▼                  │
+         AgentIdle ◄───────────────── AgentRunning            │
+              │                                               │
+              │ output changed                                │
+              └───────────────────────────────────────────────┘
 ```
 
 ## TUI Design
@@ -567,16 +661,17 @@ Wagner does not create chains. That's Claude's job via `/chain-link`.
 
 **Validate**: Can create multi-repo task, worktrees work.
 
-### Phase 2: Hook Integration
+### Phase 2: Status Monitoring
 
-**Goal**: Accurate session status.
+**Goal**: Real-time pane status via polling.
 
-1. Hook script
-2. Event socket/file watcher
-3. Session status updates
-4. Status persistence
+1. `AgentDetector` trait and implementations
+2. `StatusMonitor` with polling loop
+3. ANSI stripping utility
+4. Pane-level status tracking
+5. Session aggregate status
 
-**Validate**: Status reflects actual Claude state.
+**Validate**: Status reflects actual state within configurable poll interval.
 
 ### Phase 3: TUI (Basic)
 
@@ -635,11 +730,11 @@ curl -L https://github.com/deevs/wagner/releases/latest/download/wagner-linux-x8
 
 ## Risks and Mitigations
 
-### Risk: Hook reliability
+### Risk: Detection pattern fragility
 
-Claude Code hooks might not fire consistently or format might change.
+Agent prompt patterns may change between versions.
 
-**Mitigation**: Fall back to tmux output polling if hooks fail. Log hook events for debugging.
+**Mitigation**: Patterns are in adapters, easy to update. Fall back to hash-based change detection.
 
 ### Risk: Tmux complexity
 
@@ -656,16 +751,16 @@ Easy to add features (auto-prompts, AI orchestration, etc).
 ## Success Criteria
 
 1. Can create multi-repo task in < 30 seconds
-2. Session status reflects reality within 5 seconds
-3. Can switch between any session in 2 keystrokes
+2. Pane status reflects reality within poll interval (configurable, default 500ms)
+3. Can switch between any pane in 2 keystrokes
 4. Chain context visible without leaving TUI
 5. No data loss on crash (state persisted)
+6. Works with any CLI agent or plain terminals
 
 ## Out of Scope (V1)
 
-- Auto-starting Claude sessions
+- Auto-starting agent sessions
 - Session orchestration (sequencing, dependencies)
 - Multi-machine sync
 - Web UI
-- Non-Claude agents
 - Ghostty backend (until API exists)

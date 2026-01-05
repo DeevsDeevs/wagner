@@ -35,7 +35,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>) -> Result<bool>
         }
 
         match app.input_mode {
-            InputMode::Normal => handle_normal_mode(app, key.code),
+            InputMode::Normal => handle_normal_mode(app, key.code, key.modifiers),
             InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
                 handle_input_mode(app, key.code, key.modifiers)
             }
@@ -69,7 +69,7 @@ fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
         .map(|(_, action)| *action)
 }
 
-fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode, modifiers: KeyModifiers) {
     let kb = &app.wagner.config.keybindings;
 
     if app.show_help {
@@ -77,6 +77,31 @@ fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
             app.toggle_help();
         }
         return;
+    }
+
+    if app.focus == Focus::Terminal {
+        if matches_key(code, &kb.toggle_sidebar) {
+            app.focus = Focus::Sidebar;
+            if !app.show_sidebar {
+                app.show_sidebar = true;
+            }
+            return;
+        }
+        if code == KeyCode::Esc {
+            app.focus = Focus::Sidebar;
+            return;
+        }
+        send_key_to_pane(app, code, modifiers);
+        return;
+    }
+
+    if let KeyCode::Char(c) = code {
+        if let Some(n) = c.to_digit(10) {
+            if n >= 1 && n <= 9 {
+                app.select_pane((n - 1) as usize);
+                return;
+            }
+        }
     }
 
     match get_action(code, kb) {
@@ -95,74 +120,116 @@ fn handle_normal_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
     }
 }
 
-fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
-    match code {
-        KeyCode::Char('g') => {
-            if app.focus == Focus::Terminal {
-                app.scroll_terminal_top();
+fn send_key_to_pane<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode, modifiers: KeyModifiers) {
+    let key_str = match code {
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Backspace => "BSpace".to_string(),
+        KeyCode::Left => "Left".to_string(),
+        KeyCode::Right => "Right".to_string(),
+        KeyCode::Up => "Up".to_string(),
+        KeyCode::Down => "Down".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::PageUp => "PageUp".to_string(),
+        KeyCode::PageDown => "PageDown".to_string(),
+        KeyCode::Tab => "Tab".to_string(),
+        KeyCode::Delete => "DC".to_string(),
+        KeyCode::Insert => "IC".to_string(),
+        KeyCode::F(n) => format!("F{}", n),
+        KeyCode::Char(c) => {
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                format!("C-{}", c)
+            } else {
+                return send_literal_to_pane(app, c);
             }
         }
-        KeyCode::Char('G') => {
-            if app.focus == Focus::Terminal {
-                app.scroll_terminal_bottom();
-            }
-        }
+        _ => return,
+    };
 
-        KeyCode::Char('j') | KeyCode::Down => match app.focus {
+    if let Some(pane_id) = &app.selected_pane.clone() {
+        let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
+        let _ = app.wagner.terminal.send_key(&pane, &key_str);
+        let _ = app.refresh_terminal_output();
+    }
+}
+
+fn send_literal_to_pane<T: Terminal, A: Agent>(app: &mut App<T, A>, c: char) {
+    if let Some(pane_id) = &app.selected_pane.clone() {
+        let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
+        let _ = app.wagner.terminal.send_literal(&pane, &c.to_string());
+        let _ = app.refresh_terminal_output();
+    }
+}
+
+fn handle_navigation<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if matches_key(code, &kb.scroll_top) || code == KeyCode::Home {
+        if app.focus == Focus::Terminal {
+            app.scroll_terminal_top();
+        }
+        return;
+    }
+
+    if matches_key(code, &kb.scroll_bottom) || code == KeyCode::End {
+        if app.focus == Focus::Terminal {
+            app.scroll_terminal_bottom();
+        }
+        return;
+    }
+
+    if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        match app.focus {
             Focus::Sidebar => match app.sidebar_section {
                 SidebarSection::Tasks => app.next_task(),
                 SidebarSection::Sessions => app.next_pane(),
             },
             Focus::Terminal => app.scroll_terminal_down(),
-        },
-        KeyCode::Char('k') | KeyCode::Up => match app.focus {
+        }
+        return;
+    }
+
+    if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        match app.focus {
             Focus::Sidebar => match app.sidebar_section {
                 SidebarSection::Tasks => app.prev_task(),
                 SidebarSection::Sessions => app.prev_pane(),
             },
             Focus::Terminal => app.scroll_terminal_up(),
-        },
+        }
+        return;
+    }
 
-        KeyCode::PageUp | KeyCode::Char('u') => {
-            if app.focus == Focus::Terminal {
-                app.scroll_terminal_page_up(20);
-            }
+    if matches_key(code, &kb.page_up) || code == KeyCode::PageUp {
+        if app.focus == Focus::Terminal {
+            app.scroll_terminal_page_up(app.wagner.config.page_scroll_lines);
         }
-        KeyCode::PageDown | KeyCode::Char('f') => {
-            if app.focus == Focus::Terminal {
-                app.scroll_terminal_page_down(20);
-            }
-        }
+        return;
+    }
 
-        KeyCode::Home => {
-            if app.focus == Focus::Terminal {
-                app.scroll_terminal_top();
-            }
+    if matches_key(code, &kb.page_down) || code == KeyCode::PageDown {
+        if app.focus == Focus::Terminal {
+            app.scroll_terminal_page_down(app.wagner.config.page_scroll_lines);
         }
-        KeyCode::End => {
-            if app.focus == Focus::Terminal {
-                app.scroll_terminal_bottom();
-            }
-        }
+        return;
+    }
 
-        KeyCode::Char('h') | KeyCode::Left => {
-            if !app.show_sidebar {
-                app.show_sidebar = true;
-            }
-            app.focus = Focus::Sidebar;
+    if matches_key(code, &kb.nav_left) || code == KeyCode::Left {
+        if !app.show_sidebar {
+            app.show_sidebar = true;
         }
-        KeyCode::Char('l') | KeyCode::Right => {
-            app.focus = Focus::Terminal;
-        }
+        app.focus = Focus::Sidebar;
+        return;
+    }
 
-        KeyCode::Enter => {
-            if app.focus == Focus::Sidebar {
-                app.focus = Focus::Terminal;
-                let _ = app.refresh_terminal_output();
-            }
-        }
+    if matches_key(code, &kb.nav_right) || code == KeyCode::Right {
+        app.focus = Focus::Terminal;
+        return;
+    }
 
-        _ => {}
+    if code == KeyCode::Enter && app.focus == Focus::Sidebar {
+        app.focus = Focus::Terminal;
+        let _ = app.refresh_terminal_output();
     }
 }
 
