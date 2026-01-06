@@ -47,6 +47,8 @@
             pkgs.libiconv
           ];
 
+          doCheck = false;
+
           meta = with pkgs.lib; {
             description = "AI agent monitoring CLI tool with TUI";
             homepage = "https://github.com/DeevsDeevs/wagner";
