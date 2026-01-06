@@ -1,250 +1,128 @@
 # Wagner
 
-Multi-repo task manager for agents sessions. Orchestrates multiple Claude instances across git worktrees with tmux.
+Multi-repo task manager for AI agent sessions. Orchestrates agent instances across git worktrees with tmux.
 
-## Overview
+## Features
 
-Wagner solves the problem of managing multiple Claude Code sessions when working on tasks that span multiple repositories. It:
-
-- Creates isolated git worktrees for each task
-- Manages tmux sessions with multiple panes
-- Sets up Claude Code hooks for status tracking
-- Provides a unified view of all active sessions
+- **Workspace support** - Define repo groups, create tasks with `-w <workspace>`
+- **Multi-pane sessions** - Tmux pane per repo with agent launched automatically
+- **Git worktree isolation** - Each task gets isolated worktrees
+- **Base branch tracking** - Configure diff base per workspace
+- **TUI dashboard** - Monitor all active sessions
 
 ## Installation
 
-### Quick install (Linux/macOS)
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DeevsDeevs/wagner/main/install.sh | sh
-```
-
-### From crates.io
-
-```bash
+# From crates.io
 cargo install wagner
-```
 
-### With Nix
-
-```bash
+# With Nix
 nix profile install github:DeevsDeevs/wagner
-```
 
-### With devbox
-
-Add to your `devbox.json`:
-```json
-{
-  "packages": ["github:DeevsDeevs/wagner"]
-}
-```
-
-### From source
-
-```bash
+# From source
 git clone https://github.com/DeevsDeevs/wagner.git
-cd wagner
-cargo build --release
-# Binary at ./target/release/wagner
+cd wagner && cargo build --release
 ```
 
 ## Quick Start
 
-### 1. Create a task
+### Single repo
 
 ```bash
-# From inside a git repo - just provide a name
 cd ~/projects/myrepo
 wagner new my-feature
-
-# Creates worktree with branch task/my-feature
-# Specify custom branch with -b
-wagner new my-feature -b fix/auth-bug
-
-# Multi-repo tasks use --repos
-wagner new my-feature --repos \
-  frontend:~/projects/frontend:feature-x,\
-  backend:~/projects/backend:feature-x
+# Creates worktree with branch feature/my-feature
+# Launches tmux session with agent
 ```
 
-This will:
-1. Create a task folder at `~/tasks/my-feature/`
-2. Create git worktrees for each repo
-3. Set up Claude Code hooks in each worktree
-4. Create a tmux session `wagner_my-feature`
-
-### 2. List tasks
+### Multi-repo with workspace
 
 ```bash
-wagner list
+# Configure workspace (one-time)
+wagner ws add myproject \
+  frontend:~/repos/frontend \
+  backend:~/repos/backend \
+  --base-branch main
+
+# Create task from workspace
+wagner new my-feature -w myproject
+# Creates worktrees in all repos
+# Opens tmux with pane per repo + central pane
 ```
 
-Output:
-```
-my-feature           3 repos  (2h ago)   /home/user/tasks/my-feature
-another-task         1 repo   (3d ago)   /home/user/tasks/another-task
-```
-
-### 3. Attach to a task
+### Other common commands
 
 ```bash
-# Explicit
-wagner attach my-feature
-
-# Auto-detect from cwd (when inside a task directory)
-cd ~/tasks/my-feature
-wagner attach
-```
-
-### 4. Add more Claude panes
-
-```bash
-# Auto-detect task from cwd
-cd ~/tasks/my-feature
-wagner add
-
-# Explicit task and repo
-wagner add my-feature backend
-```
-
-### 5. Delete a task
-
-```bash
-# Removes worktrees, keeps branches
-wagner delete my-feature
-
-# Also deletes the branches
-wagner delete my-feature --force
-```
-
-## Repo Specification Format
-
-Repos are specified as `name:source:branch` where:
-
-- **name**: Display name for the repo within the task
-- **source**: Either a local path or git URL
-  - Local: `/path/to/repo` or `~/repos/myrepo`
-  - Remote: `https://github.com/user/repo.git` or `git@github.com:user/repo.git`
-- **branch**: Branch name for the worktree (default: `main`)
-
-Examples:
-```bash
-# Local repo, custom branch
-frontend:/home/user/repos/frontend:feature-auth
-
-# Local repo, default branch (main)
-frontend:/home/user/repos/frontend
-
-# Remote repo (will be cloned)
-backend:https://github.com/org/backend.git:develop
-```
-
-## Configuration
-
-Config is stored at `$XDG_CONFIG_HOME/wagner/config.json` (or `~/.config/wagner/config.json`).
-
-```json
-{
-  "tasks_root": "/home/user/tasks",
-  "default_agent": "claude"
-}
-```
-
-- **tasks_root**: Where task folders are created (default: `~/tasks`)
-- **default_agent**: Agent to use (currently only `claude` supported)
-
-## Directory Structure
-
-When you create a task, Wagner creates:
-
-```
-~/tasks/my-feature/
-├── .wagner/
-│   └── task.json          # Task metadata
-├── frontend/              # Git worktree
-│   └── .claude/
-│       └── settings.json  # Claude hooks
-├── backend/               # Git worktree
-│   └── .claude/
-│       └── settings.json
-└── shared/                # Git worktree
-    └── .claude/
-        └── settings.json
+wagner ls                    # List tasks
+wagner a my-feature          # Attach to task
+wagner rm my-feature         # Delete task
+wagner rm my-feature -f      # Delete task + branches
 ```
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `wagner` | Launch TUI |
-| `wagner new <name>` | Create task from current repo (auto branch: `task/<name>`) |
-| `wagner new <name> -b <branch>` | Create task with specific branch |
-| `wagner new <name> --repos <specs>` | Create multi-repo task |
-| `wagner list` | List all tasks with age |
-| `wagner attach [task]` | Attach to tmux session (auto-detects from cwd) |
-| `wagner add [task] [repo]` | Add Claude pane (auto-detects from cwd) |
-| `wagner delete <task> [--force]` | Delete task (--force removes branches) |
-| `wagner completions zsh` | Generate zsh completions |
+| Command | Alias | Description |
+|---------|-------|-------------|
+| `wagner` | | Launch TUI |
+| `wagner new <name>` | | Create task |
+| `wagner new <name> -w <ws>` | | Create from workspace |
+| `wagner list` | `ls` | List tasks |
+| `wagner attach [task]` | `a` | Attach to session |
+| `wagner add [task] [repo]` | | Add agent pane |
+| `wagner add-repo <task> <spec>` | | Add repo to task |
+| `wagner rm-repo <task> <repo>` | | Remove repo from task |
+| `wagner delete <task>` | `rm` | Delete task |
+| `wagner workspace` | `ws` | Manage workspaces |
+
+### Workspace commands
+
+```bash
+wagner ws add <name> <repos...> [-b <base>]  # Create workspace
+wagner ws add-repo <ws> <name:path>          # Add repo
+wagner ws rm-repo <ws> <name>                # Remove repo
+wagner ws ls                                  # List workspaces
+wagner ws rm <name>                          # Delete workspace
+```
+
+## Configuration
+
+`~/.config/wagner/config.json`:
+
+```json
+{
+  "tasks_root": "/home/user/tasks",
+  "default_agent": "claude",
+  "diff_base": "main",
+  "workspaces": {
+    "myproject": {
+      "base_branch": "main",
+      "frontend": "~/repos/frontend",
+      "backend": "~/repos/backend"
+    }
+  }
+}
+```
 
 ## Shell Completions
 
-Add to your `~/.zshrc`:
-
-```zsh
-eval "$(wagner completions zsh)"
-```
-
-This enables tab completion for commands and task names (dynamically fetched).
-
-## Workflow Example
-
 ```bash
-# Single repo workflow
-cd ~/projects/myapi
-wagner new user-auth            # Creates task/user-auth branch
-wagner attach                   # Opens tmux
-wagner add                      # Add another Claude pane
-wagner delete user-auth --force # Cleanup when done
-
-# Multi-repo workflow
-wagner new user-auth --repos \
-  api:~/work/api:feature/user-auth,\
-  web:~/work/web:feature/user-auth
-
-cd ~/tasks/user-auth
-wagner attach                   # Auto-detects task
-wagner add api                  # Add pane in api repo
+eval "$(wagner completions zsh)"   # Zsh
+eval "$(wagner completions bash)"  # Bash
+wagner completions fish | source   # Fish
 ```
 
-## Architecture
+## TUI Keybindings
 
-Wagner uses a hexagonal architecture with swappable backends:
-
-- **Terminal trait**: Currently `Tmux`, future `Ghostty`
-- **Agent trait**: Currently `ClaudeCode`, extensible to other agents
-
-## Development
-
-```bash
-# Enter dev environment
-devbox shell
-
-# Build
-cargo build
-
-# Run tests
-cargo test
-
-# Check
-cargo check
-
-# Format
-cargo fmt
-
-# Lint
-cargo clippy
-```
+| Key | Action |
+|-----|--------|
+| `j/k` | Navigate |
+| `a` | Attach |
+| `n` | New task |
+| `d` | Delete |
+| `c` | View diff |
+| `?` | Help |
+| `S` | Settings |
+| `q` | Quit |
 
 ## License
 
