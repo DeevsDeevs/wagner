@@ -79,7 +79,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let session_dir = if is_multi_repo {
             &task.path
         } else {
-            task.repos.first().map(|r| &r.worktree).unwrap_or(&task.path)
+            task.repos
+                .first()
+                .map(|r| &r.worktree)
+                .unwrap_or(&task.path)
         };
 
         let session = self.terminal.create_session(name, session_dir)?;
@@ -196,11 +199,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let pane_dir = match repo_name {
             Some(name) => {
-                let repo = task
-                    .repos
-                    .iter()
-                    .find(|r| r.name == name)
-                    .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?;
+                let repo =
+                    task.repos.iter().find(|r| r.name == name).ok_or_else(|| {
+                        WagnerError::RepoNotFound(name.to_string(), PathBuf::new())
+                    })?;
                 repo.worktree.clone()
             }
             None => {

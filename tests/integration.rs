@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
-use wagner::{Config, MockTerminal, RepoSource, RepoSpec, Terminal, TestAgent, Wagner};
 use wagner::config::Workspace;
+use wagner::{Config, MockTerminal, RepoSource, RepoSpec, Terminal, TestAgent, Wagner};
 
 struct TestContext {
     _temp_dir: TempDir,
@@ -138,7 +138,10 @@ fn test_create_single_repo_task() {
     assert!(terminal.session_exists("test-task").unwrap());
 
     let sent_keys = terminal.get_sent_keys();
-    assert!(!sent_keys.is_empty(), "Should have sent keys to launch agent");
+    assert!(
+        !sent_keys.is_empty(),
+        "Should have sent keys to launch agent"
+    );
     assert!(
         sent_keys[0].1.contains("echo"),
         "Should have launched test agent"
@@ -265,7 +268,10 @@ fn test_delete_task_cleans_up() {
 
     let task_path = ctx.tasks_root.join("delete-task");
     let worktree_path = task_path.join("main");
-    assert!(worktree_path.exists(), "Worktree should exist before delete");
+    assert!(
+        worktree_path.exists(),
+        "Worktree should exist before delete"
+    );
 
     wagner.delete_task("delete-task", false).unwrap();
 
@@ -324,7 +330,9 @@ fn test_task_already_exists_error() {
         branch: "feature/dup".to_string(),
     };
 
-    wagner.create_task("dup-task", &[spec.clone()], None).unwrap();
+    wagner
+        .create_task("dup-task", &[spec.clone()], None)
+        .unwrap();
 
     let result = wagner.create_task("dup-task", &[spec], None);
     assert!(result.is_err(), "Should error on duplicate task name");
@@ -359,14 +367,10 @@ fn test_add_pane_defaults() {
             branch: "feature/pane2".to_string(),
         },
     ];
-    wagner
-        .create_task("multi-pane-task", &specs, None)
-        .unwrap();
+    wagner.create_task("multi-pane-task", &specs, None).unwrap();
 
     wagner.add_pane("multi-pane-task", None).unwrap();
-    wagner
-        .add_pane("multi-pane-task", Some("repo1"))
-        .unwrap();
+    wagner.add_pane("multi-pane-task", Some("repo1")).unwrap();
 }
 
 // =====================
@@ -381,8 +385,14 @@ fn test_create_task_from_workspace() {
     let mut config = ctx.config();
     let mut ws = Workspace::default();
     ws.base_branch = "main".to_string();
-    ws.repos.insert("repo1".to_string(), ctx.repo_path.to_string_lossy().to_string());
-    ws.repos.insert("repo2".to_string(), repo2_path.to_string_lossy().to_string());
+    ws.repos.insert(
+        "repo1".to_string(),
+        ctx.repo_path.to_string_lossy().to_string(),
+    );
+    ws.repos.insert(
+        "repo2".to_string(),
+        repo2_path.to_string_lossy().to_string(),
+    );
     config.workspaces.insert("test-ws".to_string(), ws);
 
     let wagner = Wagner::new(MockTerminal::new(), TestAgent::echo(), config);
@@ -470,7 +480,9 @@ fn test_delete_task_force_deletes_branch() {
         branch: "feature/force-delete".to_string(),
     };
 
-    wagner.create_task("force-delete-task", &[spec], None).unwrap();
+    wagner
+        .create_task("force-delete-task", &[spec], None)
+        .unwrap();
 
     let branch_exists = Command::new("git")
         .args(["branch", "--list", "feature/force-delete"])
@@ -488,7 +500,10 @@ fn test_delete_task_force_deletes_branch() {
         .output()
         .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
         .unwrap_or(false);
-    assert!(!branch_exists_after, "Branch should be deleted with --force");
+    assert!(
+        !branch_exists_after,
+        "Branch should be deleted with --force"
+    );
 }
 
 // =====================
@@ -514,13 +529,15 @@ fn test_config_save_and_load() {
     config.tasks_root = temp_dir.path().join("tasks");
 
     let mut ws = Workspace::default();
-    ws.repos.insert("test".to_string(), "/path/to/test".to_string());
+    ws.repos
+        .insert("test".to_string(), "/path/to/test".to_string());
     config.workspaces.insert("my-ws".to_string(), ws);
 
     let content = serde_json::to_string_pretty(&config).unwrap();
     std::fs::write(&config_path, &content).unwrap();
 
-    let loaded: Config = serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let loaded: Config =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
     assert_eq!(loaded.diff_base, "develop");
     assert!(loaded.workspaces.contains_key("my-ws"));
     assert!(loaded.workspaces["my-ws"].repos.contains_key("test"));
@@ -568,7 +585,9 @@ fn test_add_duplicate_repo_error() {
         branch: "feature/dup-repo".to_string(),
     };
 
-    wagner.create_task("dup-repo-task", &[spec.clone()], None).unwrap();
+    wagner
+        .create_task("dup-repo-task", &[spec.clone()], None)
+        .unwrap();
 
     let result = wagner.add_repo_to_task("dup-repo-task", &spec);
     assert!(result.is_err(), "Adding duplicate repo should error");

@@ -15,8 +15,8 @@ pub use ansi::strip_ansi;
 pub use detector::{AgentDetector, IDLE_THRESHOLD};
 pub use detectors::TerminalDetector;
 pub use status::{
-    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, PaneStatus,
-    SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason, STUCK_THRESHOLD,
+    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, PaneStatus, STUCK_THRESHOLD,
+    SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
 };
 
 struct TrackedSession {

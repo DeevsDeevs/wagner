@@ -1045,7 +1045,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
             return;
         };
 
-        let base = task.diff_base.as_deref().unwrap_or(&self.wagner.config.diff_base);
+        let base = task
+            .diff_base
+            .as_deref()
+            .unwrap_or(&self.wagner.config.diff_base);
         for repo in &task.repos {
             let stats = crate::git::get_repo_stats(&repo.worktree, base);
             self.repo_stats.insert(repo.name.clone(), stats);
