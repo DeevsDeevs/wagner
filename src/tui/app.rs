@@ -4,7 +4,7 @@ use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
 use crate::terminal::{PaneHandle, SessionHandle, Terminal};
-use crate::wagner::{RepoSpec, Wagner};
+use crate::wagner::{default_branch_for_task, RepoSpec, Wagner};
 
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
@@ -642,11 +642,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
 
         let name = parts[0];
+        let default_branch = default_branch_for_task(name);
         let repo_specs: Vec<&str> = parts[1].split(',').collect();
 
         let specs: Vec<RepoSpec> = repo_specs
             .iter()
-            .filter_map(|s| RepoSpec::parse(s.trim()).ok())
+            .filter_map(|s| RepoSpec::parse(s.trim(), Some(&default_branch)).ok())
             .collect();
 
         if specs.is_empty() {

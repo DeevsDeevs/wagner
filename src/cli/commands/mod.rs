@@ -1,6 +1,9 @@
-use crate::cli::{Cli, Commands, print_completions};
+use crate::cli::{Cli, Commands, WorkspaceCommands, print_completions};
 use tracing::{debug, info};
-use wagner::{Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner};
+use wagner::{
+    default_branch_for_task, Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal,
+    Tmux, Wagner,
+};
 
 pub fn run(cli: Cli) -> Result<()> {
     if let Some(Commands::Completions { shell }) = &cli.command {
@@ -20,12 +23,14 @@ pub fn run(cli: Cli) -> Result<()> {
             name,
             branch,
             repos,
-        }) => cmd_new(&wagner, &name, branch.as_deref(), &repos),
+            workspace,
+        }) => cmd_new(&wagner, &name, branch.as_deref(), &repos, workspace.as_deref()),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
         Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
         Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
         Some(Commands::Completions { .. }) => unreachable!(),
+        Some(Commands::Workspace { command }) => cmd_workspace(command),
         None => cmd_tui(wagner),
     }
 }
@@ -35,23 +40,39 @@ fn cmd_new<T: Terminal, A: Agent>(
     name: &str,
     branch: Option<&str>,
     repos: &[String],
+    workspace: Option<&str>,
 ) -> Result<()> {
-    let specs: Vec<RepoSpec> = if repos.is_empty() {
+    let default_branch = branch
+        .map(String::from)
+        .unwrap_or_else(|| default_branch_for_task(name));
+
+    let specs: Vec<RepoSpec> = if let Some(ws_name) = workspace {
+        let ws = wagner.config.workspaces.get(ws_name).unwrap_or_else(|| {
+            eprintln!("Error: Workspace '{}' not found in config", ws_name);
+            eprintln!("Configure workspaces in: {}", Config::config_path().display());
+            std::process::exit(1);
+        });
+
+        ws.iter()
+            .map(|(repo_name, path)| RepoSpec {
+                name: repo_name.clone(),
+                source: RepoSource::Local(shellexpand::tilde(path).into_owned().into()),
+                branch: default_branch.clone(),
+            })
+            .collect()
+    } else if repos.is_empty() {
         match detect_git_repo() {
             Some((repo_path, repo_name)) => {
-                let branch_name = branch
-                    .map(String::from)
-                    .unwrap_or_else(|| format!("task/{}", name));
-                debug!(repo = %repo_name, branch = %branch_name, "Auto-detected repo");
+                debug!(repo = %repo_name, branch = %default_branch, "Auto-detected repo");
                 vec![RepoSpec {
                     name: repo_name,
                     source: RepoSource::Local(repo_path),
-                    branch: branch_name,
+                    branch: default_branch.clone(),
                 }]
             }
             None => {
                 eprintln!("Error: Not in a git repository");
-                eprintln!("Either run from inside a git repo, or specify --repos");
+                eprintln!("Either run from inside a git repo, or specify --repos or --workspace");
                 eprintln!("Usage: wagner new <name> --repos name:path:branch");
                 std::process::exit(1);
             }
@@ -59,7 +80,7 @@ fn cmd_new<T: Terminal, A: Agent>(
     } else {
         repos
             .iter()
-            .map(|s| RepoSpec::parse(s))
+            .map(|s| RepoSpec::parse(s, Some(&default_branch)))
             .collect::<Result<Vec<_>>>()?
     };
 
@@ -221,4 +242,85 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
 fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {
     info!("Launching TUI");
     wagner::tui::run(wagner)
+}
+
+fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
+    let mut config = Config::load()?;
+
+    match command {
+        WorkspaceCommands::Add { name, repos } => {
+            let mut workspace = std::collections::HashMap::new();
+
+            for spec in repos {
+                let parts: Vec<&str> = spec.splitn(2, ':').collect();
+                if parts.len() != 2 {
+                    eprintln!("Invalid repo spec: {}", spec);
+                    eprintln!("Expected format: name:path");
+                    std::process::exit(1);
+                }
+                workspace.insert(parts[0].to_string(), parts[1].to_string());
+            }
+
+            config.workspaces.insert(name.clone(), workspace);
+            config.save()?;
+
+            println!("Added workspace: {}", name);
+            for (repo_name, path) in &config.workspaces[&name] {
+                println!("  {}: {}", repo_name, path);
+            }
+        }
+        WorkspaceCommands::AddRepo { workspace, repo } => {
+            let parts: Vec<&str> = repo.splitn(2, ':').collect();
+            if parts.len() != 2 {
+                eprintln!("Invalid repo spec: {}", repo);
+                eprintln!("Expected format: name:path");
+                std::process::exit(1);
+            }
+
+            let ws = config.workspaces.entry(workspace.clone()).or_default();
+            ws.insert(parts[0].to_string(), parts[1].to_string());
+            config.save()?;
+
+            println!("Added {} to workspace {}", parts[0], workspace);
+        }
+        WorkspaceCommands::RmRepo { workspace, repo } => {
+            let ws = config.workspaces.get_mut(&workspace).unwrap_or_else(|| {
+                eprintln!("Workspace '{}' not found", workspace);
+                std::process::exit(1);
+            });
+
+            if ws.remove(&repo).is_none() {
+                eprintln!("Repo '{}' not found in workspace '{}'", repo, workspace);
+                std::process::exit(1);
+            }
+
+            config.save()?;
+            println!("Removed {} from workspace {}", repo, workspace);
+        }
+        WorkspaceCommands::List => {
+            if config.workspaces.is_empty() {
+                println!("No workspaces configured");
+                println!("Add one with: wagner workspace add <name> repo:path ...");
+                return Ok(());
+            }
+
+            for (name, repos) in &config.workspaces {
+                println!("{}", name);
+                for (repo_name, path) in repos {
+                    println!("  {}: {}", repo_name, path);
+                }
+            }
+        }
+        WorkspaceCommands::Remove { name } => {
+            if config.workspaces.remove(&name).is_none() {
+                eprintln!("Workspace '{}' not found", name);
+                std::process::exit(1);
+            }
+
+            config.save()?;
+            println!("Removed workspace: {}", name);
+        }
+    }
+
+    Ok(())
 }

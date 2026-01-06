@@ -283,6 +283,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     }
 }
 
+pub fn default_branch_for_task(task_name: &str) -> String {
+    format!("feature/{}", task_name)
+}
+
 #[derive(Debug, Clone)]
 pub struct RepoSpec {
     pub name: String,
@@ -291,7 +295,7 @@ pub struct RepoSpec {
 }
 
 impl RepoSpec {
-    pub fn parse(s: &str) -> Result<Self> {
+    pub fn parse(s: &str, default_branch: Option<&str>) -> Result<Self> {
         let parts: Vec<&str> = s.split(':').collect();
 
         match parts.len() {
@@ -303,7 +307,7 @@ impl RepoSpec {
             2 => Ok(Self {
                 name: parts[0].to_string(),
                 source: RepoSource::parse(parts[1]),
-                branch: "main".to_string(),
+                branch: default_branch.unwrap_or("main").to_string(),
             }),
             _ => Err(WagnerError::InvalidRepoSpec(format!(
                 "Expected format: name:source:branch or name:source, got: {}",

@@ -15,4 +15,4 @@ pub use error::{Result, WagnerError};
 pub use model::{RepoSource, Task, TaskRepo};
 pub use store::Store;
 pub use terminal::{PaneHandle, SessionHandle, Terminal, Tmux};
-pub use wagner::{RepoSpec, Wagner};
+pub use wagner::{default_branch_for_task, RepoSpec, Wagner};

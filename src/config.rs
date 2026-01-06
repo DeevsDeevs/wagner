@@ -1,5 +1,6 @@
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +153,8 @@ pub struct Config {
     pub diff_base: String,
     #[serde(default)]
     pub keybindings: Keybindings,
+    #[serde(default)]
+    pub workspaces: HashMap<String, HashMap<String, String>>,
 }
 
 fn default_diff_base() -> String {
@@ -182,6 +185,7 @@ impl Default for Config {
             background_poll_interval_ms: default_background_poll_ms(),
             diff_base: default_diff_base(),
             keybindings: Keybindings::default(),
+            workspaces: HashMap::new(),
         }
     }
 }
