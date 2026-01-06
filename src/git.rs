@@ -19,7 +19,13 @@ pub struct RepoStats {
 fn resolve_base_ref(repo_path: &Path, base: &str) -> String {
     let check_ref = |r: &str| -> bool {
         Command::new("git")
-            .args(["-C", &repo_path.to_string_lossy(), "rev-parse", "--verify", r])
+            .args([
+                "-C",
+                &repo_path.to_string_lossy(),
+                "rev-parse",
+                "--verify",
+                r,
+            ])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)

@@ -4,7 +4,7 @@ use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
 use crate::terminal::{PaneHandle, SessionHandle, Terminal};
-use crate::wagner::{default_branch_for_task, RepoSpec, Wagner};
+use crate::wagner::{RepoSpec, Wagner, default_branch_for_task};
 
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};

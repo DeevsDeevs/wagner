@@ -1,8 +1,8 @@
 use crate::cli::{Cli, Commands, WorkspaceCommands, print_completions};
 use tracing::{debug, info};
 use wagner::{
-    default_branch_for_task, Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal,
-    Tmux, Wagner,
+    Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner,
+    default_branch_for_task,
 };
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -24,7 +24,13 @@ pub fn run(cli: Cli) -> Result<()> {
             branch,
             repos,
             workspace,
-        }) => cmd_new(&wagner, &name, branch.as_deref(), &repos, workspace.as_deref()),
+        }) => cmd_new(
+            &wagner,
+            &name,
+            branch.as_deref(),
+            &repos,
+            workspace.as_deref(),
+        ),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
         Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
@@ -49,7 +55,10 @@ fn cmd_new<T: Terminal, A: Agent>(
     let specs: Vec<RepoSpec> = if let Some(ws_name) = workspace {
         let ws = wagner.config.workspaces.get(ws_name).unwrap_or_else(|| {
             eprintln!("Error: Workspace '{}' not found in config", ws_name);
-            eprintln!("Configure workspaces in: {}", Config::config_path().display());
+            eprintln!(
+                "Configure workspaces in: {}",
+                Config::config_path().display()
+            );
             std::process::exit(1);
         });
 
