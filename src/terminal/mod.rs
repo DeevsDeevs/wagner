@@ -1,5 +1,7 @@
+mod mock;
 mod tmux;
 
+pub use mock::MockTerminal;
 pub use tmux::Tmux;
 
 use crate::error::Result;

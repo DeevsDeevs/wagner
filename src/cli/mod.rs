@@ -61,6 +61,24 @@ pub enum Commands {
         repo: Option<String>,
     },
 
+    /// Add a repo to an existing task
+    AddRepo {
+        /// Task name
+        task: String,
+
+        /// Repo specification (name:source:branch or name:source)
+        repo: String,
+    },
+
+    /// Remove a repo from a task
+    RmRepo {
+        /// Task name
+        task: String,
+
+        /// Repo name to remove
+        repo: String,
+    },
+
     /// Attach to a task's tmux session
     ///
     /// Auto-detects task when run from inside a task directory.
@@ -166,6 +184,8 @@ _wagner() {{
         'delete:Delete a task'
         'rm:Delete a task'
         'add:Add a new Claude pane to a task'
+        'add-repo:Add a repo to a task'
+        'rm-repo:Remove a repo from a task'
         'attach:Attach to a task tmux session'
         'a:Attach to a task tmux session'
         'completions:Generate shell completions'
@@ -206,6 +226,16 @@ _wagner() {{
                     _arguments \
                         '1:task:_wagner_tasks' \
                         '2:repo:'
+                    ;;
+                add-repo)
+                    _arguments \
+                        '1:task:_wagner_tasks' \
+                        '2:repo spec:'
+                    ;;
+                rm-repo)
+                    _arguments \
+                        '1:task:_wagner_tasks' \
+                        '2:repo name:'
                     ;;
                 completions)
                     _arguments '1:shell:(bash zsh fish powershell elvish)'

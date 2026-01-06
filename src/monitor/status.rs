@@ -1,7 +1,9 @@
 use std::fmt;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::terminal::PaneHandle;
+
+use super::detector::IDLE_THRESHOLD;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -54,13 +56,11 @@ impl PaneStatus {
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(
-            self,
-            Self::Agent {
-                status: AgentStatus::Active(_),
-                ..
-            } | Self::Terminal(TerminalStatus::Active)
-        )
+        match self {
+            Self::Agent { status, .. } => status.is_active(),
+            Self::Terminal(s) => s.is_active(),
+            Self::Unknown => false,
+        }
     }
 }
 
@@ -261,6 +261,8 @@ impl ClaudeActivity {
     }
 }
 
+pub const STUCK_THRESHOLD: Duration = Duration::from_secs(30);
+
 #[derive(Debug, Clone)]
 pub struct TrackedPane {
     pub handle: PaneHandle,
@@ -272,12 +274,13 @@ pub struct TrackedPane {
 
 impl TrackedPane {
     pub fn new(handle: PaneHandle) -> Self {
+        let past_time = Instant::now() - IDLE_THRESHOLD - Duration::from_millis(100);
         Self {
             handle,
             agent_type: None,
             status: PaneStatus::Unknown,
             output_hash: [0u8; 32],
-            last_change: Instant::now(),
+            last_change: past_time,
         }
     }
 }

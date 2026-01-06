@@ -6,8 +6,8 @@ pub mod status;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use rayon::prelude::*;
 use sha2::{Digest, Sha256};
-use tracing::warn;
 
 use crate::terminal::{PaneHandle, Terminal};
 
@@ -15,7 +15,7 @@ pub use ansi::strip_ansi;
 pub use detector::{AgentDetector, IDLE_THRESHOLD};
 pub use detectors::TerminalDetector;
 pub use status::{
-    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, PaneStatus,
+    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, PaneStatus, STUCK_THRESHOLD,
     SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
 };
 
@@ -114,18 +114,17 @@ impl StatusMonitor {
             .entry(session_name.to_string())
             .or_insert_with(TrackedSession::new);
 
-        for pane in panes {
+        let captures: Vec<_> = panes
+            .par_iter()
+            .filter_map(|pane| {
+                let output = terminal.capture(pane, 100).ok()?;
+                let command = terminal.get_pane_command(pane).unwrap_or_default();
+                Some((pane.clone(), output, command))
+            })
+            .collect();
+
+        for (pane, output, pane_command) in captures {
             let pane_id = pane.0.clone();
-
-            let output = match terminal.capture(pane, 100) {
-                Ok(o) => o,
-                Err(e) => {
-                    warn!(pane = %pane_id, error = %e, "failed to capture pane output");
-                    continue;
-                }
-            };
-
-            let pane_command = terminal.get_pane_command(pane).unwrap_or_default();
             let clean_output = strip_ansi(&output);
             let hash = Self::hash(&clean_output);
 
@@ -138,14 +137,17 @@ impl StatusMonitor {
                     .entry(pane_id.clone())
                     .or_insert_with(|| TrackedPane::new(pane.clone()));
 
+                let is_first_poll = tracked.output_hash == [0u8; 32];
                 let output_changed = hash != tracked.output_hash;
                 if output_changed {
                     tracked.output_hash = hash;
-                    tracked.last_change = Instant::now();
+                    if !is_first_poll {
+                        tracked.last_change = Instant::now();
+                    }
                 }
 
                 (
-                    output_changed,
+                    output_changed && !is_first_poll,
                     tracked.last_change.elapsed(),
                     tracked.agent_type.clone(),
                     tracked.status.clone(),
@@ -154,7 +156,7 @@ impl StatusMonitor {
 
             let agent_type =
                 current_agent.or_else(|| self.detect_agent(&pane_command, &clean_output));
-            let new_status = self.detect_status(
+            let mut new_status = self.detect_status(
                 agent_type.as_ref(),
                 &clean_output,
                 output_changed,
@@ -163,7 +165,17 @@ impl StatusMonitor {
 
             let session = self.sessions.get_mut(session_name).unwrap();
             let tracked = session.panes.get_mut(&pane_id).unwrap();
-            tracked.agent_type = agent_type;
+            tracked.agent_type = agent_type.clone();
+
+            if new_status.is_active() && since_change > STUCK_THRESHOLD {
+                new_status = match &agent_type {
+                    Some(at) => PaneStatus::Agent {
+                        agent_type: at.clone(),
+                        status: AgentStatus::Idle,
+                    },
+                    None => PaneStatus::Terminal(TerminalStatus::Idle),
+                };
+            }
 
             if new_status != current_status {
                 tracked.status = new_status.clone();

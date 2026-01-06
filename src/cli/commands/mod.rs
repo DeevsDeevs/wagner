@@ -34,6 +34,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
         Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
+        Some(Commands::AddRepo { task, repo }) => cmd_add_repo(&wagner, &task, &repo),
+        Some(Commands::RmRepo { task, repo }) => cmd_rm_repo(&wagner, &task, &repo),
         Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
@@ -240,6 +242,38 @@ fn cmd_add<T: Terminal, A: Agent>(
     let pane = wagner.add_pane(&task_name, repo)?;
     info!(task = %task_name, pane = %pane.0, "Pane created");
     println!("Created pane: {}", pane.0);
+
+    Ok(())
+}
+
+fn cmd_add_repo<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    task: &str,
+    repo: &str,
+) -> Result<()> {
+    let task_data = wagner.get_task(task)?;
+    let default_branch = task_data
+        .repos
+        .first()
+        .map(|r| r.branch.clone())
+        .unwrap_or_else(|| default_branch_for_task(task));
+
+    let spec = RepoSpec::parse(repo, Some(&default_branch))?;
+    debug!(task = %task, repo = %spec.name, "Adding repo to task");
+
+    wagner.add_repo_to_task(task, &spec)?;
+    info!(task = %task, repo = %spec.name, "Repo added");
+    println!("Added repo {} to task {}", spec.name, task);
+
+    Ok(())
+}
+
+fn cmd_rm_repo<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: &str, repo: &str) -> Result<()> {
+    debug!(task = %task, repo = %repo, "Removing repo from task");
+
+    wagner.remove_repo_from_task(task, repo)?;
+    info!(task = %task, repo = %repo, "Repo removed");
+    println!("Removed repo {} from task {}", repo, task);
 
     Ok(())
 }
