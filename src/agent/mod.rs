@@ -1,6 +1,8 @@
 mod claude;
+mod test;
 
 pub use claude::{ClaudeCode, ClaudeCodeDetector};
+pub use test::TestAgent;
 
 use crate::monitor::AgentDetector;
 

@@ -1,6 +1,6 @@
 [package]
 name = "wagner"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.85"
 description = "AI agent monitoring CLI tool with TUI"
@@ -30,3 +30,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
 sha2 = "0.10"
+rayon = "1.11.0"
+
+[dev-dependencies]
+tempfile = "3"

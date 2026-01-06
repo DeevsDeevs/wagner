@@ -75,12 +75,14 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let task = Task::new(name, task_path, repos, base_branch.map(String::from));
         self.store.save_task(&task)?;
 
-        let first_repo = task
-            .repos
-            .first()
-            .map(|r| &r.worktree)
-            .unwrap_or(&task.path);
-        let session = self.terminal.create_session(name, first_repo)?;
+        let is_multi_repo = task.repos.len() > 1;
+        let session_dir = if is_multi_repo {
+            &task.path
+        } else {
+            task.repos.first().map(|r| &r.worktree).unwrap_or(&task.path)
+        };
+
+        let session = self.terminal.create_session(name, session_dir)?;
 
         if let Ok(panes) = self.terminal.list_panes(&session) {
             if let Some(pane) = panes.first() {
@@ -88,9 +90,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             }
         }
 
-        for repo in task.repos.iter().skip(1) {
-            let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-            let _ = self.terminal.send_keys(&pane, self.agent.launch_command());
+        if is_multi_repo {
+            for repo in &task.repos {
+                let pane = self.terminal.create_pane(&session, &repo.worktree)?;
+                let _ = self.terminal.send_keys(&pane, self.agent.launch_command());
+            }
         }
 
         Ok(task)
@@ -190,19 +194,25 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let task = self.store.load_task(task_name)?;
         let session = SessionHandle(format!("wagner_{}", task_name));
 
-        let repo = match repo_name {
-            Some(name) => task
-                .repos
-                .iter()
-                .find(|r| r.name == name)
-                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?,
-            None => task
-                .repos
-                .first()
-                .ok_or_else(|| WagnerError::TaskNotFound(task_name.to_string()))?,
+        let pane_dir = match repo_name {
+            Some(name) => {
+                let repo = task
+                    .repos
+                    .iter()
+                    .find(|r| r.name == name)
+                    .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?;
+                repo.worktree.clone()
+            }
+            None => {
+                if task.repos.len() == 1 {
+                    task.repos[0].worktree.clone()
+                } else {
+                    task.path.clone()
+                }
+            }
         };
 
-        let pane = self.terminal.create_pane(&session, &repo.worktree)?;
+        let pane = self.terminal.create_pane(&session, &pane_dir)?;
         self.terminal
             .send_keys(&pane, self.agent.launch_command())?;
         Ok(pane)
@@ -211,6 +221,65 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     pub fn attach(&self, task_name: &str) -> Result<()> {
         let session = SessionHandle(format!("wagner_{}", task_name));
         self.terminal.attach(&session)
+    }
+
+    pub fn add_repo_to_task(&self, task_name: &str, spec: &RepoSpec) -> Result<()> {
+        let mut task = self.store.load_task(task_name)?;
+
+        if task.repos.iter().any(|r| r.name == spec.name) {
+            return Err(WagnerError::Git(format!(
+                "Repo '{}' already exists in task",
+                spec.name
+            )));
+        }
+
+        let worktree_path = task.path.join(&spec.name);
+
+        match &spec.source {
+            RepoSource::Local(source_path) => {
+                if !source_path.exists() {
+                    return Err(WagnerError::RepoNotFound(
+                        spec.name.clone(),
+                        source_path.clone(),
+                    ));
+                }
+                self.create_worktree(source_path, &worktree_path, &spec.branch)?;
+            }
+            RepoSource::Remote(url) => {
+                let clone_path = self.clone_repo(url, &task.path)?;
+                self.create_worktree(&clone_path, &worktree_path, &spec.branch)?;
+            }
+        }
+
+        task.repos.push(TaskRepo {
+            name: spec.name.clone(),
+            source: spec.source.clone(),
+            worktree: worktree_path,
+            branch: spec.branch.clone(),
+        });
+
+        self.store.save_task(&task)
+    }
+
+    pub fn remove_repo_from_task(&self, task_name: &str, repo_name: &str) -> Result<()> {
+        let mut task = self.store.load_task(task_name)?;
+
+        let repo_idx = task
+            .repos
+            .iter()
+            .position(|r| r.name == repo_name)
+            .ok_or_else(|| WagnerError::RepoNotFound(repo_name.to_string(), PathBuf::new()))?;
+
+        let repo = &task.repos[repo_idx];
+        let main_repo = self.get_main_repo(&repo.worktree, &repo.source);
+
+        if repo.worktree.exists() {
+            self.remove_worktree(&main_repo, &repo.worktree)?;
+        }
+        self.prune_worktrees(&main_repo);
+
+        task.repos.remove(repo_idx);
+        self.store.save_task(&task)
     }
 
     fn create_worktree(&self, repo: &PathBuf, worktree: &PathBuf, branch: &str) -> Result<()> {

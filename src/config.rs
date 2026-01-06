@@ -135,7 +135,7 @@ impl Default for Keybindings {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
     #[serde(default = "default_base_branch")]
     pub base_branch: String,
@@ -145,6 +145,15 @@ pub struct Workspace {
 
 fn default_base_branch() -> String {
     "main".to_string()
+}
+
+impl Default for Workspace {
+    fn default() -> Self {
+        Self {
+            base_branch: default_base_branch(),
+            repos: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
