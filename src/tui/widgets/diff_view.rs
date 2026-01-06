@@ -20,7 +20,7 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 }
 
 fn draw_file_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let base = &app.wagner.config.diff_base;
+    let base = app.get_diff_base();
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
     let info = Paragraph::new(Line::from(vec![
         Span::styled(" Base: ", Style::default().fg(Color::DarkGray)),

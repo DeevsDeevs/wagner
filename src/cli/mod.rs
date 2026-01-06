@@ -95,6 +95,10 @@ pub enum WorkspaceCommands {
         /// Repo mappings (name:path)
         #[arg(required = true)]
         repos: Vec<String>,
+
+        /// Base branch for diffs (defaults to main)
+        #[arg(short, long)]
+        base_branch: Option<String>,
     },
 
     /// Add a repo to an existing workspace
@@ -210,6 +214,8 @@ _wagner() {{
                     local -a ws_commands
                     ws_commands=(
                         'add:Add or update a workspace'
+                        'add-repo:Add a repo to a workspace'
+                        'rm-repo:Remove a repo from a workspace'
                         'list:List all workspaces'
                         'ls:List all workspaces'
                         'remove:Remove a workspace'
@@ -225,7 +231,17 @@ _wagner() {{
                         ws_args)
                             case $words[1] in
                                 add)
-                                    _arguments '1:workspace name:' '*:repo spec:'
+                                    _arguments \
+                                        '1:workspace name:' \
+                                        '-b[Base branch]:branch:' \
+                                        '--base-branch=[Base branch]:branch:' \
+                                        '*:repo spec:'
+                                    ;;
+                                add-repo)
+                                    _arguments '1:workspace:_wagner_workspaces' '2:repo spec:'
+                                    ;;
+                                rm-repo)
+                                    _arguments '1:workspace:_wagner_workspaces' '2:repo name:'
                                     ;;
                                 remove|rm)
                                     _arguments '1:workspace:_wagner_workspaces'

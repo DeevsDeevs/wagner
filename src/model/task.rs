@@ -8,15 +8,23 @@ pub struct Task {
     pub path: PathBuf,
     pub repos: Vec<TaskRepo>,
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub diff_base: Option<String>,
 }
 
 impl Task {
-    pub fn new(name: impl Into<String>, path: PathBuf, repos: Vec<TaskRepo>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        path: PathBuf,
+        repos: Vec<TaskRepo>,
+        diff_base: Option<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             path,
             repos,
             created_at: Utc::now(),
+            diff_base,
         }
     }
 

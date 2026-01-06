@@ -25,7 +25,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         }
     }
 
-    pub fn create_task(&self, name: &str, repo_specs: &[RepoSpec]) -> Result<Task> {
+    pub fn create_task(
+        &self,
+        name: &str,
+        repo_specs: &[RepoSpec],
+        base_branch: Option<&str>,
+    ) -> Result<Task> {
         if self.store.task_exists(name) {
             return Err(WagnerError::TaskExists(name.to_string()));
         }
@@ -47,6 +52,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                         ));
                     }
 
+                    if let Some(base) = base_branch {
+                        self.fetch_and_update_branch(source_path, base);
+                    }
+
                     self.create_worktree(source_path, &worktree_path, &spec.branch)?;
                 }
                 RepoSource::Remote(url) => {
@@ -63,7 +72,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             });
         }
 
-        let task = Task::new(name, task_path, repos);
+        let task = Task::new(name, task_path, repos, base_branch.map(String::from));
         self.store.save_task(&task)?;
 
         let first_repo = task
@@ -79,7 +88,29 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             }
         }
 
+        for repo in task.repos.iter().skip(1) {
+            let pane = self.terminal.create_pane(&session, &repo.worktree)?;
+            let _ = self.terminal.send_keys(&pane, self.agent.launch_command());
+        }
+
         Ok(task)
+    }
+
+    fn fetch_and_update_branch(&self, repo: &PathBuf, branch: &str) {
+        let _ = Command::new("git")
+            .args(["-C", &repo.to_string_lossy(), "fetch", "origin", branch])
+            .output();
+
+        let _ = Command::new("git")
+            .args([
+                "-C",
+                &repo.to_string_lossy(),
+                "branch",
+                "-f",
+                branch,
+                &format!("origin/{}", branch),
+            ])
+            .output();
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>> {
