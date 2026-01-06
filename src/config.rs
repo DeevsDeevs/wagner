@@ -137,10 +137,10 @@ impl Default for Keybindings {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Workspace {
-    #[serde(default, flatten)]
-    pub repos: HashMap<String, String>,
     #[serde(default = "default_base_branch")]
     pub base_branch: String,
+    #[serde(default, flatten)]
+    pub repos: HashMap<String, String>,
 }
 
 fn default_base_branch() -> String {
