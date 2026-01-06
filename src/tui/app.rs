@@ -141,6 +141,17 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
     }
 
+    pub fn get_diff_base(&self) -> String {
+        if let Some(task_name) = &self.selected_task {
+            if let Ok(task) = self.wagner.get_task(task_name) {
+                if let Some(base) = task.diff_base {
+                    return base;
+                }
+            }
+        }
+        self.wagner.config.diff_base.clone()
+    }
+
     pub fn run(
         &mut self,
         terminal: &mut ratatui::Terminal<impl ratatui::backend::Backend + std::io::Write>,
@@ -655,7 +666,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             return;
         }
 
-        match self.wagner.create_task(name, &specs) {
+        match self.wagner.create_task(name, &specs, None) {
             Ok(task) => {
                 self.set_status(&format!("Created task: {}", task.name));
                 self.selected_task = Some(task.name);
@@ -956,8 +967,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             return;
         };
 
-        let base = &self.wagner.config.diff_base;
-        self.diff_files = crate::git::get_diff_files(repo_path, base);
+        let base = self.get_diff_base();
+        self.diff_files = crate::git::get_diff_files(repo_path, &base);
         self.diff_file_index = 0;
         self.diff_content.clear();
         self.diff_scroll = 0;
@@ -972,8 +983,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             return;
         };
 
-        let base = &self.wagner.config.diff_base;
-        self.diff_content = crate::git::get_diff_content(repo_path, base, &file.path);
+        let base = self.get_diff_base();
+        self.diff_content = crate::git::get_diff_content(repo_path, &base, &file.path);
         self.diff_scroll = 0;
         self.input_mode = InputMode::DiffContent;
     }
@@ -1034,7 +1045,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             return;
         };
 
-        let base = &self.wagner.config.diff_base;
+        let base = task.diff_base.as_deref().unwrap_or(&self.wagner.config.diff_base);
         for repo in &task.repos {
             let stats = crate::git::get_repo_stats(&repo.worktree, base);
             self.repo_stats.insert(repo.name.clone(), stats);

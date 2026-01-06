@@ -135,6 +135,18 @@ impl Default for Keybindings {
     }
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Workspace {
+    #[serde(default, flatten)]
+    pub repos: HashMap<String, String>,
+    #[serde(default = "default_base_branch")]
+    pub base_branch: String,
+}
+
+fn default_base_branch() -> String {
+    "main".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub tasks_root: PathBuf,
@@ -154,7 +166,7 @@ pub struct Config {
     #[serde(default)]
     pub keybindings: Keybindings,
     #[serde(default)]
-    pub workspaces: HashMap<String, HashMap<String, String>>,
+    pub workspaces: HashMap<String, Workspace>,
 }
 
 fn default_diff_base() -> String {

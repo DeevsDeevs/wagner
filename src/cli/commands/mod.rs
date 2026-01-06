@@ -52,7 +52,7 @@ fn cmd_new<T: Terminal, A: Agent>(
         .map(String::from)
         .unwrap_or_else(|| default_branch_for_task(name));
 
-    let specs: Vec<RepoSpec> = if let Some(ws_name) = workspace {
+    let (specs, base_branch): (Vec<RepoSpec>, Option<String>) = if let Some(ws_name) = workspace {
         let ws = wagner.config.workspaces.get(ws_name).unwrap_or_else(|| {
             eprintln!("Error: Workspace '{}' not found in config", ws_name);
             eprintln!(
@@ -62,22 +62,28 @@ fn cmd_new<T: Terminal, A: Agent>(
             std::process::exit(1);
         });
 
-        ws.iter()
+        let specs = ws
+            .repos
+            .iter()
             .map(|(repo_name, path)| RepoSpec {
                 name: repo_name.clone(),
                 source: RepoSource::Local(shellexpand::tilde(path).into_owned().into()),
                 branch: default_branch.clone(),
             })
-            .collect()
+            .collect();
+        (specs, Some(ws.base_branch.clone()))
     } else if repos.is_empty() {
         match detect_git_repo() {
             Some((repo_path, repo_name)) => {
                 debug!(repo = %repo_name, branch = %default_branch, "Auto-detected repo");
-                vec![RepoSpec {
-                    name: repo_name,
-                    source: RepoSource::Local(repo_path),
-                    branch: default_branch.clone(),
-                }]
+                (
+                    vec![RepoSpec {
+                        name: repo_name,
+                        source: RepoSource::Local(repo_path),
+                        branch: default_branch.clone(),
+                    }],
+                    None,
+                )
             }
             None => {
                 eprintln!("Error: Not in a git repository");
@@ -87,15 +93,18 @@ fn cmd_new<T: Terminal, A: Agent>(
             }
         }
     } else {
-        repos
-            .iter()
-            .map(|s| RepoSpec::parse(s, Some(&default_branch)))
-            .collect::<Result<Vec<_>>>()?
+        (
+            repos
+                .iter()
+                .map(|s| RepoSpec::parse(s, Some(&default_branch)))
+                .collect::<Result<Vec<_>>>()?,
+            None,
+        )
     };
 
     debug!("Creating task '{}' with {} repos", name, specs.len());
 
-    let task = wagner.create_task(name, &specs)?;
+    let task = wagner.create_task(name, &specs, base_branch.as_deref())?;
 
     info!(task = %task.name, path = %task.path.display(), "Task created");
 
@@ -257,8 +266,15 @@ fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
     let mut config = Config::load()?;
 
     match command {
-        WorkspaceCommands::Add { name, repos } => {
-            let mut workspace = std::collections::HashMap::new();
+        WorkspaceCommands::Add {
+            name,
+            repos,
+            base_branch,
+        } => {
+            let mut ws = wagner::config::Workspace::default();
+            if let Some(base) = base_branch {
+                ws.base_branch = base;
+            }
 
             for spec in repos {
                 let parts: Vec<&str> = spec.splitn(2, ':').collect();
@@ -267,14 +283,15 @@ fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
                     eprintln!("Expected format: name:path");
                     std::process::exit(1);
                 }
-                workspace.insert(parts[0].to_string(), parts[1].to_string());
+                ws.repos.insert(parts[0].to_string(), parts[1].to_string());
             }
 
-            config.workspaces.insert(name.clone(), workspace);
+            config.workspaces.insert(name.clone(), ws);
             config.save()?;
 
-            println!("Added workspace: {}", name);
-            for (repo_name, path) in &config.workspaces[&name] {
+            let ws = &config.workspaces[&name];
+            println!("Added workspace: {} (base: {})", name, ws.base_branch);
+            for (repo_name, path) in &ws.repos {
                 println!("  {}: {}", repo_name, path);
             }
         }
@@ -287,7 +304,7 @@ fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
             }
 
             let ws = config.workspaces.entry(workspace.clone()).or_default();
-            ws.insert(parts[0].to_string(), parts[1].to_string());
+            ws.repos.insert(parts[0].to_string(), parts[1].to_string());
             config.save()?;
 
             println!("Added {} to workspace {}", parts[0], workspace);
@@ -298,7 +315,7 @@ fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
                 std::process::exit(1);
             });
 
-            if ws.remove(&repo).is_none() {
+            if ws.repos.remove(&repo).is_none() {
                 eprintln!("Repo '{}' not found in workspace '{}'", repo, workspace);
                 std::process::exit(1);
             }
@@ -313,9 +330,9 @@ fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
                 return Ok(());
             }
 
-            for (name, repos) in &config.workspaces {
-                println!("{}", name);
-                for (repo_name, path) in repos {
+            for (name, ws) in &config.workspaces {
+                println!("{} (base: {})", name, ws.base_branch);
+                for (repo_name, path) in &ws.repos {
                     println!("  {}: {}", repo_name, path);
                 }
             }
