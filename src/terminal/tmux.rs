@@ -155,4 +155,17 @@ impl Terminal for Tmux {
     fn get_pane_command(&self, pane: &PaneHandle) -> Result<String> {
         self.run(&["display", "-p", "-t", &pane.0, "#{pane_current_command}"])
     }
+
+    fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()> {
+        self.run(&[
+            "resize-pane",
+            "-t",
+            &pane.0,
+            "-x",
+            &width.to_string(),
+            "-y",
+            &height.to_string(),
+        ])?;
+        Ok(())
+    }
 }
