@@ -83,6 +83,7 @@ pub struct App<T: Terminal, A: Agent> {
 
     last_click: Option<(u16, u16, Instant)>,
     terminal_view_size: Option<(u16, u16)>,
+    pub dragging_sidebar: bool,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -145,6 +146,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
             last_click: None,
             terminal_view_size: None,
+            dragging_sidebar: false,
         }
     }
 
@@ -230,6 +232,22 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 let _ = self.refresh_terminal_output();
             }
         }
+    }
+
+    pub fn handle_sidebar_drag(&mut self, col: u16, area: Rect) {
+        let min_width = 20u16;
+        let max_width = area.width.saturating_sub(20);
+        let new_width = col.clamp(min_width, max_width);
+        self.wagner.config.sidebar_width = new_width;
+        self.handle_resize(area);
+    }
+
+    pub fn is_on_sidebar_border(&self, col: u16) -> bool {
+        if !self.show_sidebar {
+            return false;
+        }
+        let border_col = self.wagner.config.sidebar_width.saturating_sub(1);
+        col == border_col || col == border_col + 1
     }
 
     pub fn select_task_by_row(&mut self, row: usize, toggle_expand: bool) {

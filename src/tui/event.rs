@@ -69,7 +69,19 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
 ) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            app.handle_click(mouse.column, mouse.row, area);
+            if app.is_on_sidebar_border(mouse.column) {
+                app.dragging_sidebar = true;
+            } else {
+                app.handle_click(mouse.column, mouse.row, area);
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            app.dragging_sidebar = false;
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if app.dragging_sidebar {
+                app.handle_sidebar_drag(mouse.column, area);
+            }
         }
         MouseEventKind::ScrollUp => {
             if app.focus == Focus::Terminal {
