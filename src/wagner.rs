@@ -3,7 +3,7 @@ use crate::config::Config;
 use crate::error::{Result, WagnerError};
 use crate::model::{RepoSource, Task, TaskRepo};
 use crate::store::Store;
-use crate::terminal::{PaneHandle, SessionHandle, Terminal};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -133,7 +133,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         if self.terminal.session_exists(name)? {
             self.terminal
-                .kill_session(&SessionHandle(format!("wagner_{}", name)))?;
+                .kill_session(&SessionHandle(session_name_for_task(name)))?;
         }
 
         for repo in &task.repos {
@@ -195,7 +195,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
     pub fn add_pane(&self, task_name: &str, repo_name: Option<&str>) -> Result<PaneHandle> {
         let task = self.store.load_task(task_name)?;
-        let session = SessionHandle(format!("wagner_{}", task_name));
+        let session = SessionHandle(session_name_for_task(task_name));
 
         let pane_dir = match repo_name {
             Some(name) => {
@@ -220,8 +220,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(pane)
     }
 
-    pub fn attach(&self, task_name: &str) -> Result<()> {
-        let session = SessionHandle(format!("wagner_{}", task_name));
+    pub fn attach(&self, task_name: &str, pane_id: Option<&str>) -> Result<()> {
+        let session = SessionHandle(session_name_for_task(task_name));
+        if let Some(id) = pane_id {
+            let pane = PaneHandle(id.to_string(), String::new());
+            self.terminal.select_pane(&pane)?;
+        }
         self.terminal.attach(&session)
     }
 

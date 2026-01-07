@@ -25,6 +25,49 @@ fn matches_key(code: KeyCode, binding: &str) -> bool {
     }
 }
 
+enum TextInputAction {
+    Cancel,
+    Submit,
+    Edit,
+    None,
+}
+
+fn handle_text_editing<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) -> TextInputAction {
+    match code {
+        KeyCode::Esc => TextInputAction::Cancel,
+        KeyCode::Enter => TextInputAction::Submit,
+        KeyCode::Backspace => {
+            app.input_backspace();
+            TextInputAction::Edit
+        }
+        KeyCode::Delete => {
+            app.input_delete();
+            TextInputAction::Edit
+        }
+        KeyCode::Left => {
+            app.input_left();
+            TextInputAction::Edit
+        }
+        KeyCode::Right => {
+            app.input_right();
+            TextInputAction::Edit
+        }
+        KeyCode::Char(c) => {
+            if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                TextInputAction::Cancel
+            } else {
+                app.input_char(c);
+                TextInputAction::Edit
+            }
+        }
+        _ => TextInputAction::None,
+    }
+}
+
 pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> Result<bool> {
     if !event::poll(Duration::from_millis(100))? {
         return Ok(false);
@@ -41,19 +84,19 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                 InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
                     handle_input_mode(app, key.code, key.modifiers)
                 }
-                InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
+                InputMode::SelectWorkspace => handle_workspace_select_mode(app, key.code),
+                InputMode::Settings => handle_settings_mode(app, key.code),
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
                 InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
                 InputMode::DiffContent => handle_diff_content_mode(app, key.code),
             }
         }
         Event::Mouse(mouse) => {
-            if app.input_mode == InputMode::Normal {
-                handle_mouse_event(app, mouse, area);
-            }
+            handle_mouse_event(app, mouse, area);
         }
-        Event::Resize(_, _) => {
-            app.handle_resize(area);
+        Event::Resize(width, height) => {
+            let new_area = Rect::new(0, 0, width, height);
+            app.handle_resize(new_area);
         }
         _ => {}
     }
@@ -68,15 +111,46 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
 ) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            app.handle_click(mouse.column, mouse.row, area);
+            match app.input_mode {
+                InputMode::Normal => {
+                    if app.is_on_sidebar_border(mouse.column) {
+                        app.dragging_sidebar = true;
+                    } else {
+                        app.handle_click(mouse.column, mouse.row, area);
+                    }
+                }
+                InputMode::DiffFileList | InputMode::DiffContent => {
+                    app.close_diff_view();
+                }
+                InputMode::Settings | InputMode::EditSetting => {
+                    app.close_settings();
+                }
+                InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
+                    app.cancel_input();
+                }
+                InputMode::SelectWorkspace => {
+                    app.pending_task_name = None;
+                    app.workspace_list.clear();
+                    app.workspace_index = 0;
+                    app.input_mode = InputMode::Normal;
+                }
+            }
+        }
+        MouseEventKind::Up(MouseButton::Left) => {
+            app.dragging_sidebar = false;
+        }
+        MouseEventKind::Drag(MouseButton::Left) => {
+            if app.dragging_sidebar {
+                app.handle_sidebar_drag(mouse.column, area);
+            }
         }
         MouseEventKind::ScrollUp => {
-            if app.focus == Focus::Terminal {
+            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
                 app.scroll_terminal_up();
             }
         }
         MouseEventKind::ScrollDown => {
-            if app.focus == Focus::Terminal {
+            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
                 app.scroll_terminal_down();
             }
         }
@@ -198,16 +272,14 @@ fn send_key_to_pane<T: Terminal, A: Agent>(
         _ => return,
     };
 
-    if let Some(pane_id) = &app.selected_pane.clone() {
-        let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
+    if let Some(pane) = app.current_pane() {
         let _ = app.wagner.terminal.send_key(&pane, &key_str);
         let _ = app.refresh_terminal_output();
     }
 }
 
 fn send_literal_to_pane<T: Terminal, A: Agent>(app: &mut App<T, A>, c: char) {
-    if let Some(pane_id) = &app.selected_pane.clone() {
-        let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
+    if let Some(pane) = app.current_pane() {
         let _ = app.wagner.terminal.send_literal(&pane, &c.to_string());
         let _ = app.refresh_terminal_output();
     }
@@ -295,58 +367,24 @@ fn handle_input_mode<T: Terminal, A: Agent>(
     code: KeyCode,
     modifiers: KeyModifiers,
 ) {
-    match code {
-        KeyCode::Esc => {
-            app.cancel_input();
-        }
-        KeyCode::Enter => {
-            app.submit_input();
-        }
-        KeyCode::Backspace => {
-            app.input_backspace();
-        }
-        KeyCode::Delete => {
-            app.input_delete();
-        }
-        KeyCode::Left => {
-            app.input_left();
-        }
-        KeyCode::Right => {
-            app.input_right();
-        }
-        KeyCode::Char(c) => {
-            if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
-                app.cancel_input();
-            } else {
-                app.input_char(c);
-            }
-        }
-        _ => {}
+    match handle_text_editing(app, code, modifiers) {
+        TextInputAction::Cancel => app.cancel_input(),
+        TextInputAction::Submit => app.submit_input(),
+        TextInputAction::Edit | TextInputAction::None => {}
     }
 }
 
-fn handle_settings_mode<T: Terminal, A: Agent>(
-    app: &mut App<T, A>,
-    code: KeyCode,
-    modifiers: KeyModifiers,
-) {
-    match code {
-        KeyCode::Esc | KeyCode::Char('q') => {
-            app.close_settings();
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            app.settings_next();
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            app.settings_prev();
-        }
-        KeyCode::Enter => {
-            app.start_edit_setting();
-        }
-        KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.save_settings();
-        }
-        _ => {}
+fn handle_settings_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Esc || matches_key(code, &kb.quit) {
+        app.close_settings();
+    } else if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.settings_next();
+    } else if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.settings_prev();
+    } else if code == KeyCode::Enter {
+        app.start_edit_setting();
     }
 }
 
@@ -355,75 +393,80 @@ fn handle_edit_setting_mode<T: Terminal, A: Agent>(
     code: KeyCode,
     modifiers: KeyModifiers,
 ) {
-    match code {
-        KeyCode::Esc => {
-            app.input_buffer.clear();
-            app.editing_setting_key = None;
-            app.input_mode = InputMode::Settings;
-        }
-        KeyCode::Enter => {
-            app.apply_setting();
-        }
-        KeyCode::Backspace => {
-            app.input_backspace();
-        }
-        KeyCode::Delete => {
-            app.input_delete();
-        }
-        KeyCode::Left => {
-            app.input_left();
-        }
-        KeyCode::Right => {
-            app.input_right();
-        }
-        KeyCode::Char(c) => {
-            if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
-                app.input_buffer.clear();
-                app.editing_setting_key = None;
-                app.input_mode = InputMode::Settings;
-            } else {
-                app.input_char(c);
-            }
-        }
-        _ => {}
+    match handle_text_editing(app, code, modifiers) {
+        TextInputAction::Cancel => app.cancel_edit_setting(),
+        TextInputAction::Submit => app.apply_setting(),
+        TextInputAction::Edit | TextInputAction::None => {}
     }
 }
 
 fn handle_diff_file_list_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
-    match code {
-        KeyCode::Esc | KeyCode::Char('q') => app.close_diff_view(),
-        KeyCode::Enter => app.select_diff_file(),
-        KeyCode::Char('j') | KeyCode::Down => app.diff_next_file(),
-        KeyCode::Char('k') | KeyCode::Up => app.diff_prev_file(),
-        KeyCode::Char('g') | KeyCode::Home => {
-            app.diff_file_index = 0;
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Esc || matches_key(code, &kb.quit) {
+        app.close_diff_view();
+    } else if code == KeyCode::Enter {
+        app.select_diff_file();
+    } else if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.diff_next_file();
+    } else if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.diff_prev_file();
+    } else if matches_key(code, &kb.scroll_top) || code == KeyCode::Home {
+        app.diff_file_index = 0;
+    } else if matches_key(code, &kb.scroll_bottom) || code == KeyCode::End {
+        if !app.diff_files.is_empty() {
+            app.diff_file_index = app.diff_files.len() - 1;
         }
-        KeyCode::Char('G') | KeyCode::End => {
-            if !app.diff_files.is_empty() {
-                app.diff_file_index = app.diff_files.len() - 1;
-            }
-        }
-        _ => {}
     }
 }
 
 fn handle_diff_content_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
-    match code {
-        KeyCode::Esc | KeyCode::Char('q') => app.diff_back_to_list(),
-        KeyCode::Char('j') | KeyCode::Down => app.diff_scroll_down(),
-        KeyCode::Char('k') | KeyCode::Up => app.diff_scroll_up(),
-        KeyCode::Char('g') | KeyCode::Home => app.diff_scroll_top(),
-        KeyCode::Char('G') | KeyCode::End => app.diff_scroll_bottom(),
-        KeyCode::PageDown | KeyCode::Char('f') => {
-            for _ in 0..20 {
-                app.diff_scroll_down();
-            }
+    let kb = &app.wagner.config.keybindings;
+    let page_size = app.wagner.config.page_scroll_lines as usize;
+
+    if code == KeyCode::Esc || matches_key(code, &kb.quit) {
+        app.diff_back_to_list();
+    } else if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.diff_scroll_down();
+    } else if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.diff_scroll_up();
+    } else if matches_key(code, &kb.scroll_top) || code == KeyCode::Home {
+        app.diff_scroll_top();
+    } else if matches_key(code, &kb.scroll_bottom) || code == KeyCode::End {
+        app.diff_scroll_bottom();
+    } else if matches_key(code, &kb.page_down) || code == KeyCode::PageDown {
+        for _ in 0..page_size {
+            app.diff_scroll_down();
         }
-        KeyCode::PageUp | KeyCode::Char('u') => {
-            for _ in 0..20 {
-                app.diff_scroll_up();
-            }
+    } else if matches_key(code, &kb.page_up) || code == KeyCode::PageUp {
+        for _ in 0..page_size {
+            app.diff_scroll_up();
         }
-        _ => {}
+    }
+}
+
+fn handle_workspace_select_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Esc {
+        app.pending_task_name = None;
+        app.workspace_list.clear();
+        app.workspace_index = 0;
+        app.input_mode = InputMode::Normal;
+        return;
+    }
+
+    if code == KeyCode::Enter {
+        app.submit_input();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.workspace_next();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.workspace_prev();
     }
 }

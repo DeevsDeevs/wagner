@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
-use crate::terminal::{PaneHandle, SessionHandle, Terminal};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::wagner::{RepoSpec, Wagner, default_branch_for_task};
 
 use ratatui::layout::Rect;
@@ -27,6 +27,7 @@ pub enum SidebarSection {
 pub enum InputMode {
     Normal,
     NewTask,
+    SelectWorkspace,
     SendMessage,
     Confirm,
     Settings,
@@ -38,7 +39,7 @@ pub enum InputMode {
 pub struct App<T: Terminal, A: Agent> {
     pub wagner: Wagner<T, A>,
     pub should_quit: bool,
-    pub pending_attach: Option<String>,
+    pub pending_attach: Option<(String, Option<String>)>,
     pub show_sidebar: bool,
     pub show_help: bool,
     pub focus: Focus,
@@ -83,6 +84,11 @@ pub struct App<T: Terminal, A: Agent> {
 
     last_click: Option<(u16, u16, Instant)>,
     terminal_view_size: Option<(u16, u16)>,
+    pub dragging_sidebar: bool,
+
+    pub pending_task_name: Option<String>,
+    pub workspace_list: Vec<String>,
+    pub workspace_index: usize,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -145,6 +151,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
             last_click: None,
             terminal_view_size: None,
+            dragging_sidebar: false,
+
+            pending_task_name: None,
+            workspace_list: Vec::new(),
+            workspace_index: 0,
         }
     }
 
@@ -221,15 +232,23 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn resize_current_pane(&mut self) {
-        if let (Some(pane_id), Some((width, height))) =
-            (&self.selected_pane, self.terminal_view_size)
-        {
-            if width > 0 && height > 0 {
-                let pane = PaneHandle(pane_id.clone(), String::new());
-                let _ = self.wagner.terminal.resize_pane(&pane, width, height);
-                let _ = self.refresh_terminal_output();
-            }
+        let _ = self.refresh_terminal_output();
+    }
+
+    pub fn handle_sidebar_drag(&mut self, col: u16, area: Rect) {
+        let min_width = 20u16;
+        let max_width = area.width.saturating_sub(20);
+        let new_width = col.clamp(min_width, max_width);
+        self.wagner.config.sidebar_width = new_width;
+        self.handle_resize(area);
+    }
+
+    pub fn is_on_sidebar_border(&self, col: u16) -> bool {
+        if !self.show_sidebar {
+            return false;
         }
+        let border_col = self.wagner.config.sidebar_width.saturating_sub(1);
+        col == border_col || col == border_col + 1
     }
 
     pub fn select_task_by_row(&mut self, row: usize, toggle_expand: bool) {
@@ -245,6 +264,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 self.selected_task = Some(task_name.clone());
                 self.selected_repo = None;
                 self.selected_pane = None;
+                self.terminal_scroll = 0;
                 self.update_task_list_selection();
                 self.refresh_panes();
                 let _ = self.refresh_terminal_output();
@@ -260,7 +280,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     if current_row == row {
                         self.selected_task = Some(task_name.clone());
                         self.selected_repo = Some(repo_name.clone());
+                        self.terminal_scroll = 0;
                         self.update_task_list_selection();
+                        if toggle_expand {
+                            self.open_diff_for_repo(repo_name);
+                        }
                         return;
                     }
                     current_row += 1;
@@ -295,10 +319,13 @@ impl<T: Terminal, A: Agent> App<T, A> {
             },
         };
 
+        let size = terminal.size().map_err(|e| WagnerError::Terminal(e.to_string()))?;
+        let initial_area = Rect::new(0, 0, size.width, size.height);
+        self.handle_resize(initial_area);
         self.refresh_data()?;
 
         while !self.should_quit {
-            if let Some(task_name) = self.pending_attach.take() {
+            if let Some((task_name, pane_id)) = self.pending_attach.take() {
                 execute!(
                     terminal.backend_mut(),
                     LeaveAlternateScreen,
@@ -307,7 +334,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 .map_err(|e| WagnerError::Terminal(e.to_string()))?;
                 disable_raw_mode().map_err(|e| WagnerError::Terminal(e.to_string()))?;
 
-                let _ = self.wagner.attach(&task_name);
+                let _ = self.wagner.attach(&task_name, pane_id.as_deref());
 
                 enable_raw_mode().map_err(|e| WagnerError::Terminal(e.to_string()))?;
                 execute!(
@@ -356,7 +383,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn refresh_panes(&mut self) {
         self.panes.clear();
         if let Some(task_name) = &self.selected_task {
-            let session_name = format!("wagner_{}", task_name);
+            let session_name = session_name_for_task(task_name);
             if let Ok(panes) = self
                 .wagner
                 .terminal
@@ -381,6 +408,16 @@ impl<T: Terminal, A: Agent> App<T, A> {
                         .insert(update.pane.0.clone(), update.status);
                 }
 
+                for pane in &self.panes {
+                    if !self.pane_statuses.contains_key(&pane.0) {
+                        if let Some(status) =
+                            self.status_monitor.get_pane_status(&session_name, &pane.0)
+                        {
+                            self.pane_statuses.insert(pane.0.clone(), status.clone());
+                        }
+                    }
+                }
+
                 self.poll_background_sessions(&session_name);
             }
         }
@@ -391,7 +428,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .tasks
             .iter()
             .filter_map(|task| {
-                let session_name = format!("wagner_{}", task.name);
+                let session_name = session_name_for_task(&task.name);
                 self.wagner
                     .terminal
                     .list_panes(&SessionHandle(session_name.clone()))
@@ -408,36 +445,27 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn get_task_status(&self, task_name: &str) -> SessionAggregateStatus {
-        let session_name = format!("wagner_{}", task_name);
+        let session_name = session_name_for_task(task_name);
         self.status_monitor.get_session_status(&session_name)
     }
 
     pub fn refresh_terminal_output(&mut self) -> Result<()> {
         let old_len = self.terminal_output.len();
 
-        if let Some(pane_id) = &self.selected_pane {
-            let pane_handle = crate::terminal::PaneHandle(pane_id.clone(), String::new());
-            match self.wagner.terminal.capture(&pane_handle, 500) {
-                Ok(output) => self.terminal_output = output,
-                Err(_) => self.terminal_output = String::from("[No output captured]"),
-            }
-        } else if let Some(task_name) = &self.selected_task {
+        if let Some(pane) = self.current_pane() {
+            self.capture_pane(&pane);
+        } else if let Some(task_name) = &self.selected_task.clone() {
             if let Ok(task) = self.wagner.get_task(task_name) {
                 if !task.repos.is_empty() {
-                    let session_name = format!("wagner_{}", task_name);
+                    let session_name = session_name_for_task(task_name);
                     if let Ok(panes) = self
                         .wagner
                         .terminal
-                        .list_panes(&crate::terminal::SessionHandle(session_name))
+                        .list_panes(&SessionHandle(session_name))
                     {
                         if let Some(first_pane) = panes.first() {
                             self.selected_pane = Some(first_pane.0.clone());
-                            match self.wagner.terminal.capture(first_pane, 500) {
-                                Ok(output) => self.terminal_output = output,
-                                Err(_) => {
-                                    self.terminal_output = String::from("[No output captured]")
-                                }
-                            }
+                            self.capture_pane(first_pane);
                         }
                     }
                 }
@@ -502,11 +530,13 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     .unwrap_or(0);
                 if repo_idx + 1 < task.repos.len() {
                     self.selected_repo = Some(task.repos[repo_idx + 1].name.clone());
+                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 }
             } else {
                 self.selected_repo = Some(task.repos[0].name.clone());
+                self.terminal_scroll = 0;
                 self.update_task_list_selection();
                 return;
             }
@@ -520,6 +550,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.selected_task = Some(self.tasks[next_idx].name.clone());
         self.selected_repo = None;
         self.selected_pane = None;
+        self.terminal_scroll = 0;
         self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
@@ -553,10 +584,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     .unwrap_or(0);
                 if repo_idx > 0 {
                     self.selected_repo = Some(task.repos[repo_idx - 1].name.clone());
+                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 } else {
                     self.selected_repo = None;
+                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 }
@@ -578,6 +611,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
 
         self.selected_pane = None;
+        self.terminal_scroll = 0;
         self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
@@ -626,6 +660,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
+        self.terminal_scroll = 0;
         self.resize_current_pane();
     }
 
@@ -634,6 +669,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.pane_list_state.select(Some(index));
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
             self.sidebar_section = SidebarSection::Panes;
+            self.terminal_scroll = 0;
             self.resize_current_pane();
         }
     }
@@ -654,6 +690,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
+        self.terminal_scroll = 0;
         self.resize_current_pane();
     }
 
@@ -694,12 +731,36 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     fn get_max_scroll(&self) -> u16 {
         let line_count = self.terminal_output.lines().count();
-        line_count.saturating_sub(20) as u16
+        let viewport_height = self.terminal_view_size.map(|(_, h)| h as usize).unwrap_or(20);
+        line_count.saturating_sub(viewport_height) as u16
+    }
+
+    pub fn current_pane(&self) -> Option<PaneHandle> {
+        self.selected_pane
+            .as_ref()
+            .map(|id| PaneHandle(id.clone(), String::new()))
+    }
+
+    fn capture_pane(&mut self, pane: &PaneHandle) {
+        if let Some((w, h)) = self.terminal_view_size {
+            if w > 0 && h > 0 {
+                let _ = self.wagner.terminal.resize_pane(pane, w, h);
+            }
+        }
+
+        let capture_lines = self.wagner.config.capture_lines;
+        match self.wagner.terminal.capture(pane, capture_lines) {
+            Ok(output) => self.terminal_output = output,
+            Err(e) => {
+                tracing::warn!(pane = %pane.0, error = %e, "Capture failed");
+                self.terminal_output = "[No output captured]".into();
+            }
+        }
     }
 
     pub fn attach_current(&mut self) {
         if let Some(task_name) = &self.selected_task {
-            self.pending_attach = Some(task_name.clone());
+            self.pending_attach = Some((task_name.clone(), self.selected_pane.clone()));
         }
     }
 
@@ -707,8 +768,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.input_mode = InputMode::NewTask;
         self.input_buffer.clear();
         self.input_cursor = 0;
-        self.input_label =
-            "New task (format: name repo:path:branch,repo2:path2:branch2)".to_string();
+        self.input_label = "Task name".to_string();
     }
 
     pub fn start_send_message(&mut self) {
@@ -716,7 +776,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.input_mode = InputMode::SendMessage;
             self.input_buffer.clear();
             self.input_cursor = 0;
-            self.input_label = "Send message to pane".to_string();
+            self.input_label = "Message".to_string();
         } else {
             self.set_status("No pane selected");
         }
@@ -726,7 +786,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if let Some(task_name) = &self.selected_task {
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(task_name.clone());
-            self.input_label = format!("Delete task '{}'? (y/n)", task_name);
+            self.input_label = format!("Delete '{}'? [y/n]", task_name);
         } else {
             self.set_status("No task selected");
         }
@@ -757,7 +817,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn submit_input(&mut self) {
         match self.input_mode {
             InputMode::NewTask => {
-                self.create_task_from_input();
+                self.handle_task_name_input();
+                return;
+            }
+            InputMode::SelectWorkspace => {
+                self.create_task_from_workspace();
             }
             InputMode::SendMessage => {
                 self.send_message_from_input();
@@ -776,30 +840,63 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.confirm_action = None;
     }
 
-    fn create_task_from_input(&mut self) {
-        let input = self.input_buffer.trim();
-        let parts: Vec<&str> = input.splitn(2, ' ').collect();
-
-        if parts.len() < 2 {
-            self.set_status("Format: name repo:path:branch");
+    fn handle_task_name_input(&mut self) {
+        let name = self.input_buffer.trim().to_string();
+        if name.is_empty() {
+            self.set_status("Task name cannot be empty");
+            self.input_mode = InputMode::Normal;
             return;
         }
 
-        let name = parts[0];
-        let default_branch = default_branch_for_task(name);
-        let repo_specs: Vec<&str> = parts[1].split(',').collect();
+        let workspaces: Vec<String> = self.wagner.config.workspaces.keys().cloned().collect();
+        if workspaces.is_empty() {
+            self.set_status("No workspaces configured. Use: wagner workspace add <name> repo:path");
+            self.input_mode = InputMode::Normal;
+            self.input_buffer.clear();
+            return;
+        }
 
-        let specs: Vec<RepoSpec> = repo_specs
+        self.pending_task_name = Some(name);
+        self.workspace_list = workspaces;
+        self.workspace_index = 0;
+        self.input_mode = InputMode::SelectWorkspace;
+        self.input_buffer.clear();
+    }
+
+    fn create_task_from_workspace(&mut self) {
+        let Some(task_name) = self.pending_task_name.take() else {
+            return;
+        };
+
+        let Some(ws_name) = self.workspace_list.get(self.workspace_index) else {
+            return;
+        };
+
+        let Some(workspace) = self.wagner.config.workspaces.get(ws_name) else {
+            self.set_status(&format!("Workspace '{}' not found", ws_name));
+            return;
+        };
+
+        let default_branch = default_branch_for_task(&task_name);
+        let specs: Vec<RepoSpec> = workspace
+            .repos
             .iter()
-            .filter_map(|s| RepoSpec::parse(s.trim(), Some(&default_branch)).ok())
+            .map(|(name, path)| {
+                let expanded = shellexpand::tilde(path).into_owned();
+                RepoSpec {
+                    name: name.clone(),
+                    source: crate::model::RepoSource::Local(std::path::PathBuf::from(expanded)),
+                    branch: default_branch.clone(),
+                }
+            })
             .collect();
 
         if specs.is_empty() {
-            self.set_status("Invalid repo spec format");
+            self.set_status("Workspace has no repos");
             return;
         }
 
-        match self.wagner.create_task(name, &specs, None) {
+        match self.wagner.create_task(&task_name, &specs, None) {
             Ok(task) => {
                 self.set_status(&format!("Created task: {}", task.name));
                 self.selected_task = Some(task.name);
@@ -809,19 +906,39 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 self.set_status(&format!("Error: {}", e));
             }
         }
+
+        self.workspace_list.clear();
+        self.workspace_index = 0;
+    }
+
+    pub fn workspace_next(&mut self) {
+        if !self.workspace_list.is_empty() {
+            self.workspace_index = (self.workspace_index + 1) % self.workspace_list.len();
+        }
+    }
+
+    pub fn workspace_prev(&mut self) {
+        if !self.workspace_list.is_empty() {
+            self.workspace_index = if self.workspace_index == 0 {
+                self.workspace_list.len() - 1
+            } else {
+                self.workspace_index - 1
+            };
+        }
     }
 
     fn send_message_from_input(&mut self) {
-        if let Some(pane_id) = &self.selected_pane.clone() {
-            let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
-            match self.wagner.terminal.send_keys(&pane, &self.input_buffer) {
-                Ok(_) => {
-                    self.set_status("Message sent");
-                    let _ = self.refresh_terminal_output();
-                }
-                Err(e) => {
-                    self.set_status(&format!("Error: {}", e));
-                }
+        let Some(pane) = self.current_pane() else {
+            return;
+        };
+
+        match self.wagner.terminal.send_keys(&pane, &self.input_buffer) {
+            Ok(_) => {
+                self.set_status("Message sent");
+                let _ = self.refresh_terminal_output();
+            }
+            Err(e) => {
+                self.set_status(&format!("Error: {}", e));
             }
         }
     }
@@ -829,11 +946,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
     fn confirm_delete(&mut self) {
         if self.input_buffer.trim().eq_ignore_ascii_case("y") {
             if let Some(task_name) = &self.confirm_action.clone() {
-                match self.wagner.delete_task(task_name, false) {
+                match self.wagner.delete_task(task_name, true) {
                     Ok(_) => {
                         self.set_status(&format!("Deleted task: {}", task_name));
                         self.selected_task = None;
                         self.selected_pane = None;
+                        self.terminal_scroll = 0;
                         let _ = self.refresh_data();
                     }
                     Err(e) => {
@@ -859,6 +977,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn close_settings(&mut self) {
         self.input_mode = InputMode::Normal;
         self.editing_setting_key = None;
+    }
+
+    pub fn cancel_edit_setting(&mut self) {
+        self.input_buffer.clear();
+        self.editing_setting_key = None;
+        self.input_mode = InputMode::Settings;
     }
 
     pub fn settings_next(&mut self) {
@@ -899,6 +1023,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.settings_items = self.build_settings_items();
             self.input_mode = InputMode::Settings;
             self.input_buffer.clear();
+            if let Err(e) = self.wagner.config.save() {
+                self.set_status(&format!("Error saving: {}", e));
+            }
         }
     }
 
@@ -1126,6 +1253,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.input_mode = InputMode::Normal;
         self.diff_files.clear();
         self.diff_content.clear();
+        self.diff_file_index = 0;
+        self.diff_scroll = 0;
         self.diff_repo_path = None;
         self.diff_repo_name = None;
     }
@@ -1184,7 +1313,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .unwrap_or(&self.wagner.config.diff_base);
         for repo in &task.repos {
             let stats = crate::git::get_repo_stats(&repo.worktree, base);
-            self.repo_stats.insert(repo.name.clone(), stats);
+            let key = repo.worktree.to_string_lossy().to_string();
+            self.repo_stats.insert(key, stats);
         }
     }
 }

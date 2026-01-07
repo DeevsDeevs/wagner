@@ -1,4 +1,4 @@
-use super::{PaneHandle, SessionHandle, Terminal};
+use super::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::error::Result;
 use std::collections::HashMap;
 use std::path::Path;
@@ -36,7 +36,7 @@ impl MockTerminal {
 
 impl Terminal for MockTerminal {
     fn create_session(&self, name: &str, _cwd: &Path) -> Result<SessionHandle> {
-        let session_name = format!("wagner_{}", name);
+        let session_name = session_name_for_task(name);
         let pane = PaneHandle(format!("{}:0.0", session_name), "main".to_string());
         self.sessions
             .lock()
@@ -78,6 +78,10 @@ impl Terminal for MockTerminal {
         Ok(())
     }
 
+    fn select_pane(&self, _pane: &PaneHandle) -> Result<()> {
+        Ok(())
+    }
+
     fn list_panes(&self, session: &SessionHandle) -> Result<Vec<PaneHandle>> {
         Ok(self
             .sessions
@@ -106,7 +110,7 @@ impl Terminal for MockTerminal {
             .sessions
             .lock()
             .unwrap()
-            .contains_key(&format!("wagner_{}", name)))
+            .contains_key(&session_name_for_task(name)))
     }
 
     fn get_pane_command(&self, _pane: &PaneHandle) -> Result<String> {
