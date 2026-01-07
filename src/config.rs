@@ -168,6 +168,8 @@ pub struct Config {
     pub sidebar_width: u16,
     #[serde(default = "default_page_scroll")]
     pub page_scroll_lines: u16,
+    #[serde(default = "default_capture_lines")]
+    pub capture_lines: usize,
     #[serde(default = "default_background_poll_ms")]
     pub background_poll_interval_ms: u64,
     #[serde(default = "default_diff_base")]
@@ -190,6 +192,9 @@ fn default_sidebar_width() -> u16 {
 fn default_page_scroll() -> u16 {
     20
 }
+fn default_capture_lines() -> usize {
+    500
+}
 fn default_background_poll_ms() -> u64 {
     2000
 }
@@ -203,6 +208,7 @@ impl Default for Config {
             show_hints: false,
             sidebar_width: default_sidebar_width(),
             page_scroll_lines: default_page_scroll(),
+            capture_lines: default_capture_lines(),
             background_poll_interval_ms: default_background_poll_ms(),
             diff_base: default_diff_base(),
             keybindings: Keybindings::default(),

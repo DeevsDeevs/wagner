@@ -452,43 +452,20 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn refresh_terminal_output(&mut self) -> Result<()> {
         let old_len = self.terminal_output.len();
 
-        if let Some(pane_id) = &self.selected_pane {
-            let pane_handle = crate::terminal::PaneHandle(pane_id.clone(), String::new());
-            if let Some((width, height)) = self.terminal_view_size {
-                if width > 0 && height > 0 {
-                    let _ = self.wagner.terminal.resize_pane(&pane_handle, width, height);
-                }
-            }
-            match self.wagner.terminal.capture(&pane_handle, 500) {
-                Ok(output) => self.terminal_output = output,
-                Err(e) => {
-                    tracing::warn!(pane = %pane_id, error = %e, "Capture failed");
-                    self.terminal_output = String::from("[No output captured]");
-                }
-            }
-        } else if let Some(task_name) = &self.selected_task {
+        if let Some(pane) = self.current_pane() {
+            self.capture_pane(&pane);
+        } else if let Some(task_name) = &self.selected_task.clone() {
             if let Ok(task) = self.wagner.get_task(task_name) {
                 if !task.repos.is_empty() {
                     let session_name = format!("wagner_{}", task_name);
                     if let Ok(panes) = self
                         .wagner
                         .terminal
-                        .list_panes(&crate::terminal::SessionHandle(session_name))
+                        .list_panes(&SessionHandle(session_name))
                     {
                         if let Some(first_pane) = panes.first() {
                             self.selected_pane = Some(first_pane.0.clone());
-                            let _ = self.wagner.terminal.select_pane(first_pane);
-                            if let Some((width, height)) = self.terminal_view_size {
-                                if width > 0 && height > 0 {
-                                    let _ = self.wagner.terminal.resize_pane(first_pane, width, height);
-                                }
-                            }
-                            match self.wagner.terminal.capture(first_pane, 500) {
-                                Ok(output) => self.terminal_output = output,
-                                Err(_) => {
-                                    self.terminal_output = String::from("[No output captured]")
-                                }
-                            }
+                            self.capture_pane(first_pane);
                         }
                     }
                 }
@@ -758,6 +735,29 @@ impl<T: Terminal, A: Agent> App<T, A> {
         line_count.saturating_sub(viewport_height) as u16
     }
 
+    pub fn current_pane(&self) -> Option<PaneHandle> {
+        self.selected_pane
+            .as_ref()
+            .map(|id| PaneHandle(id.clone(), String::new()))
+    }
+
+    fn capture_pane(&mut self, pane: &PaneHandle) {
+        if let Some((w, h)) = self.terminal_view_size {
+            if w > 0 && h > 0 {
+                let _ = self.wagner.terminal.resize_pane(pane, w, h);
+            }
+        }
+
+        let capture_lines = self.wagner.config.capture_lines;
+        match self.wagner.terminal.capture(pane, capture_lines) {
+            Ok(output) => self.terminal_output = output,
+            Err(e) => {
+                tracing::warn!(pane = %pane.0, error = %e, "Capture failed");
+                self.terminal_output = "[No output captured]".into();
+            }
+        }
+    }
+
     pub fn attach_current(&mut self) {
         if let Some(task_name) = &self.selected_task {
             self.pending_attach = Some((task_name.clone(), self.selected_pane.clone()));
@@ -928,16 +928,17 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn send_message_from_input(&mut self) {
-        if let Some(pane_id) = &self.selected_pane.clone() {
-            let pane = crate::terminal::PaneHandle(pane_id.clone(), String::new());
-            match self.wagner.terminal.send_keys(&pane, &self.input_buffer) {
-                Ok(_) => {
-                    self.set_status("Message sent");
-                    let _ = self.refresh_terminal_output();
-                }
-                Err(e) => {
-                    self.set_status(&format!("Error: {}", e));
-                }
+        let Some(pane) = self.current_pane() else {
+            return;
+        };
+
+        match self.wagner.terminal.send_keys(&pane, &self.input_buffer) {
+            Ok(_) => {
+                self.set_status("Message sent");
+                let _ = self.refresh_terminal_output();
+            }
+            Err(e) => {
+                self.set_status(&format!("Error: {}", e));
             }
         }
     }
@@ -976,6 +977,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn close_settings(&mut self) {
         self.input_mode = InputMode::Normal;
         self.editing_setting_key = None;
+    }
+
+    pub fn cancel_edit_setting(&mut self) {
+        self.input_buffer.clear();
+        self.editing_setting_key = None;
+        self.input_mode = InputMode::Settings;
     }
 
     pub fn settings_next(&mut self) {
