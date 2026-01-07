@@ -39,7 +39,7 @@ pub enum InputMode {
 pub struct App<T: Terminal, A: Agent> {
     pub wagner: Wagner<T, A>,
     pub should_quit: bool,
-    pub pending_attach: Option<String>,
+    pub pending_attach: Option<(String, Option<String>)>,
     pub show_sidebar: bool,
     pub show_help: bool,
     pub focus: Focus,
@@ -323,7 +323,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.refresh_data()?;
 
         while !self.should_quit {
-            if let Some(task_name) = self.pending_attach.take() {
+            if let Some((task_name, pane_id)) = self.pending_attach.take() {
                 execute!(
                     terminal.backend_mut(),
                     LeaveAlternateScreen,
@@ -332,7 +332,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 .map_err(|e| WagnerError::Terminal(e.to_string()))?;
                 disable_raw_mode().map_err(|e| WagnerError::Terminal(e.to_string()))?;
 
-                let _ = self.wagner.attach(&task_name);
+                let _ = self.wagner.attach(&task_name, pane_id.as_deref());
 
                 enable_raw_mode().map_err(|e| WagnerError::Terminal(e.to_string()))?;
                 execute!(
@@ -472,6 +472,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     {
                         if let Some(first_pane) = panes.first() {
                             self.selected_pane = Some(first_pane.0.clone());
+                            if let Some((width, height)) = self.terminal_view_size {
+                                if width > 0 && height > 0 {
+                                    let _ = self.wagner.terminal.resize_pane(first_pane, width, height);
+                                }
+                            }
                             match self.wagner.terminal.capture(first_pane, 500) {
                                 Ok(output) => self.terminal_output = output,
                                 Err(_) => {
@@ -739,7 +744,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn attach_current(&mut self) {
         if let Some(task_name) = &self.selected_task {
-            self.pending_attach = Some(task_name.clone());
+            self.pending_attach = Some((task_name.clone(), self.selected_pane.clone()));
         }
     }
 

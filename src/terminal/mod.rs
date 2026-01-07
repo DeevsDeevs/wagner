@@ -21,6 +21,7 @@ pub trait Terminal: Send + Sync {
     fn send_key(&self, pane: &PaneHandle, key: &str) -> Result<()>;
     fn send_literal(&self, pane: &PaneHandle, text: &str) -> Result<()>;
     fn attach(&self, session: &SessionHandle) -> Result<()>;
+    fn select_pane(&self, pane: &PaneHandle) -> Result<()>;
     fn list_panes(&self, session: &SessionHandle) -> Result<Vec<PaneHandle>>;
     fn kill_pane(&self, pane: &PaneHandle) -> Result<()>;
     fn kill_session(&self, session: &SessionHandle) -> Result<()>;

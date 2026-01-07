@@ -288,7 +288,7 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
         });
 
     debug!(task = %task_name, "Attaching to session");
-    wagner.attach(&task_name)
+    wagner.attach(&task_name, None)
 }
 
 fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {

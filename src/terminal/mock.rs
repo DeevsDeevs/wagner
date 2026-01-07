@@ -78,6 +78,10 @@ impl Terminal for MockTerminal {
         Ok(())
     }
 
+    fn select_pane(&self, _pane: &PaneHandle) -> Result<()> {
+        Ok(())
+    }
+
     fn list_panes(&self, session: &SessionHandle) -> Result<Vec<PaneHandle>> {
         Ok(self
             .sessions

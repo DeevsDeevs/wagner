@@ -220,8 +220,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(pane)
     }
 
-    pub fn attach(&self, task_name: &str) -> Result<()> {
+    pub fn attach(&self, task_name: &str, pane_id: Option<&str>) -> Result<()> {
         let session = SessionHandle(format!("wagner_{}", task_name));
+        if let Some(id) = pane_id {
+            let pane = PaneHandle(id.to_string(), String::new());
+            self.terminal.select_pane(&pane)?;
+        }
         self.terminal.attach(&session)
     }
 

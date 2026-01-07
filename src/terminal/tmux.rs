@@ -110,6 +110,11 @@ impl Terminal for Tmux {
         }
     }
 
+    fn select_pane(&self, pane: &PaneHandle) -> Result<()> {
+        self.run(&["select-pane", "-t", &pane.0])?;
+        Ok(())
+    }
+
     fn list_panes(&self, session: &SessionHandle) -> Result<Vec<PaneHandle>> {
         let output = self.run(&[
             "list-panes",
