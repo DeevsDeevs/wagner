@@ -85,9 +85,10 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
                     Style::default().fg(Color::DarkGray)
                 };
 
+                let repo_key = repo.worktree.to_string_lossy();
                 let stats_str = app
                     .repo_stats
-                    .get(&repo.name)
+                    .get(repo_key.as_ref())
                     .map(|s| {
                         if s.file_count > 0 {
                             format!(" [+{} -{}]", s.additions, s.deletions)

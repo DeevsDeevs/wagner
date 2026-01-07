@@ -261,6 +261,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
                         self.selected_task = Some(task_name.clone());
                         self.selected_repo = Some(repo_name.clone());
                         self.update_task_list_selection();
+                        if toggle_expand {
+                            self.open_diff_for_repo(repo_name);
+                        }
                         return;
                     }
                     current_row += 1;
@@ -379,6 +382,16 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 for update in updates {
                     self.pane_statuses
                         .insert(update.pane.0.clone(), update.status);
+                }
+
+                for pane in &self.panes {
+                    if !self.pane_statuses.contains_key(&pane.0) {
+                        if let Some(status) =
+                            self.status_monitor.get_pane_status(&session_name, &pane.0)
+                        {
+                            self.pane_statuses.insert(pane.0.clone(), status.clone());
+                        }
+                    }
                 }
 
                 self.poll_background_sessions(&session_name);
@@ -627,6 +640,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
         self.resize_current_pane();
+        let _ = self.refresh_terminal_output();
     }
 
     pub fn select_pane(&mut self, index: usize) {
@@ -635,6 +649,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
             self.sidebar_section = SidebarSection::Panes;
             self.resize_current_pane();
+            let _ = self.refresh_terminal_output();
         }
     }
 
@@ -655,6 +670,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
         self.resize_current_pane();
+        let _ = self.refresh_terminal_output();
     }
 
     pub fn toggle_sidebar_section(&mut self) {
@@ -1184,7 +1200,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .unwrap_or(&self.wagner.config.diff_base);
         for repo in &task.repos {
             let stats = crate::git::get_repo_stats(&repo.worktree, base);
-            self.repo_stats.insert(repo.name.clone(), stats);
+            let key = repo.worktree.to_string_lossy().to_string();
+            self.repo_stats.insert(key, stats);
         }
     }
 }

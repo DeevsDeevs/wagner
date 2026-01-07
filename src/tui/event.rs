@@ -52,8 +52,9 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                 handle_mouse_event(app, mouse, area);
             }
         }
-        Event::Resize(_, _) => {
-            app.handle_resize(area);
+        Event::Resize(width, height) => {
+            let new_area = Rect::new(0, 0, width, height);
+            app.handle_resize(new_area);
         }
         _ => {}
     }
