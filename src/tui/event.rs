@@ -41,6 +41,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                 InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
                     handle_input_mode(app, key.code, key.modifiers)
                 }
+                InputMode::SelectWorkspace => handle_workspace_select_mode(app, key.code),
                 InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
                 InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
@@ -48,9 +49,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
             }
         }
         Event::Mouse(mouse) => {
-            if app.input_mode == InputMode::Normal {
-                handle_mouse_event(app, mouse, area);
-            }
+            handle_mouse_event(app, mouse, area);
         }
         Event::Resize(width, height) => {
             let new_area = Rect::new(0, 0, width, height);
@@ -69,10 +68,29 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
 ) {
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if app.is_on_sidebar_border(mouse.column) {
-                app.dragging_sidebar = true;
-            } else {
-                app.handle_click(mouse.column, mouse.row, area);
+            match app.input_mode {
+                InputMode::Normal => {
+                    if app.is_on_sidebar_border(mouse.column) {
+                        app.dragging_sidebar = true;
+                    } else {
+                        app.handle_click(mouse.column, mouse.row, area);
+                    }
+                }
+                InputMode::DiffFileList | InputMode::DiffContent => {
+                    app.close_diff_view();
+                }
+                InputMode::Settings | InputMode::EditSetting => {
+                    app.close_settings();
+                }
+                InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
+                    app.cancel_input();
+                }
+                InputMode::SelectWorkspace => {
+                    app.pending_task_name = None;
+                    app.workspace_list.clear();
+                    app.workspace_index = 0;
+                    app.input_mode = InputMode::Normal;
+                }
             }
         }
         MouseEventKind::Up(MouseButton::Left) => {
@@ -84,12 +102,12 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             }
         }
         MouseEventKind::ScrollUp => {
-            if app.focus == Focus::Terminal {
+            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
                 app.scroll_terminal_up();
             }
         }
         MouseEventKind::ScrollDown => {
-            if app.focus == Focus::Terminal {
+            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
                 app.scroll_terminal_down();
             }
         }
@@ -438,5 +456,31 @@ fn handle_diff_content_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: Ke
             }
         }
         _ => {}
+    }
+}
+
+fn handle_workspace_select_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Esc {
+        app.pending_task_name = None;
+        app.workspace_list.clear();
+        app.workspace_index = 0;
+        app.input_mode = InputMode::Normal;
+        return;
+    }
+
+    if code == KeyCode::Enter {
+        app.submit_input();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.workspace_next();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.workspace_prev();
     }
 }

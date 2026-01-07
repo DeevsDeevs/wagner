@@ -27,6 +27,7 @@ pub enum SidebarSection {
 pub enum InputMode {
     Normal,
     NewTask,
+    SelectWorkspace,
     SendMessage,
     Confirm,
     Settings,
@@ -84,6 +85,10 @@ pub struct App<T: Terminal, A: Agent> {
     last_click: Option<(u16, u16, Instant)>,
     terminal_view_size: Option<(u16, u16)>,
     pub dragging_sidebar: bool,
+
+    pub pending_task_name: Option<String>,
+    pub workspace_list: Vec<String>,
+    pub workspace_index: usize,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -147,6 +152,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
             last_click: None,
             terminal_view_size: None,
             dragging_sidebar: false,
+
+            pending_task_name: None,
+            workspace_list: Vec::new(),
+            workspace_index: 0,
         }
     }
 
@@ -741,8 +750,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.input_mode = InputMode::NewTask;
         self.input_buffer.clear();
         self.input_cursor = 0;
-        self.input_label =
-            "New task (format: name repo:path:branch,repo2:path2:branch2)".to_string();
+        self.input_label = "Task name".to_string();
     }
 
     pub fn start_send_message(&mut self) {
@@ -750,7 +758,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.input_mode = InputMode::SendMessage;
             self.input_buffer.clear();
             self.input_cursor = 0;
-            self.input_label = "Send message to pane".to_string();
+            self.input_label = "Message".to_string();
         } else {
             self.set_status("No pane selected");
         }
@@ -760,7 +768,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if let Some(task_name) = &self.selected_task {
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(task_name.clone());
-            self.input_label = format!("Delete task '{}'? (y/n)", task_name);
+            self.input_label = format!("Delete '{}'? [y/n]", task_name);
         } else {
             self.set_status("No task selected");
         }
@@ -791,7 +799,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn submit_input(&mut self) {
         match self.input_mode {
             InputMode::NewTask => {
-                self.create_task_from_input();
+                self.handle_task_name_input();
+                return;
+            }
+            InputMode::SelectWorkspace => {
+                self.create_task_from_workspace();
             }
             InputMode::SendMessage => {
                 self.send_message_from_input();
@@ -810,30 +822,60 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.confirm_action = None;
     }
 
-    fn create_task_from_input(&mut self) {
-        let input = self.input_buffer.trim();
-        let parts: Vec<&str> = input.splitn(2, ' ').collect();
-
-        if parts.len() < 2 {
-            self.set_status("Format: name repo:path:branch");
+    fn handle_task_name_input(&mut self) {
+        let name = self.input_buffer.trim().to_string();
+        if name.is_empty() {
+            self.set_status("Task name cannot be empty");
+            self.input_mode = InputMode::Normal;
             return;
         }
 
-        let name = parts[0];
-        let default_branch = default_branch_for_task(name);
-        let repo_specs: Vec<&str> = parts[1].split(',').collect();
+        let workspaces: Vec<String> = self.wagner.config.workspaces.keys().cloned().collect();
+        if workspaces.is_empty() {
+            self.set_status("No workspaces configured. Use: wagner workspace add <name> repo:path");
+            self.input_mode = InputMode::Normal;
+            self.input_buffer.clear();
+            return;
+        }
 
-        let specs: Vec<RepoSpec> = repo_specs
+        self.pending_task_name = Some(name);
+        self.workspace_list = workspaces;
+        self.workspace_index = 0;
+        self.input_mode = InputMode::SelectWorkspace;
+        self.input_buffer.clear();
+    }
+
+    fn create_task_from_workspace(&mut self) {
+        let Some(task_name) = self.pending_task_name.take() else {
+            return;
+        };
+
+        let Some(ws_name) = self.workspace_list.get(self.workspace_index) else {
+            return;
+        };
+
+        let Some(workspace) = self.wagner.config.workspaces.get(ws_name) else {
+            self.set_status(&format!("Workspace '{}' not found", ws_name));
+            return;
+        };
+
+        let default_branch = default_branch_for_task(&task_name);
+        let specs: Vec<RepoSpec> = workspace
+            .repos
             .iter()
-            .filter_map(|s| RepoSpec::parse(s.trim(), Some(&default_branch)).ok())
+            .map(|(name, path)| RepoSpec {
+                name: name.clone(),
+                source: crate::model::RepoSource::Local(std::path::PathBuf::from(path)),
+                branch: default_branch.clone(),
+            })
             .collect();
 
         if specs.is_empty() {
-            self.set_status("Invalid repo spec format");
+            self.set_status("Workspace has no repos");
             return;
         }
 
-        match self.wagner.create_task(name, &specs, None) {
+        match self.wagner.create_task(&task_name, &specs, None) {
             Ok(task) => {
                 self.set_status(&format!("Created task: {}", task.name));
                 self.selected_task = Some(task.name);
@@ -842,6 +884,25 @@ impl<T: Terminal, A: Agent> App<T, A> {
             Err(e) => {
                 self.set_status(&format!("Error: {}", e));
             }
+        }
+
+        self.workspace_list.clear();
+        self.workspace_index = 0;
+    }
+
+    pub fn workspace_next(&mut self) {
+        if !self.workspace_list.is_empty() {
+            self.workspace_index = (self.workspace_index + 1) % self.workspace_list.len();
+        }
+    }
+
+    pub fn workspace_prev(&mut self) {
+        if !self.workspace_list.is_empty() {
+            self.workspace_index = if self.workspace_index == 0 {
+                self.workspace_list.len() - 1
+            } else {
+                self.workspace_index - 1
+            };
         }
     }
 
@@ -933,6 +994,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.settings_items = self.build_settings_items();
             self.input_mode = InputMode::Settings;
             self.input_buffer.clear();
+            if let Err(e) = self.wagner.config.save() {
+                self.set_status(&format!("Error saving: {}", e));
+            }
         }
     }
 

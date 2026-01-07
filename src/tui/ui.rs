@@ -16,12 +16,21 @@ use std::time::Duration;
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
     let area = frame.area();
 
-    let main_area = if app.status_message.is_some() {
+    let is_input_mode = matches!(
+        app.input_mode,
+        InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm | InputMode::EditSetting
+    );
+    let is_workspace_select = app.input_mode == InputMode::SelectWorkspace;
+
+    let (main_area, bottom_area) = if is_input_mode || is_workspace_select {
+        let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+        (chunks[0], Some(chunks[1]))
+    } else if app.status_message.is_some() {
         let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
         draw_status_bar(frame, chunks[1], app);
-        chunks[0]
+        (chunks[0], None)
     } else {
-        area
+        (area, None)
     };
 
     let (sidebar_area, terminal_area) = if app.show_sidebar {
@@ -41,17 +50,20 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
         draw_sidebar(frame, sidebar, app);
     }
 
+    if let Some(input_area) = bottom_area {
+        if is_workspace_select {
+            draw_workspace_bar(frame, input_area, app);
+        } else {
+            draw_input_bar(frame, input_area, app);
+        }
+    }
+
     if app.show_help {
         draw_help_popup(frame, area, &app.wagner.config.keybindings);
     }
 
     if app.input_mode == InputMode::Settings || app.input_mode == InputMode::EditSetting {
         draw_settings_popup(frame, area, app);
-    } else if !matches!(
-        app.input_mode,
-        InputMode::Normal | InputMode::DiffFileList | InputMode::DiffContent
-    ) {
-        draw_input_dialog(frame, area, app);
     }
 }
 
@@ -147,20 +159,7 @@ fn draw_help_popup(frame: &mut Frame, area: Rect, keybindings: &crate::config::K
     help_popup::draw(frame, popup_area, keybindings);
 }
 
-fn draw_input_dialog<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let popup_area = centered_rect(70, 20, area);
-    frame.render_widget(Clear, popup_area);
-
-    let block = Block::default()
-        .title(format!(" {} ", app.input_label))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
-
-    let inner = block.inner(popup_area);
-    frame.render_widget(block, popup_area);
-
-    let input_area = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(inner)[0];
-
+fn draw_input_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
     let cursor_pos = app.input_cursor;
     let input_text = &app.input_buffer;
 
@@ -173,7 +172,9 @@ fn draw_input_dialog<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
         String::new()
     };
 
+    let prompt = format!("{}: ", app.input_label);
     let input_line = Line::from(vec![
+        Span::styled(&prompt, Style::default().fg(Color::Yellow)),
         Span::raw(before_cursor),
         Span::styled(
             cursor_char.to_string(),
@@ -182,8 +183,36 @@ fn draw_input_dialog<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
         Span::raw(after_cursor),
     ]);
 
-    let paragraph = Paragraph::new(input_line);
-    frame.render_widget(paragraph, input_area);
+    let paragraph = Paragraph::new(input_line).style(Style::default().bg(Color::DarkGray));
+    frame.render_widget(paragraph, area);
+}
+
+fn draw_workspace_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
+    let task_name = app.pending_task_name.as_deref().unwrap_or("?");
+    let mut spans = vec![
+        Span::styled(
+            format!("Workspace for '{}': ", task_name),
+            Style::default().fg(Color::Yellow),
+        ),
+    ];
+
+    for (i, ws) in app.workspace_list.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" | "));
+        }
+        if i == app.workspace_index {
+            spans.push(Span::styled(
+                ws.as_str(),
+                Style::default().bg(Color::White).fg(Color::Black),
+            ));
+        } else {
+            spans.push(Span::raw(ws.as_str()));
+        }
+    }
+
+    let paragraph =
+        Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::DarkGray));
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_status_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
