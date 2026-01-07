@@ -264,6 +264,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 self.selected_task = Some(task_name.clone());
                 self.selected_repo = None;
                 self.selected_pane = None;
+                self.terminal_scroll = 0;
                 self.update_task_list_selection();
                 self.refresh_panes();
                 let _ = self.refresh_terminal_output();
@@ -279,6 +280,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     if current_row == row {
                         self.selected_task = Some(task_name.clone());
                         self.selected_repo = Some(repo_name.clone());
+                        self.terminal_scroll = 0;
                         self.update_task_list_selection();
                         if toggle_expand {
                             self.open_diff_for_repo(repo_name);
@@ -452,7 +454,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         if let Some(pane_id) = &self.selected_pane {
             let pane_handle = crate::terminal::PaneHandle(pane_id.clone(), String::new());
-            let _ = self.wagner.terminal.select_pane(&pane_handle);
             if let Some((width, height)) = self.terminal_view_size {
                 if width > 0 && height > 0 {
                     let _ = self.wagner.terminal.resize_pane(&pane_handle, width, height);
@@ -460,7 +461,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
             }
             match self.wagner.terminal.capture(&pane_handle, 500) {
                 Ok(output) => self.terminal_output = output,
-                Err(_) => self.terminal_output = String::from("[No output captured]"),
+                Err(e) => {
+                    tracing::warn!(pane = %pane_id, error = %e, "Capture failed");
+                    self.terminal_output = String::from("[No output captured]");
+                }
             }
         } else if let Some(task_name) = &self.selected_task {
             if let Ok(task) = self.wagner.get_task(task_name) {
@@ -549,11 +553,13 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     .unwrap_or(0);
                 if repo_idx + 1 < task.repos.len() {
                     self.selected_repo = Some(task.repos[repo_idx + 1].name.clone());
+                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 }
             } else {
                 self.selected_repo = Some(task.repos[0].name.clone());
+                self.terminal_scroll = 0;
                 self.update_task_list_selection();
                 return;
             }
@@ -567,6 +573,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.selected_task = Some(self.tasks[next_idx].name.clone());
         self.selected_repo = None;
         self.selected_pane = None;
+        self.terminal_scroll = 0;
         self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
@@ -600,10 +607,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     .unwrap_or(0);
                 if repo_idx > 0 {
                     self.selected_repo = Some(task.repos[repo_idx - 1].name.clone());
+                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 } else {
                     self.selected_repo = None;
+                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 }
@@ -625,6 +634,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
 
         self.selected_pane = None;
+        self.terminal_scroll = 0;
         self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
@@ -673,6 +683,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
+        self.terminal_scroll = 0;
         self.resize_current_pane();
     }
 
@@ -681,6 +692,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.pane_list_state.select(Some(index));
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
             self.sidebar_section = SidebarSection::Panes;
+            self.terminal_scroll = 0;
             self.resize_current_pane();
         }
     }
@@ -701,6 +713,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
+        self.terminal_scroll = 0;
         self.resize_current_pane();
     }
 
@@ -741,7 +754,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     fn get_max_scroll(&self) -> u16 {
         let line_count = self.terminal_output.lines().count();
-        line_count.saturating_sub(20) as u16
+        let viewport_height = self.terminal_view_size.map(|(_, h)| h as usize).unwrap_or(20);
+        line_count.saturating_sub(viewport_height) as u16
     }
 
     pub fn attach_current(&mut self) {
@@ -936,6 +950,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                         self.set_status(&format!("Deleted task: {}", task_name));
                         self.selected_task = None;
                         self.selected_pane = None;
+                        self.terminal_scroll = 0;
                         let _ = self.refresh_data();
                     }
                     Err(e) => {
@@ -1231,6 +1246,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.input_mode = InputMode::Normal;
         self.diff_files.clear();
         self.diff_content.clear();
+        self.diff_file_index = 0;
+        self.diff_scroll = 0;
         self.diff_repo_path = None;
         self.diff_repo_name = None;
     }
