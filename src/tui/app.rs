@@ -452,6 +452,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         if let Some(pane_id) = &self.selected_pane {
             let pane_handle = crate::terminal::PaneHandle(pane_id.clone(), String::new());
+            let _ = self.wagner.terminal.select_pane(&pane_handle);
             if let Some((width, height)) = self.terminal_view_size {
                 if width > 0 && height > 0 {
                     let _ = self.wagner.terminal.resize_pane(&pane_handle, width, height);
@@ -472,6 +473,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     {
                         if let Some(first_pane) = panes.first() {
                             self.selected_pane = Some(first_pane.0.clone());
+                            let _ = self.wagner.terminal.select_pane(first_pane);
                             if let Some((width, height)) = self.terminal_view_size {
                                 if width > 0 && height > 0 {
                                     let _ = self.wagner.terminal.resize_pane(first_pane, width, height);
@@ -929,7 +931,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     fn confirm_delete(&mut self) {
         if self.input_buffer.trim().eq_ignore_ascii_case("y") {
             if let Some(task_name) = &self.confirm_action.clone() {
-                match self.wagner.delete_task(task_name, false) {
+                match self.wagner.delete_task(task_name, true) {
                     Ok(_) => {
                         self.set_status(&format!("Deleted task: {}", task_name));
                         self.selected_task = None;
