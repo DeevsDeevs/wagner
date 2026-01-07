@@ -1,3 +1,4 @@
+pub mod components;
 pub mod diff_view;
 pub mod help_popup;
 pub mod pane_list;

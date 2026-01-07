@@ -42,7 +42,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                     handle_input_mode(app, key.code, key.modifiers)
                 }
                 InputMode::SelectWorkspace => handle_workspace_select_mode(app, key.code),
-                InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
+                InputMode::Settings => handle_settings_mode(app, key.code),
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
                 InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
                 InputMode::DiffContent => handle_diff_content_mode(app, key.code),
@@ -356,11 +356,7 @@ fn handle_input_mode<T: Terminal, A: Agent>(
     }
 }
 
-fn handle_settings_mode<T: Terminal, A: Agent>(
-    app: &mut App<T, A>,
-    code: KeyCode,
-    modifiers: KeyModifiers,
-) {
+fn handle_settings_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
     match code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.close_settings();
@@ -373,9 +369,6 @@ fn handle_settings_mode<T: Terminal, A: Agent>(
         }
         KeyCode::Enter => {
             app.start_edit_setting();
-        }
-        KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.save_settings();
         }
         _ => {}
     }

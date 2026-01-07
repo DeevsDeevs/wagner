@@ -2,6 +2,7 @@ use crate::agent::Agent;
 use crate::terminal::Terminal;
 
 use super::app::{App, Focus, InputMode};
+use super::widgets::components::{Selector, TextInput};
 use super::widgets::{diff_view, help_popup, pane_list, settings_popup, task_tree, terminal_view};
 
 use ratatui::{
@@ -160,59 +161,13 @@ fn draw_help_popup(frame: &mut Frame, area: Rect, keybindings: &crate::config::K
 }
 
 fn draw_input_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let cursor_pos = app.input_cursor;
-    let input_text = &app.input_buffer;
-
-    let chars: Vec<char> = input_text.chars().collect();
-    let before_cursor: String = chars[..cursor_pos.min(chars.len())].iter().collect();
-    let cursor_char = chars.get(cursor_pos).copied().unwrap_or(' ');
-    let after_cursor: String = if cursor_pos < chars.len() {
-        chars[cursor_pos + 1..].iter().collect()
-    } else {
-        String::new()
-    };
-
-    let prompt = format!("{}: ", app.input_label);
-    let input_line = Line::from(vec![
-        Span::styled(&prompt, Style::default().fg(Color::Yellow)),
-        Span::raw(before_cursor),
-        Span::styled(
-            cursor_char.to_string(),
-            Style::default().bg(Color::White).fg(Color::Black),
-        ),
-        Span::raw(after_cursor),
-    ]);
-
-    let paragraph = Paragraph::new(input_line).style(Style::default().bg(Color::DarkGray));
-    frame.render_widget(paragraph, area);
+    TextInput::new(&app.input_label, &app.input_buffer, app.input_cursor).draw(frame, area);
 }
 
 fn draw_workspace_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
     let task_name = app.pending_task_name.as_deref().unwrap_or("?");
-    let mut spans = vec![
-        Span::styled(
-            format!("Workspace for '{}': ", task_name),
-            Style::default().fg(Color::Yellow),
-        ),
-    ];
-
-    for (i, ws) in app.workspace_list.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw(" | "));
-        }
-        if i == app.workspace_index {
-            spans.push(Span::styled(
-                ws.as_str(),
-                Style::default().bg(Color::White).fg(Color::Black),
-            ));
-        } else {
-            spans.push(Span::raw(ws.as_str()));
-        }
-    }
-
-    let paragraph =
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::DarkGray));
-    frame.render_widget(paragraph, area);
+    let label = format!("Workspace for '{}'", task_name);
+    Selector::new(&label, &app.workspace_list, app.workspace_index).draw(frame, area);
 }
 
 fn draw_status_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

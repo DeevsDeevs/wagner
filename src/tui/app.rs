@@ -232,15 +232,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn resize_current_pane(&mut self) {
-        if let (Some(pane_id), Some((width, height))) =
-            (&self.selected_pane, self.terminal_view_size)
-        {
-            if width > 0 && height > 0 {
-                let pane = PaneHandle(pane_id.clone(), String::new());
-                let _ = self.wagner.terminal.resize_pane(&pane, width, height);
-                let _ = self.refresh_terminal_output();
-            }
-        }
+        let _ = self.refresh_terminal_output();
     }
 
     pub fn handle_sidebar_drag(&mut self, col: u16, area: Rect) {
@@ -325,6 +317,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             },
         };
 
+        let size = terminal.size().map_err(|e| WagnerError::Terminal(e.to_string()))?;
+        let initial_area = Rect::new(0, 0, size.width, size.height);
+        self.handle_resize(initial_area);
         self.refresh_data()?;
 
         while !self.should_quit {
@@ -457,6 +452,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         if let Some(pane_id) = &self.selected_pane {
             let pane_handle = crate::terminal::PaneHandle(pane_id.clone(), String::new());
+            if let Some((width, height)) = self.terminal_view_size {
+                if width > 0 && height > 0 {
+                    let _ = self.wagner.terminal.resize_pane(&pane_handle, width, height);
+                }
+            }
             match self.wagner.terminal.capture(&pane_handle, 500) {
                 Ok(output) => self.terminal_output = output,
                 Err(_) => self.terminal_output = String::from("[No output captured]"),
@@ -667,7 +667,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
         self.resize_current_pane();
-        let _ = self.refresh_terminal_output();
     }
 
     pub fn select_pane(&mut self, index: usize) {
@@ -676,7 +675,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
             self.sidebar_section = SidebarSection::Panes;
             self.resize_current_pane();
-            let _ = self.refresh_terminal_output();
         }
     }
 
@@ -697,7 +695,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
         self.resize_current_pane();
-        let _ = self.refresh_terminal_output();
     }
 
     pub fn toggle_sidebar_section(&mut self) {
@@ -863,10 +860,13 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let specs: Vec<RepoSpec> = workspace
             .repos
             .iter()
-            .map(|(name, path)| RepoSpec {
-                name: name.clone(),
-                source: crate::model::RepoSource::Local(std::path::PathBuf::from(path)),
-                branch: default_branch.clone(),
+            .map(|(name, path)| {
+                let expanded = shellexpand::tilde(path).into_owned();
+                RepoSpec {
+                    name: name.clone(),
+                    source: crate::model::RepoSource::Local(std::path::PathBuf::from(expanded)),
+                    branch: default_branch.clone(),
+                }
             })
             .collect();
 
