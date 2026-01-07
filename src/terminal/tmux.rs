@@ -111,6 +111,7 @@ impl Terminal for Tmux {
     }
 
     fn select_pane(&self, pane: &PaneHandle) -> Result<()> {
+        self.run(&["select-window", "-t", &pane.0])?;
         self.run(&["select-pane", "-t", &pane.0])?;
         Ok(())
     }
