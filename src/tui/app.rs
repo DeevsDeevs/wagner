@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
-use crate::terminal::{PaneHandle, SessionHandle, Terminal};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::wagner::{RepoSpec, Wagner, default_branch_for_task};
 
 use ratatui::layout::Rect;
@@ -383,7 +383,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn refresh_panes(&mut self) {
         self.panes.clear();
         if let Some(task_name) = &self.selected_task {
-            let session_name = format!("wagner_{}", task_name);
+            let session_name = session_name_for_task(task_name);
             if let Ok(panes) = self
                 .wagner
                 .terminal
@@ -428,7 +428,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .tasks
             .iter()
             .filter_map(|task| {
-                let session_name = format!("wagner_{}", task.name);
+                let session_name = session_name_for_task(&task.name);
                 self.wagner
                     .terminal
                     .list_panes(&SessionHandle(session_name.clone()))
@@ -445,7 +445,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn get_task_status(&self, task_name: &str) -> SessionAggregateStatus {
-        let session_name = format!("wagner_{}", task_name);
+        let session_name = session_name_for_task(task_name);
         self.status_monitor.get_session_status(&session_name)
     }
 
@@ -457,7 +457,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         } else if let Some(task_name) = &self.selected_task.clone() {
             if let Ok(task) = self.wagner.get_task(task_name) {
                 if !task.repos.is_empty() {
-                    let session_name = format!("wagner_{}", task_name);
+                    let session_name = session_name_for_task(task_name);
                     if let Ok(panes) = self
                         .wagner
                         .terminal

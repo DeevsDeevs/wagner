@@ -1,9 +1,7 @@
-use super::{PaneHandle, SessionHandle, Terminal};
+use super::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::error::{Result, WagnerError};
 use std::path::Path;
 use std::process::Command;
-
-const SESSION_PREFIX: &str = "wagner_";
 
 pub struct Tmux;
 
@@ -25,10 +23,6 @@ impl Tmux {
             Err(WagnerError::Terminal(format!("tmux error: {}", stderr)))
         }
     }
-
-    fn session_name(&self, name: &str) -> String {
-        format!("{}{}", SESSION_PREFIX, name.replace(['/', '.', ' '], "_"))
-    }
 }
 
 impl Default for Tmux {
@@ -39,7 +33,7 @@ impl Default for Tmux {
 
 impl Terminal for Tmux {
     fn create_session(&self, name: &str, cwd: &Path) -> Result<SessionHandle> {
-        let session_name = self.session_name(name);
+        let session_name = session_name_for_task(name);
         let cwd_str = cwd.to_string_lossy();
 
         self.run(&["new-session", "-d", "-s", &session_name, "-c", &cwd_str])?;
@@ -153,7 +147,7 @@ impl Terminal for Tmux {
     }
 
     fn session_exists(&self, name: &str) -> Result<bool> {
-        let session_name = self.session_name(name);
+        let session_name = session_name_for_task(name);
         let result = self.run(&["has-session", "-t", &session_name]);
         Ok(result.is_ok())
     }
