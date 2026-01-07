@@ -6,6 +6,7 @@ use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
 use crate::terminal::{PaneHandle, SessionHandle, Terminal};
 use crate::wagner::{RepoSpec, Wagner, default_branch_for_task};
 
+use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -79,6 +80,9 @@ pub struct App<T: Terminal, A: Agent> {
     pub diff_content: Vec<String>,
     pub diff_scroll: usize,
     pub repo_stats: HashMap<String, RepoStats>,
+
+    last_click: Option<(u16, u16, Instant)>,
+    terminal_view_size: Option<(u16, u16)>,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -138,6 +142,130 @@ impl<T: Terminal, A: Agent> App<T, A> {
             diff_content: Vec::new(),
             diff_scroll: 0,
             repo_stats: HashMap::new(),
+
+            last_click: None,
+            terminal_view_size: None,
+        }
+    }
+
+    pub fn handle_click(&mut self, col: u16, row: u16, area: Rect) {
+        let is_double_click = self
+            .last_click
+            .map(|(lc, lr, t)| lc == col && lr == row && t.elapsed() < Duration::from_millis(300))
+            .unwrap_or(false);
+        self.last_click = Some((col, row, Instant::now()));
+        let sidebar_width = self.wagner.config.sidebar_width;
+
+        let main_height = if self.status_message.is_some() {
+            area.height.saturating_sub(1)
+        } else {
+            area.height
+        };
+
+        if !self.show_sidebar {
+            self.focus = Focus::Terminal;
+            return;
+        }
+
+        if col < sidebar_width {
+            self.focus = Focus::Sidebar;
+            let sidebar_chunks = ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Percentage(60),
+                ratatui::layout::Constraint::Min(0),
+            ])
+            .split(Rect::new(0, 0, sidebar_width, main_height));
+
+            let task_area = sidebar_chunks[1];
+            let pane_area = sidebar_chunks[2];
+
+            let task_inner_start = task_area.y + 1;
+            let task_inner_end = task_area.y + task_area.height.saturating_sub(1);
+            if row >= task_inner_start && row < task_inner_end {
+                self.sidebar_section = SidebarSection::Tasks;
+                let clicked_row = (row - task_inner_start) as usize;
+                self.select_task_by_row(clicked_row, is_double_click);
+            }
+
+            let pane_inner_start = pane_area.y + 1;
+            let pane_inner_end = pane_area.y + pane_area.height.saturating_sub(1);
+            if row >= pane_inner_start && row < pane_inner_end {
+                self.sidebar_section = SidebarSection::Panes;
+                let clicked_row = (row - pane_inner_start) as usize;
+                if is_double_click {
+                    self.focus = Focus::Terminal;
+                } else {
+                    self.select_pane(clicked_row);
+                }
+            }
+        } else {
+            self.focus = Focus::Terminal;
+        }
+    }
+
+    pub fn handle_resize(&mut self, area: Rect) {
+        let terminal_width = if self.show_sidebar {
+            area.width.saturating_sub(self.wagner.config.sidebar_width)
+        } else {
+            area.width
+        };
+        let terminal_height = area.height.saturating_sub(2);
+
+        let new_size = (terminal_width, terminal_height);
+        let size_changed = self.terminal_view_size != Some(new_size);
+        self.terminal_view_size = Some(new_size);
+
+        if size_changed {
+            self.resize_current_pane();
+        }
+    }
+
+    fn resize_current_pane(&mut self) {
+        if let (Some(pane_id), Some((width, height))) =
+            (&self.selected_pane, self.terminal_view_size)
+        {
+            if width > 0 && height > 0 {
+                let pane = PaneHandle(pane_id.clone(), String::new());
+                let _ = self.wagner.terminal.resize_pane(&pane, width, height);
+                let _ = self.refresh_terminal_output();
+            }
+        }
+    }
+
+    pub fn select_task_by_row(&mut self, row: usize, toggle_expand: bool) {
+        let mut current_row = 0;
+        let tasks_snapshot: Vec<_> = self
+            .tasks
+            .iter()
+            .map(|t| (t.name.clone(), t.repos.iter().map(|r| r.name.clone()).collect::<Vec<_>>()))
+            .collect();
+
+        for (task_name, repo_names) in tasks_snapshot {
+            if current_row == row {
+                self.selected_task = Some(task_name.clone());
+                self.selected_repo = None;
+                self.selected_pane = None;
+                self.update_task_list_selection();
+                self.refresh_panes();
+                let _ = self.refresh_terminal_output();
+                if toggle_expand {
+                    self.toggle_task_expand();
+                }
+                return;
+            }
+            current_row += 1;
+
+            if self.expanded_tasks.contains(&task_name) {
+                for repo_name in &repo_names {
+                    if current_row == row {
+                        self.selected_task = Some(task_name.clone());
+                        self.selected_repo = Some(repo_name.clone());
+                        self.update_task_list_selection();
+                        return;
+                    }
+                    current_row += 1;
+                }
+            }
         }
     }
 
@@ -196,11 +324,16 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 continue;
             }
 
+            let size = terminal.size().map_err(|e| WagnerError::Terminal(e.to_string()))?;
+            let area = Rect::new(0, 0, size.width, size.height);
+
+            self.handle_resize(area);
+
             terminal
                 .draw(|frame| draw(frame, self))
                 .map_err(|e| WagnerError::Terminal(e.to_string()))?;
 
-            if handle_events(self)? {
+            if handle_events(self, area)? {
                 continue;
             }
 
@@ -493,7 +626,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
-        let _ = self.refresh_terminal_output();
+        self.resize_current_pane();
     }
 
     pub fn select_pane(&mut self, index: usize) {
@@ -501,7 +634,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.pane_list_state.select(Some(index));
             self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
             self.sidebar_section = SidebarSection::Panes;
-            let _ = self.refresh_terminal_output();
+            self.resize_current_pane();
         }
     }
 
@@ -521,7 +654,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         self.pane_list_state.select(Some(i));
         self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
-        let _ = self.refresh_terminal_output();
+        self.resize_current_pane();
     }
 
     pub fn toggle_sidebar_section(&mut self) {

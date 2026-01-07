@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 pub struct MockTerminal {
     pub sessions: Arc<Mutex<HashMap<String, Vec<PaneHandle>>>>,
     pub sent_keys: Arc<Mutex<Vec<(String, String)>>>,
+    pub resize_calls: Arc<Mutex<Vec<(String, u16, u16)>>>,
 }
 
 impl MockTerminal {
@@ -110,5 +111,44 @@ impl Terminal for MockTerminal {
 
     fn get_pane_command(&self, _pane: &PaneHandle) -> Result<String> {
         Ok("bash".to_string())
+    }
+
+    fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()> {
+        self.resize_calls
+            .lock()
+            .unwrap()
+            .push((pane.0.clone(), width, height));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resize_pane_records_call() {
+        let terminal = MockTerminal::new();
+        let pane = PaneHandle("test_pane".to_string(), "title".to_string());
+
+        terminal.resize_pane(&pane, 80, 24).unwrap();
+
+        let calls = terminal.resize_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], ("test_pane".to_string(), 80, 24));
+    }
+
+    #[test]
+    fn test_resize_pane_multiple_calls() {
+        let terminal = MockTerminal::new();
+        let pane = PaneHandle("pane1".to_string(), "title".to_string());
+
+        terminal.resize_pane(&pane, 100, 30).unwrap();
+        terminal.resize_pane(&pane, 120, 40).unwrap();
+
+        let calls = terminal.resize_calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0], ("pane1".to_string(), 100, 30));
+        assert_eq!(calls[1], ("pane1".to_string(), 120, 40));
     }
 }

@@ -26,4 +26,5 @@ pub trait Terminal: Send + Sync {
     fn kill_session(&self, session: &SessionHandle) -> Result<()>;
     fn session_exists(&self, name: &str) -> Result<bool>;
     fn get_pane_command(&self, pane: &PaneHandle) -> Result<String>;
+    fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()>;
 }

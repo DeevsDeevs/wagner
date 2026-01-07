@@ -5,7 +5,8 @@ use crate::terminal::Terminal;
 
 use super::app::{App, Focus, InputMode, SidebarSection};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use ratatui::layout::Rect;
 use std::time::Duration;
 
 fn matches_key(code: KeyCode, binding: &str) -> bool {
@@ -24,29 +25,63 @@ fn matches_key(code: KeyCode, binding: &str) -> bool {
     }
 }
 
-pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>) -> Result<bool> {
+pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> Result<bool> {
     if !event::poll(Duration::from_millis(100))? {
         return Ok(false);
     }
 
-    if let Event::Key(key) = event::read()? {
-        if key.kind != KeyEventKind::Press {
-            return Ok(false);
-        }
-
-        match app.input_mode {
-            InputMode::Normal => handle_normal_mode(app, key.code, key.modifiers),
-            InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
-                handle_input_mode(app, key.code, key.modifiers)
+    match event::read()? {
+        Event::Key(key) => {
+            if key.kind != KeyEventKind::Press {
+                return Ok(false);
             }
-            InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
-            InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
-            InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
-            InputMode::DiffContent => handle_diff_content_mode(app, key.code),
+
+            match app.input_mode {
+                InputMode::Normal => handle_normal_mode(app, key.code, key.modifiers),
+                InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
+                    handle_input_mode(app, key.code, key.modifiers)
+                }
+                InputMode::Settings => handle_settings_mode(app, key.code, key.modifiers),
+                InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
+                InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
+                InputMode::DiffContent => handle_diff_content_mode(app, key.code),
+            }
         }
+        Event::Mouse(mouse) => {
+            if app.input_mode == InputMode::Normal {
+                handle_mouse_event(app, mouse, area);
+            }
+        }
+        Event::Resize(_, _) => {
+            app.handle_resize(area);
+        }
+        _ => {}
     }
 
     Ok(true)
+}
+
+fn handle_mouse_event<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    mouse: crossterm::event::MouseEvent,
+    area: Rect,
+) {
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            app.handle_click(mouse.column, mouse.row, area);
+        }
+        MouseEventKind::ScrollUp => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_up();
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            if app.focus == Focus::Terminal {
+                app.scroll_terminal_down();
+            }
+        }
+        _ => {}
+    }
 }
 
 fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
