@@ -28,7 +28,4 @@ pub enum WagnerError {
 
     #[error("Invalid repo spec: {0}")]
     InvalidRepoSpec(String),
-
-    #[error("Config error: {0}")]
-    Config(String),
 }

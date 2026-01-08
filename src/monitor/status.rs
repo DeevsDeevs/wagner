@@ -66,31 +66,25 @@ impl PaneStatus {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AgentStatus {
-    Starting,
     Active(Activity),
     Waiting(WaitReason),
     Idle,
-    Error(String),
 }
 
 impl AgentStatus {
     pub fn icon(&self) -> char {
         match self {
-            Self::Starting => '◐',
             Self::Active(a) => a.icon(),
             Self::Waiting(_) => '◉',
             Self::Idle => '○',
-            Self::Error(_) => '✗',
         }
     }
 
     pub fn label(&self) -> String {
         match self {
-            Self::Starting => "Starting".to_string(),
             Self::Active(a) => a.label().to_string(),
             Self::Waiting(r) => format!("Waiting: {}", r.label()),
             Self::Idle => "Idle".to_string(),
-            Self::Error(e) => format!("Error: {}", e),
         }
     }
 
@@ -99,7 +93,7 @@ impl AgentStatus {
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(self, Self::Active(_) | Self::Starting)
+        matches!(self, Self::Active(_))
     }
 }
 
@@ -223,7 +217,6 @@ pub enum ClaudeActivity {
     Subagent,
     WebSearch,
     WebFetch,
-    Planning,
     TodoUpdate,
 }
 
@@ -239,7 +232,6 @@ impl ClaudeActivity {
             Self::Subagent => "Subagent",
             Self::WebSearch => "Web Search",
             Self::WebFetch => "Web Fetch",
-            Self::Planning => "Planning",
             Self::TodoUpdate => "Todo",
         }
     }
@@ -255,7 +247,6 @@ impl ClaudeActivity {
             Self::Subagent => '◇',
             Self::WebSearch => '◉',
             Self::WebFetch => '◈',
-            Self::Planning => '◎',
             Self::TodoUpdate => '☐',
         }
     }

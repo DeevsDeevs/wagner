@@ -88,6 +88,17 @@ pub enum Commands {
         task: Option<String>,
     },
 
+    /// Open a new shell in the task's worktree directory
+    ///
+    /// Spawns a subshell in the worktree. Exit with Ctrl+D or 'exit' to return.
+    Cd {
+        /// Task name
+        task: String,
+
+        /// Repo name (for multi-repo tasks, defaults to first repo)
+        repo: Option<String>,
+    },
+
     /// Generate shell completions
     Completions {
         /// Shell to generate completions for
@@ -175,6 +186,21 @@ _wagner_workspaces() {{
     fi
 }}
 
+_wagner_task_repos() {{
+    local task="$words[2]"
+    [[ -z "$task" ]] && return
+    local config_file="${{XDG_CONFIG_HOME:-$HOME/.config}}/wagner/config.json"
+    local tasks_root="$(grep -oP '"tasks_root"\s*:\s*"\K[^"]+' "$config_file" 2>/dev/null)"
+    tasks_root="${{tasks_root:-$HOME/.wagner/tasks}}"
+    tasks_root="${{tasks_root/#\~/$HOME}}"
+    local task_file="$tasks_root/$task/.wagner/task.json"
+    if [[ -f "$task_file" ]]; then
+        local -a repos
+        repos=(${{(f)"$(grep -oP '"name"\s*:\s*"\K[^"]+' "$task_file" 2>/dev/null | head -20)"}} )
+        _describe 'repo' repos
+    fi
+}}
+
 _wagner() {{
     local -a commands
     commands=(
@@ -188,6 +214,7 @@ _wagner() {{
         'rm-repo:Remove a repo from a task'
         'attach:Attach to a task tmux session'
         'a:Attach to a task tmux session'
+        'cd:Open shell in task worktree'
         'completions:Generate shell completions'
         'workspace:Manage workspaces'
         'ws:Manage workspaces'
@@ -222,10 +249,13 @@ _wagner() {{
                 attach|a)
                     _arguments '1:task:_wagner_tasks'
                     ;;
+                cd)
+                    _arguments '1:task:_wagner_tasks' '2:repo:_wagner_task_repos'
+                    ;;
                 add)
                     _arguments \
                         '1:task:_wagner_tasks' \
-                        '2:repo:'
+                        '2:repo:_wagner_task_repos'
                     ;;
                 add-repo)
                     _arguments \
@@ -235,7 +265,7 @@ _wagner() {{
                 rm-repo)
                     _arguments \
                         '1:task:_wagner_tasks' \
-                        '2:repo name:'
+                        '2:repo:_wagner_task_repos'
                     ;;
                 completions)
                     _arguments '1:shell:(bash zsh fish powershell elvish)'

@@ -109,6 +109,28 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
+            "  Status Icons",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  ◉ ", Style::default().fg(Color::Yellow)),
+            Span::raw("Needs attention"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ● ", Style::default().fg(Color::Green)),
+            Span::raw("Working"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ○ ", Style::default().fg(Color::DarkGray)),
+            Span::raw("Idle"),
+        ]),
+        Line::from(vec![
+            Span::styled("  ◌ ", Style::default().fg(Color::DarkGray)),
+            Span::raw("No session"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::styled(
             "  General",
             Style::default().add_modifier(Modifier::BOLD),
         )]),

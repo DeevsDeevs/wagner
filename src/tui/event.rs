@@ -5,7 +5,9 @@ use crate::terminal::Terminal;
 
 use super::app::{App, Focus, InputMode, SidebarSection};
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
 use ratatui::layout::Rect;
 use std::time::Duration;
 
@@ -110,32 +112,30 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
     area: Rect,
 ) {
     match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            match app.input_mode {
-                InputMode::Normal => {
-                    if app.is_on_sidebar_border(mouse.column) {
-                        app.dragging_sidebar = true;
-                    } else {
-                        app.handle_click(mouse.column, mouse.row, area);
-                    }
-                }
-                InputMode::DiffFileList | InputMode::DiffContent => {
-                    app.close_diff_view();
-                }
-                InputMode::Settings | InputMode::EditSetting => {
-                    app.close_settings();
-                }
-                InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
-                    app.cancel_input();
-                }
-                InputMode::SelectWorkspace => {
-                    app.pending_task_name = None;
-                    app.workspace_list.clear();
-                    app.workspace_index = 0;
-                    app.input_mode = InputMode::Normal;
+        MouseEventKind::Down(MouseButton::Left) => match app.input_mode {
+            InputMode::Normal => {
+                if app.is_on_sidebar_border(mouse.column) {
+                    app.dragging_sidebar = true;
+                } else {
+                    app.handle_click(mouse.column, mouse.row, area);
                 }
             }
-        }
+            InputMode::DiffFileList | InputMode::DiffContent => {
+                app.close_diff_view();
+            }
+            InputMode::Settings | InputMode::EditSetting => {
+                app.close_settings();
+            }
+            InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
+                app.cancel_input();
+            }
+            InputMode::SelectWorkspace => {
+                app.pending_task_name = None;
+                app.workspace_list.clear();
+                app.workspace_index = 0;
+                app.input_mode = InputMode::Normal;
+            }
+        },
         MouseEventKind::Up(MouseButton::Left) => {
             app.dragging_sidebar = false;
         }
@@ -199,15 +199,29 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     if app.focus == Focus::Terminal {
-        if matches_key(code, &kb.toggle_sidebar) {
-            app.focus = Focus::Sidebar;
-            if !app.show_sidebar {
-                app.show_sidebar = true;
+        if code == KeyCode::Esc {
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                if let Some(pane) = app.current_pane() {
+                    let _ = app.wagner.terminal.send_key(&pane, "Escape");
+                    let _ = app.refresh_terminal_output();
+                }
+            } else {
+                app.focus = Focus::Sidebar;
             }
             return;
         }
-        if code == KeyCode::Esc {
-            app.focus = Focus::Sidebar;
+        if matches_key(code, &kb.toggle_sidebar) {
+            if modifiers.contains(KeyModifiers::CONTROL) {
+                if let Some(pane) = app.current_pane() {
+                    let _ = app.wagner.terminal.send_key(&pane, "Tab");
+                    let _ = app.refresh_terminal_output();
+                }
+            } else {
+                app.focus = Focus::Sidebar;
+                if !app.show_sidebar {
+                    app.show_sidebar = true;
+                }
+            }
             return;
         }
         send_key_to_pane(app, code, modifiers);
