@@ -10,7 +10,12 @@ fn main() {
         let file = std::fs::File::create(&log_path).expect("Failed to create log file");
         tracing_subscriber::registry()
             .with(filter)
-            .with(tracing_subscriber::fmt::layer().with_target(false).with_ansi(false).with_writer(file))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_target(false)
+                    .with_ansi(false)
+                    .with_writer(file),
+            )
             .init();
     } else {
         tracing_subscriber::registry()

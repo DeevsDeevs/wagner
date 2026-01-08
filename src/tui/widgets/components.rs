@@ -14,7 +14,11 @@ pub struct TextInput<'a> {
 
 impl<'a> TextInput<'a> {
     pub fn new(label: &'a str, buffer: &'a str, cursor: usize) -> Self {
-        Self { label, buffer, cursor }
+        Self {
+            label,
+            buffer,
+            cursor,
+        }
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect) {
@@ -51,16 +55,18 @@ pub struct Selector<'a> {
 
 impl<'a> Selector<'a> {
     pub fn new(label: &'a str, items: &'a [String], selected: usize) -> Self {
-        Self { label, items, selected }
+        Self {
+            label,
+            items,
+            selected,
+        }
     }
 
     pub fn draw(&self, frame: &mut Frame, area: Rect) {
-        let mut spans = vec![
-            Span::styled(
-                format!("{}: ", self.label),
-                Style::default().fg(Color::Yellow),
-            ),
-        ];
+        let mut spans = vec![Span::styled(
+            format!("{}: ", self.label),
+            Style::default().fg(Color::Yellow),
+        )];
 
         for (i, item) in self.items.iter().enumerate() {
             if i > 0 {
@@ -76,7 +82,8 @@ impl<'a> Selector<'a> {
             }
         }
 
-        let paragraph = Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::DarkGray));
+        let paragraph =
+            Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::DarkGray));
         frame.render_widget(paragraph, area);
     }
 }
@@ -115,12 +122,21 @@ impl<'a> ScrollableList<'a> {
     }
 
     pub fn item(mut self, key: &'a str, value: &'a str, selected: bool, dimmed: bool) -> Self {
-        self.items.push(ListItem::Item { key, value, selected, dimmed });
+        self.items.push(ListItem::Item {
+            key,
+            value,
+            selected,
+            dimmed,
+        });
         self
     }
 
     pub fn bool_item(mut self, key: &'a str, value: bool, selected: bool) -> Self {
-        self.items.push(ListItem::BoolItem { key, value, selected });
+        self.items.push(ListItem::BoolItem {
+            key,
+            value,
+            selected,
+        });
         self
     }
 
@@ -129,7 +145,8 @@ impl<'a> ScrollableList<'a> {
 
         for (i, item) in self.items.iter().enumerate() {
             match item {
-                ListItem::Item { selected: true, .. } | ListItem::BoolItem { selected: true, .. } => {
+                ListItem::Item { selected: true, .. }
+                | ListItem::BoolItem { selected: true, .. } => {
                     visual_index = i;
                     break;
                 }
@@ -153,7 +170,8 @@ impl<'a> ScrollableList<'a> {
         let visible_height = area.height as usize;
         let total = self.items.len();
 
-        let visible_items: Vec<Line> = self.items
+        let visible_items: Vec<Line> = self
+            .items
             .iter()
             .skip(self.scroll_offset)
             .take(visible_height)
@@ -193,13 +211,25 @@ impl<'a> ScrollableList<'a> {
         match item {
             ListItem::Section(title) => Line::from(vec![
                 Span::styled("─── ", Style::default().fg(Color::DarkGray)),
-                Span::styled(*title, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    *title,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" ───", Style::default().fg(Color::DarkGray)),
             ]),
-            ListItem::Item { key, value, selected, dimmed } => {
+            ListItem::Item {
+                key,
+                value,
+                selected,
+                dimmed,
+            } => {
                 let prefix = if *selected { "▸ " } else { "  " };
                 let style = if *selected {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else if *dimmed {
                     Style::default().fg(Color::Gray)
                 } else {
@@ -212,10 +242,16 @@ impl<'a> ScrollableList<'a> {
                     Span::styled(*value, Style::default().fg(Color::Green)),
                 ])
             }
-            ListItem::BoolItem { key, value, selected } => {
+            ListItem::BoolItem {
+                key,
+                value,
+                selected,
+            } => {
                 let prefix = if *selected { "▸ " } else { "  " };
                 let style = if *selected {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -251,7 +287,10 @@ impl<'a> Footer<'a> {
             if i > 0 {
                 spans.push(Span::raw("  "));
             }
-            spans.push(Span::styled(format!(" {} ", key), Style::default().fg(Color::Cyan)));
+            spans.push(Span::styled(
+                format!(" {} ", key),
+                Style::default().fg(Color::Cyan),
+            ));
             spans.push(Span::raw(*action));
         }
 

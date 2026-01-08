@@ -10,7 +10,11 @@ use std::path::Path;
 const SESSION_PREFIX: &str = "wagner_";
 
 pub fn session_name_for_task(task_name: &str) -> String {
-    format!("{}{}", SESSION_PREFIX, task_name.replace(['/', '.', ' '], "_"))
+    format!(
+        "{}{}",
+        SESSION_PREFIX,
+        task_name.replace(['/', '.', ' '], "_")
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -55,18 +59,12 @@ mod tests {
 
     #[test]
     fn session_name_with_dots() {
-        assert_eq!(
-            session_name_for_task("feature.v2.0"),
-            "wagner_feature_v2_0"
-        );
+        assert_eq!(session_name_for_task("feature.v2.0"), "wagner_feature_v2_0");
     }
 
     #[test]
     fn session_name_with_spaces() {
-        assert_eq!(
-            session_name_for_task("my task name"),
-            "wagner_my_task_name"
-        );
+        assert_eq!(session_name_for_task("my task name"), "wagner_my_task_name");
     }
 
     #[test]
@@ -79,17 +77,11 @@ mod tests {
 
     #[test]
     fn session_name_preserves_underscores() {
-        assert_eq!(
-            session_name_for_task("my_task_name"),
-            "wagner_my_task_name"
-        );
+        assert_eq!(session_name_for_task("my_task_name"), "wagner_my_task_name");
     }
 
     #[test]
     fn session_name_preserves_hyphens() {
-        assert_eq!(
-            session_name_for_task("my-task-name"),
-            "wagner_my-task-name"
-        );
+        assert_eq!(session_name_for_task("my-task-name"), "wagner_my-task-name");
     }
 }

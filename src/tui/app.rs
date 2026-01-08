@@ -258,7 +258,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let tasks_snapshot: Vec<_> = self
             .tasks
             .iter()
-            .map(|t| (t.name.clone(), t.repos.iter().map(|r| r.name.clone()).collect::<Vec<_>>()))
+            .map(|t| {
+                (
+                    t.name.clone(),
+                    t.repos.iter().map(|r| r.name.clone()).collect::<Vec<_>>(),
+                )
+            })
             .collect();
 
         for (task_name, repo_names) in tasks_snapshot {
@@ -323,7 +328,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             },
         };
 
-        let size = terminal.size().map_err(|e| WagnerError::Terminal(e.to_string()))?;
+        let size = terminal
+            .size()
+            .map_err(|e| WagnerError::Terminal(e.to_string()))?;
         let initial_area = Rect::new(0, 0, size.width, size.height);
         self.handle_resize(initial_area);
         self.refresh_data()?;
@@ -355,7 +362,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 continue;
             }
 
-            let size = terminal.size().map_err(|e| WagnerError::Terminal(e.to_string()))?;
+            let size = terminal
+                .size()
+                .map_err(|e| WagnerError::Terminal(e.to_string()))?;
             let area = Rect::new(0, 0, size.width, size.height);
 
             self.handle_resize(area);
@@ -664,8 +673,20 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
         let len = self.panes.len();
         let i = match self.pane_list_state.selected() {
-            Some(i) if forward => if i >= len - 1 { 0 } else { i + 1 },
-            Some(i) => if i == 0 { len - 1 } else { i - 1 },
+            Some(i) if forward => {
+                if i >= len - 1 {
+                    0
+                } else {
+                    i + 1
+                }
+            }
+            Some(i) => {
+                if i == 0 {
+                    len - 1
+                } else {
+                    i - 1
+                }
+            }
             None => 0,
         };
         self.select_pane_at(i);
@@ -723,7 +744,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     fn get_max_scroll(&self) -> u16 {
         let line_count = self.terminal_output.lines().count();
-        let viewport_height = self.terminal_view_size.map(|(_, h)| h as usize).unwrap_or(20);
+        let viewport_height = self
+            .terminal_view_size
+            .map(|(_, h)| h as usize)
+            .unwrap_or(20);
         line_count.saturating_sub(viewport_height) as u16
     }
 
@@ -1163,7 +1187,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
     fn delete_char_at_cursor(&mut self) {
         let byte_pos = self.char_to_byte_pos(self.input_cursor);
         if let Some(c) = self.input_buffer.chars().nth(self.input_cursor) {
-            self.input_buffer.replace_range(byte_pos..byte_pos + c.len_utf8(), "");
+            self.input_buffer
+                .replace_range(byte_pos..byte_pos + c.len_utf8(), "");
         }
     }
 

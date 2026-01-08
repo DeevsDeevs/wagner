@@ -25,7 +25,12 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
     if let Some(header) = header_area {
         let header_line = Line::from(vec![
             Span::styled(" ", Style::default()),
-            Span::styled(header_text, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                header_text,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]);
         frame.render_widget(Paragraph::new(header_line), header);
     }

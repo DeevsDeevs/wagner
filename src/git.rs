@@ -30,9 +30,8 @@ fn run_git(repo_path: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn resolve_base_ref(repo_path: &Path, base: &str) -> String {
-    let check_ref = |r: &str| -> bool {
-        run_git(repo_path, &["rev-parse", "--verify", r]).is_some()
-    };
+    let check_ref =
+        |r: &str| -> bool { run_git(repo_path, &["rev-parse", "--verify", r]).is_some() };
 
     if check_ref(base) {
         return base.to_string();
@@ -62,7 +61,12 @@ pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
                 let deletions = parts[1].parse().unwrap_or(0);
                 let path = parts[2].to_string();
                 let status = get_file_status(repo_path, &base_ref, &path);
-                Some(DiffFile { path, status, additions, deletions })
+                Some(DiffFile {
+                    path,
+                    status,
+                    additions,
+                    deletions,
+                })
             } else {
                 None
             }
@@ -72,9 +76,12 @@ pub fn get_diff_files(repo_path: &Path, base: &str) -> Vec<DiffFile> {
 
 fn get_file_status(repo_path: &Path, base_ref: &str, file_path: &str) -> char {
     let range = format!("{}..HEAD", base_ref);
-    run_git(repo_path, &["diff", "--name-status", &range, "--", file_path])
-        .and_then(|s| s.chars().next())
-        .unwrap_or('M')
+    run_git(
+        repo_path,
+        &["diff", "--name-status", &range, "--", file_path],
+    )
+    .and_then(|s| s.chars().next())
+    .unwrap_or('M')
 }
 
 pub fn get_repo_stats(repo_path: &Path, base: &str) -> RepoStats {
@@ -111,7 +118,10 @@ fn parse_shortstat(s: &str) -> RepoStats {
 pub fn get_diff_content(repo_path: &Path, base: &str, file_path: &str) -> Vec<String> {
     let base_ref = resolve_base_ref(repo_path, base);
     let range = format!("{}..HEAD", base_ref);
-    run_git(repo_path, &["diff", "--color=always", &range, "--", file_path])
-        .map(|s| s.lines().map(String::from).collect())
-        .unwrap_or_default()
+    run_git(
+        repo_path,
+        &["diff", "--color=always", &range, "--", file_path],
+    )
+    .map(|s| s.lines().map(String::from).collect())
+    .unwrap_or_default()
 }

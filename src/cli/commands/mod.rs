@@ -306,7 +306,14 @@ fn cmd_cd<T: Terminal, A: Agent>(
             .map(|r| &r.worktree)
             .unwrap_or_else(|| {
                 eprintln!("Repo '{}' not found in task '{}'", repo_name, task_name);
-                eprintln!("Available repos: {}", task.repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "));
+                eprintln!(
+                    "Available repos: {}",
+                    task.repos
+                        .iter()
+                        .map(|r| r.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 std::process::exit(1);
             })
     } else {
