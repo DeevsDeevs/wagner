@@ -656,3 +656,75 @@ fn test_mock_terminal_send_literal() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0], ("%0".to_string(), "hello world".to_string()));
 }
+
+// =====================
+// GET TASK / CD TESTS
+// =====================
+
+#[test]
+fn test_get_task_returns_worktree_path() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let spec = RepoSpec {
+        name: "main".to_string(),
+        source: RepoSource::Local(ctx.repo_path.clone()),
+        branch: "feature/cd-test".to_string(),
+    };
+
+    wagner.create_task("cd-test", &[spec], None).unwrap();
+
+    let task = wagner.get_task("cd-test").unwrap();
+    assert_eq!(task.repos.len(), 1);
+    assert_eq!(task.repos[0].name, "main");
+
+    let expected_worktree = ctx.tasks_root.join("cd-test").join("main");
+    assert_eq!(task.repos[0].worktree, expected_worktree);
+    assert!(task.repos[0].worktree.exists());
+}
+
+#[test]
+fn test_get_task_multi_repo_find_by_name() {
+    let ctx = TestContext::new();
+    let repo2_path = ctx.add_second_repo();
+    let wagner = ctx.wagner();
+
+    let specs = vec![
+        RepoSpec {
+            name: "frontend".to_string(),
+            source: RepoSource::Local(ctx.repo_path.clone()),
+            branch: "feature/multi-cd".to_string(),
+        },
+        RepoSpec {
+            name: "backend".to_string(),
+            source: RepoSource::Local(repo2_path),
+            branch: "feature/multi-cd".to_string(),
+        },
+    ];
+
+    wagner.create_task("multi-cd-test", &specs, None).unwrap();
+
+    let task = wagner.get_task("multi-cd-test").unwrap();
+    assert_eq!(task.repos.len(), 2);
+
+    let frontend = task.repos.iter().find(|r| r.name == "frontend");
+    let backend = task.repos.iter().find(|r| r.name == "backend");
+
+    assert!(frontend.is_some(), "Should find frontend repo");
+    assert!(backend.is_some(), "Should find backend repo");
+
+    let frontend_path = ctx.tasks_root.join("multi-cd-test").join("frontend");
+    let backend_path = ctx.tasks_root.join("multi-cd-test").join("backend");
+
+    assert_eq!(frontend.unwrap().worktree, frontend_path);
+    assert_eq!(backend.unwrap().worktree, backend_path);
+}
+
+#[test]
+fn test_get_task_not_found() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let result = wagner.get_task("nonexistent-task");
+    assert!(result.is_err(), "Should error for nonexistent task");
+}

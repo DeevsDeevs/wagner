@@ -37,6 +37,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::AddRepo { task, repo }) => cmd_add_repo(&wagner, &task, &repo),
         Some(Commands::RmRepo { task, repo }) => cmd_rm_repo(&wagner, &task, &repo),
         Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
+        Some(Commands::Cd { task, repo }) => cmd_cd(&wagner, &task, repo.as_deref()),
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
         None => cmd_tui(wagner),
@@ -289,6 +290,38 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
 
     debug!(task = %task_name, "Attaching to session");
     wagner.attach(&task_name, None)
+}
+
+fn cmd_cd<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    task_name: &str,
+    repo: Option<&str>,
+) -> Result<()> {
+    let task = wagner.get_task(task_name)?;
+
+    let worktree = if let Some(repo_name) = repo {
+        task.repos
+            .iter()
+            .find(|r| r.name == repo_name)
+            .map(|r| &r.worktree)
+            .unwrap_or_else(|| {
+                eprintln!("Repo '{}' not found in task '{}'", repo_name, task_name);
+                eprintln!("Available repos: {}", task.repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "));
+                std::process::exit(1);
+            })
+    } else {
+        task.repos.first().map(|r| &r.worktree).unwrap_or_else(|| {
+            eprintln!("Task '{}' has no repos", task_name);
+            std::process::exit(1);
+        })
+    };
+
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    std::process::Command::new(&shell)
+        .current_dir(worktree)
+        .status()?;
+
+    Ok(())
 }
 
 fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {
