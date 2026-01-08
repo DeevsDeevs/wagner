@@ -9,6 +9,7 @@ pub struct MockTerminal {
     pub sessions: Arc<Mutex<HashMap<String, Vec<PaneHandle>>>>,
     pub sent_keys: Arc<Mutex<Vec<(String, String)>>>,
     pub resize_calls: Arc<Mutex<Vec<(String, u16, u16)>>>,
+    pub capture_output: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl MockTerminal {
@@ -32,6 +33,13 @@ impl MockTerminal {
             .map(|p| p.len())
             .unwrap_or(0)
     }
+
+    pub fn set_capture_output(&self, pane_id: &str, output: &str) {
+        self.capture_output
+            .lock()
+            .unwrap()
+            .insert(pane_id.to_string(), output.to_string());
+    }
 }
 
 impl Terminal for MockTerminal {
@@ -54,8 +62,14 @@ impl Terminal for MockTerminal {
         Ok(pane)
     }
 
-    fn capture(&self, _pane: &PaneHandle, _lines: usize) -> Result<String> {
-        Ok(String::new())
+    fn capture(&self, pane: &PaneHandle, _lines: usize) -> Result<String> {
+        Ok(self
+            .capture_output
+            .lock()
+            .unwrap()
+            .get(&pane.0)
+            .cloned()
+            .unwrap_or_default())
     }
 
     fn send_keys(&self, pane: &PaneHandle, keys: &str) -> Result<()> {

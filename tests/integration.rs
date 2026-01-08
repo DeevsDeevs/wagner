@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 use wagner::config::Workspace;
-use wagner::{Config, MockTerminal, RepoSource, RepoSpec, Terminal, TestAgent, Wagner};
+use wagner::{Config, MockTerminal, PaneHandle, RepoSource, RepoSpec, Terminal, TestAgent, Wagner};
 
 struct TestContext {
     _temp_dir: TempDir,
@@ -608,4 +607,52 @@ fn test_remove_nonexistent_repo_error() {
 
     let result = wagner.remove_repo_from_task("rm-err-task", "nonexistent");
     assert!(result.is_err(), "Removing nonexistent repo should error");
+}
+
+// =====================
+// MOCK TERMINAL TESTS
+// =====================
+
+#[test]
+fn test_mock_terminal_send_key_tracking() {
+    let terminal = MockTerminal::new();
+    let pane = PaneHandle("%0".to_string(), "test".to_string());
+
+    terminal.send_key(&pane, "Escape").unwrap();
+    terminal.send_key(&pane, "Tab").unwrap();
+    terminal.send_key(&pane, "C-c").unwrap();
+
+    let sent = terminal.get_sent_keys();
+    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[0], ("%0".to_string(), "Escape".to_string()));
+    assert_eq!(sent[1], ("%0".to_string(), "Tab".to_string()));
+    assert_eq!(sent[2], ("%0".to_string(), "C-c".to_string()));
+}
+
+#[test]
+fn test_mock_terminal_capture_output() {
+    let terminal = MockTerminal::new();
+    let pane = PaneHandle("%0".to_string(), "test".to_string());
+
+    assert_eq!(terminal.capture(&pane, 100).unwrap(), "");
+
+    terminal.set_capture_output("%0", "line1\nline2\nline3");
+    assert_eq!(terminal.capture(&pane, 100).unwrap(), "line1\nline2\nline3");
+
+    let pane2 = PaneHandle("%1".to_string(), "test2".to_string());
+    terminal.set_capture_output("%1", "other content");
+    assert_eq!(terminal.capture(&pane2, 100).unwrap(), "other content");
+    assert_eq!(terminal.capture(&pane, 100).unwrap(), "line1\nline2\nline3");
+}
+
+#[test]
+fn test_mock_terminal_send_literal() {
+    let terminal = MockTerminal::new();
+    let pane = PaneHandle("%0".to_string(), "test".to_string());
+
+    terminal.send_literal(&pane, "hello world").unwrap();
+
+    let sent = terminal.get_sent_keys();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0], ("%0".to_string(), "hello world".to_string()));
 }

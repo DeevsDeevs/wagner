@@ -58,6 +58,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub selected_pane: Option<String>,
     pub terminal_output: String,
     pub terminal_scroll: u16,
+    pane_scroll_positions: HashMap<String, u16>,
 
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
@@ -125,6 +126,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             selected_pane: None,
             terminal_output: String::new(),
             terminal_scroll: 0,
+            pane_scroll_positions: HashMap::new(),
 
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
@@ -261,13 +263,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         for (task_name, repo_names) in tasks_snapshot {
             if current_row == row {
+                self.save_pane_scroll();
                 self.selected_task = Some(task_name.clone());
                 self.selected_repo = None;
                 self.selected_pane = None;
-                self.terminal_scroll = 0;
                 self.update_task_list_selection();
                 self.refresh_panes();
                 let _ = self.refresh_terminal_output();
+                self.restore_pane_scroll();
                 if toggle_expand {
                     self.toggle_task_expand();
                 }
@@ -278,10 +281,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
             if self.expanded_tasks.contains(&task_name) {
                 for repo_name in &repo_names {
                     if current_row == row {
+                        self.save_pane_scroll();
                         self.selected_task = Some(task_name.clone());
                         self.selected_repo = Some(repo_name.clone());
-                        self.terminal_scroll = 0;
                         self.update_task_list_selection();
+                        self.restore_pane_scroll();
                         if toggle_expand {
                             self.open_diff_for_repo(repo_name);
                         }
@@ -530,13 +534,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     .unwrap_or(0);
                 if repo_idx + 1 < task.repos.len() {
                     self.selected_repo = Some(task.repos[repo_idx + 1].name.clone());
-                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 }
             } else {
                 self.selected_repo = Some(task.repos[0].name.clone());
-                self.terminal_scroll = 0;
                 self.update_task_list_selection();
                 return;
             }
@@ -547,13 +549,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
         } else {
             task_idx + 1
         };
+        self.save_pane_scroll();
         self.selected_task = Some(self.tasks[next_idx].name.clone());
         self.selected_repo = None;
         self.selected_pane = None;
-        self.terminal_scroll = 0;
         self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
+        self.restore_pane_scroll();
     }
 
     pub fn prev_task(&mut self) {
@@ -584,12 +587,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     .unwrap_or(0);
                 if repo_idx > 0 {
                     self.selected_repo = Some(task.repos[repo_idx - 1].name.clone());
-                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 } else {
                     self.selected_repo = None;
-                    self.terminal_scroll = 0;
                     self.update_task_list_selection();
                     return;
                 }
@@ -602,19 +603,24 @@ impl<T: Terminal, A: Agent> App<T, A> {
             task_idx - 1
         };
         let prev_task = &self.tasks[prev_idx];
-        self.selected_task = Some(prev_task.name.clone());
+        let prev_task_name = prev_task.name.clone();
+        let prev_task_expanded = self.expanded_tasks.contains(&prev_task.name);
+        let prev_task_last_repo = prev_task.repos.last().map(|r| r.name.clone());
 
-        if self.expanded_tasks.contains(&prev_task.name) && !prev_task.repos.is_empty() {
-            self.selected_repo = prev_task.repos.last().map(|r| r.name.clone());
+        self.save_pane_scroll();
+        self.selected_task = Some(prev_task_name);
+
+        if prev_task_expanded && prev_task_last_repo.is_some() {
+            self.selected_repo = prev_task_last_repo;
         } else {
             self.selected_repo = None;
         }
 
         self.selected_pane = None;
-        self.terminal_scroll = 0;
         self.update_task_list_selection();
         self.refresh_panes();
         let _ = self.refresh_terminal_output();
+        self.restore_pane_scroll();
     }
 
     fn update_task_list_selection(&mut self) {
@@ -645,53 +651,39 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn next_pane(&mut self) {
+        self.navigate_pane(true);
+    }
+
+    pub fn prev_pane(&mut self) {
+        self.navigate_pane(false);
+    }
+
+    fn navigate_pane(&mut self, forward: bool) {
         if self.panes.is_empty() {
             return;
         }
+        let len = self.panes.len();
         let i = match self.pane_list_state.selected() {
-            Some(i) => {
-                if i >= self.panes.len() - 1 {
-                    0
-                } else {
-                    i + 1
-                }
-            }
+            Some(i) if forward => if i >= len - 1 { 0 } else { i + 1 },
+            Some(i) => if i == 0 { len - 1 } else { i - 1 },
             None => 0,
         };
-        self.pane_list_state.select(Some(i));
-        self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
-        self.terminal_scroll = 0;
-        self.resize_current_pane();
+        self.select_pane_at(i);
     }
 
     pub fn select_pane(&mut self, index: usize) {
         if index < self.panes.len() {
-            self.pane_list_state.select(Some(index));
-            self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
+            self.select_pane_at(index);
             self.sidebar_section = SidebarSection::Panes;
-            self.terminal_scroll = 0;
-            self.resize_current_pane();
         }
     }
 
-    pub fn prev_pane(&mut self) {
-        if self.panes.is_empty() {
-            return;
-        }
-        let i = match self.pane_list_state.selected() {
-            Some(i) => {
-                if i == 0 {
-                    self.panes.len() - 1
-                } else {
-                    i - 1
-                }
-            }
-            None => 0,
-        };
-        self.pane_list_state.select(Some(i));
-        self.selected_pane = self.panes.get(i).map(|p| p.0.clone());
-        self.terminal_scroll = 0;
+    fn select_pane_at(&mut self, index: usize) {
+        self.save_pane_scroll();
+        self.pane_list_state.select(Some(index));
+        self.selected_pane = self.panes.get(index).map(|p| p.0.clone());
         self.resize_current_pane();
+        self.restore_pane_scroll();
     }
 
     pub fn toggle_sidebar_section(&mut self) {
@@ -735,6 +727,24 @@ impl<T: Terminal, A: Agent> App<T, A> {
         line_count.saturating_sub(viewport_height) as u16
     }
 
+    fn save_pane_scroll(&mut self) {
+        if let Some(pane_id) = &self.selected_pane {
+            self.pane_scroll_positions
+                .insert(pane_id.clone(), self.terminal_scroll);
+        }
+    }
+
+    fn restore_pane_scroll(&mut self) {
+        let saved = self
+            .selected_pane
+            .as_ref()
+            .and_then(|id| self.pane_scroll_positions.get(id))
+            .copied()
+            .unwrap_or(0);
+        let max = self.get_max_scroll();
+        self.terminal_scroll = saved.min(max);
+    }
+
     pub fn current_pane(&self) -> Option<PaneHandle> {
         self.selected_pane
             .as_ref()
@@ -765,6 +775,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn start_new_task(&mut self) {
+        if self.wagner.config.workspaces.is_empty() {
+            self.set_status("No workspaces configured. Use: wagner workspace add <name> repo:path");
+            return;
+        }
         self.input_mode = InputMode::NewTask;
         self.input_buffer.clear();
         self.input_cursor = 0;
@@ -850,7 +864,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         let workspaces: Vec<String> = self.wagner.config.workspaces.keys().cloned().collect();
         if workspaces.is_empty() {
-            self.set_status("No workspaces configured. Use: wagner workspace add <name> repo:path");
             self.input_mode = InputMode::Normal;
             self.input_buffer.clear();
             return;
@@ -951,7 +964,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                         self.set_status(&format!("Deleted task: {}", task_name));
                         self.selected_task = None;
                         self.selected_pane = None;
-                        self.terminal_scroll = 0;
+                        self.restore_pane_scroll();
                         let _ = self.refresh_data();
                     }
                     Err(e) => {
@@ -1137,22 +1150,20 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn input_backspace(&mut self) {
         if self.input_cursor > 0 {
             self.input_cursor -= 1;
-            let byte_pos = self.char_to_byte_pos(self.input_cursor);
-            if let Some(c) = self.input_buffer.chars().nth(self.input_cursor) {
-                self.input_buffer
-                    .replace_range(byte_pos..byte_pos + c.len_utf8(), "");
-            }
+            self.delete_char_at_cursor();
         }
     }
 
     pub fn input_delete(&mut self) {
-        let char_count = self.input_buffer.chars().count();
-        if self.input_cursor < char_count {
-            let byte_pos = self.char_to_byte_pos(self.input_cursor);
-            if let Some(c) = self.input_buffer.chars().nth(self.input_cursor) {
-                self.input_buffer
-                    .replace_range(byte_pos..byte_pos + c.len_utf8(), "");
-            }
+        if self.input_cursor < self.input_buffer.chars().count() {
+            self.delete_char_at_cursor();
+        }
+    }
+
+    fn delete_char_at_cursor(&mut self) {
+        let byte_pos = self.char_to_byte_pos(self.input_cursor);
+        if let Some(c) = self.input_buffer.chars().nth(self.input_cursor) {
+            self.input_buffer.replace_range(byte_pos..byte_pos + c.len_utf8(), "");
         }
     }
 
@@ -1176,50 +1187,47 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn open_diff_view(&mut self) {
-        let Some(task_name) = &self.selected_task else {
-            self.set_status("No task selected");
-            return;
-        };
-
-        let Ok(task) = self.wagner.get_task(task_name) else {
-            self.set_status("Task not found");
-            return;
-        };
-
-        let repo = if let Some(repo_name) = &self.selected_repo {
-            task.repos.iter().find(|r| &r.name == repo_name)
-        } else {
-            task.repos.first()
-        };
-
-        let Some(repo) = repo else {
-            self.set_status("No repos in task");
-            return;
-        };
-
-        self.diff_repo_path = Some(repo.worktree.clone());
-        self.diff_repo_name = Some(repo.name.clone());
-        self.load_diff_files();
-        self.input_mode = InputMode::DiffFileList;
+        let repo_name = self.selected_repo.clone();
+        if !self.open_diff_for_repo_impl(repo_name.as_deref(), true) {
+            if self.selected_task.is_none() {
+                self.set_status("No task selected");
+            }
+        }
     }
 
     pub fn open_diff_for_repo(&mut self, repo_name: &str) {
+        self.open_diff_for_repo_impl(Some(repo_name), false);
+    }
+
+    fn open_diff_for_repo_impl(&mut self, repo_name: Option<&str>, show_errors: bool) -> bool {
         let Some(task_name) = &self.selected_task else {
-            return;
+            return false;
         };
 
         let Ok(task) = self.wagner.get_task(task_name) else {
-            return;
+            if show_errors {
+                self.set_status("Task not found");
+            }
+            return false;
         };
 
-        let Some(repo) = task.repos.iter().find(|r| r.name == repo_name) else {
-            return;
+        let repo = match repo_name {
+            Some(name) => task.repos.iter().find(|r| r.name == name),
+            None => task.repos.first(),
+        };
+
+        let Some(repo) = repo else {
+            if show_errors {
+                self.set_status("No repos in task");
+            }
+            return false;
         };
 
         self.diff_repo_path = Some(repo.worktree.clone());
         self.diff_repo_name = Some(repo.name.clone());
         self.load_diff_files();
         self.input_mode = InputMode::DiffFileList;
+        true
     }
 
     fn load_diff_files(&mut self) {
