@@ -32,7 +32,13 @@ const WAIT_PATTERNS: &[(&[&str], WaitReason)] = &[
         ],
         WaitReason::Question,
     ),
-    (&["How is Claude doing this session?"], WaitReason::Input),
+    (
+        &[
+            "How is Claude doing this session?",
+            "Claude is waiting for your input",
+        ],
+        WaitReason::Input,
+    ),
     (
         &[
             "Interrupted · What should Claude do instead?",
@@ -52,13 +58,33 @@ const WAIT_PATTERNS: &[(&[&str], WaitReason)] = &[
         &["Permission denied", "requires permission"],
         WaitReason::Permission,
     ),
+    (
+        &[
+            "Enter plan mode?",
+            "Exit plan mode?",
+            "Claude wants to enter plan mode",
+            "Claude wants to exit plan mode",
+            "Yes, enter plan mode",
+        ],
+        WaitReason::Approval,
+    ),
+    (
+        &[
+            "Enter to apply changes",
+            "Enter to confirm · Esc to reject",
+            "Enter to confirm · Esc to skip",
+            "Yes, and auto-accept edits",
+        ],
+        WaitReason::Approval,
+    ),
 ];
 
 pub struct ClaudeCodeDetector;
 
 impl ClaudeCodeDetector {
     fn has_spinner(output: &str) -> bool {
-        output.contains(ACTIVITY_SPINNER) || BRAILLE_SPINNERS.iter().any(|&c| output.contains(c))
+        let tail: String = output.lines().rev().take(10).collect::<Vec<_>>().join("\n");
+        tail.contains(ACTIVITY_SPINNER) || BRAILLE_SPINNERS.iter().any(|&c| tail.contains(c))
     }
 
     fn has_active_status(output: &str) -> bool {
@@ -70,7 +96,16 @@ impl ClaudeCodeDetector {
     }
 
     fn detect_tool(output: &str) -> Option<ClaudeActivity> {
-        let tail_lines: Vec<&str> = output.lines().rev().take(20).collect();
+        let tail_lines: Vec<&str> = output.lines().rev().take(10).collect();
+        let tail_text = tail_lines.join("\n");
+        let is_running = tail_text.contains("Running")
+            || tail_text.contains("In progress")
+            || tail_text.contains("⎿  …");
+
+        if !is_running {
+            return None;
+        }
+
         TOOL_PATTERNS
             .iter()
             .find(|(patterns, _)| {
@@ -82,9 +117,10 @@ impl ClaudeCodeDetector {
     }
 
     fn detect_wait(output: &str) -> Option<WaitReason> {
+        let tail: String = output.lines().rev().take(10).collect::<Vec<_>>().join("\n");
         WAIT_PATTERNS
             .iter()
-            .find(|(patterns, _)| patterns.iter().any(|p| output.contains(p)))
+            .find(|(patterns, _)| patterns.iter().any(|p| tail.contains(p)))
             .map(|(_, reason)| *reason)
     }
 }
@@ -113,16 +149,16 @@ impl AgentDetector for ClaudeCodeDetector {
         output_changed: bool,
         since_change: Duration,
     ) -> AgentStatus {
-        if let Some(reason) = Self::detect_wait(output) {
-            return AgentStatus::Waiting(reason);
-        }
-
-        let is_active =
-            Self::has_spinner(output) || (output_changed && Self::has_active_status(output));
+        let has_spinner = Self::has_spinner(output);
+        let is_active = has_spinner || (output_changed && Self::has_active_status(output));
 
         if is_active {
             let activity = Self::detect_tool(output).unwrap_or(ClaudeActivity::Thinking);
             return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
+        }
+
+        if let Some(reason) = Self::detect_wait(output) {
+            return AgentStatus::Waiting(reason);
         }
 
         if since_change > IDLE_THRESHOLD {
