@@ -60,6 +60,16 @@ impl PaneStatus {
             Self::Unknown => false,
         }
     }
+
+    pub fn is_idle(&self) -> bool {
+        matches!(
+            self,
+            Self::Agent {
+                status: AgentStatus::Idle,
+                ..
+            } | Self::Terminal(TerminalStatus::Idle)
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

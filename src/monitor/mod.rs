@@ -6,6 +6,8 @@ pub mod status;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+const STATUS_HYSTERESIS: Duration = Duration::from_millis(500);
+
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -178,7 +180,11 @@ impl StatusMonitor {
                 };
             }
 
-            if new_status != current_status {
+            let dominated_by_hysteresis = current_status.is_active()
+                && new_status.is_idle()
+                && since_change < STATUS_HYSTERESIS;
+
+            if new_status != current_status && !dominated_by_hysteresis {
                 tracked.status = new_status.clone();
                 updates.push(StatusUpdate {
                     pane: pane.clone(),

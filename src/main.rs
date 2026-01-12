@@ -17,11 +17,6 @@ fn main() {
                     .with_writer(file),
             )
             .init();
-    } else {
-        tracing_subscriber::registry()
-            .with(filter)
-            .with(tracing_subscriber::fmt::layer().with_target(false))
-            .init();
     }
 
     let cli = cli::Cli::parse();

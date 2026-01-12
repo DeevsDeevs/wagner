@@ -100,15 +100,15 @@ impl ClaudeCodeDetector {
             .min()
     }
 
-    fn has_active_indicator(raw_output: &str, _clean_output: &str) -> bool {
+    fn star_indicator_state(raw_output: &str) -> Option<bool> {
         for line in raw_output.lines().rev().take(15) {
             if let Some(pos) = Self::find_star_spinner(line) {
                 if let Some(rgb) = Self::find_last_rgb_color(&line[..pos]) {
-                    return !Self::is_gray_color(rgb);
+                    return Some(!Self::is_gray_color(rgb));
                 }
             }
         }
-        false
+        None
     }
 
     fn find_last_rgb_color(text: &str) -> Option<(u8, u8, u8)> {
@@ -146,15 +146,7 @@ impl ClaudeCodeDetector {
     }
 
     fn detect_tool(output: &str) -> Option<ClaudeActivity> {
-        let tail_lines: Vec<&str> = output.lines().rev().take(10).collect();
-        let tail_text = tail_lines.join("\n");
-        let is_running = tail_text.contains("Running")
-            || tail_text.contains("In progress")
-            || tail_text.contains("⎿  …");
-
-        if !is_running {
-            return None;
-        }
+        let tail_lines: Vec<&str> = output.lines().rev().take(15).collect();
 
         TOOL_PATTERNS
             .iter()
@@ -197,20 +189,20 @@ impl AgentDetector for ClaudeCodeDetector {
         &self,
         raw_output: &str,
         clean_output: &str,
-        _output_changed: bool,
+        output_changed: bool,
         _since_change: Duration,
     ) -> AgentStatus {
-        if let Some(reason) = Self::detect_wait(clean_output) {
-            return AgentStatus::Waiting(reason);
-        }
-
         let has_spinner = Self::has_spinner(clean_output);
-        let has_active_text = Self::has_active_status(clean_output);
-        let has_active_indicator = Self::has_active_indicator(raw_output, clean_output);
+        let star_active = Self::star_indicator_state(raw_output);
+        let has_active_text = output_changed && Self::has_active_status(clean_output);
 
-        if has_spinner || has_active_text || has_active_indicator {
+        if has_spinner || star_active == Some(true) || has_active_text {
             let activity = Self::detect_tool(clean_output).unwrap_or(ClaudeActivity::Thinking);
             return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
+        }
+
+        if let Some(reason) = Self::detect_wait(clean_output) {
+            return AgentStatus::Waiting(reason);
         }
 
         AgentStatus::Idle

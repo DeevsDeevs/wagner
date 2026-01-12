@@ -8,6 +8,31 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing::{debug, warn};
 
+pub fn quote_arg_for_control_mode(arg: &str) -> String {
+    let needs_quoting = arg.contains(char::is_whitespace)
+        || arg.contains('"')
+        || arg.contains('#')
+        || arg.contains('{')
+        || arg.contains('}')
+        || arg.contains('$')
+        || arg.contains(';')
+        || arg.contains('\'')
+        || arg.contains('`')
+        || arg.contains('\\');
+    if needs_quoting {
+        format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        arg.to_string()
+    }
+}
+
+pub fn build_control_mode_command(args: &[&str]) -> String {
+    args.iter()
+        .map(|arg| quote_arg_for_control_mode(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub struct Tmux {
     control_mode: Mutex<Option<Arc<TmuxControlMode>>>,
     config: TerminalConfig,
@@ -89,27 +114,7 @@ impl Tmux {
             Arc::clone(cm)
         };
 
-        let command = args
-            .iter()
-            .map(|arg| {
-                let needs_quoting = arg.contains(char::is_whitespace)
-                    || arg.contains('"')
-                    || arg.contains('#')
-                    || arg.contains('{')
-                    || arg.contains('}')
-                    || arg.contains('$')
-                    || arg.contains(';')
-                    || arg.contains('\'')
-                    || arg.contains('`')
-                    || arg.contains('\\');
-                if needs_quoting {
-                    format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
-                } else {
-                    (*arg).to_string()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
+        let command = build_control_mode_command(args);
         let exec_start = Instant::now();
         let result = cm.execute(&command);
         let exec_elapsed = exec_start.elapsed();
@@ -222,7 +227,6 @@ impl Terminal for Tmux {
     }
 
     fn attach(&self, session: &SessionHandle) -> Result<()> {
-        // attach must use spawn - can't do interactive attach via control mode
         let status = Command::new("tmux")
             .args(["attach-session", "-t", &session.0])
             .status()
@@ -298,5 +302,234 @@ impl Terminal for Tmux {
             &height.to_string(),
         ])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quote_arg_simple_string() {
+        assert_eq!(quote_arg_for_control_mode("simple"), "simple");
+    }
+
+    #[test]
+    fn quote_arg_with_space() {
+        assert_eq!(
+            quote_arg_for_control_mode("path with spaces"),
+            "\"path with spaces\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_format_string_with_braces() {
+        assert_eq!(
+            quote_arg_for_control_mode("#{pane_id}"),
+            "\"#{pane_id}\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_format_string_with_hash() {
+        assert_eq!(
+            quote_arg_for_control_mode("#S:#I.#P"),
+            "\"#S:#I.#P\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_dollar_sign() {
+        assert_eq!(quote_arg_for_control_mode("$HOME"), "\"$HOME\"");
+    }
+
+    #[test]
+    fn quote_arg_semicolon() {
+        assert_eq!(
+            quote_arg_for_control_mode("cmd1; cmd2"),
+            "\"cmd1; cmd2\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_single_quote() {
+        assert_eq!(quote_arg_for_control_mode("it's"), "\"it's\"");
+    }
+
+    #[test]
+    fn quote_arg_backtick() {
+        assert_eq!(quote_arg_for_control_mode("`cmd`"), "\"`cmd`\"");
+    }
+
+    #[test]
+    fn quote_arg_backslash_escaped() {
+        assert_eq!(
+            quote_arg_for_control_mode("path\\file"),
+            "\"path\\\\file\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_double_quote_escaped() {
+        assert_eq!(
+            quote_arg_for_control_mode("say \"hello\""),
+            "\"say \\\"hello\\\"\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_multiple_special_chars() {
+        assert_eq!(
+            quote_arg_for_control_mode("#{pane_id}\t${var}"),
+            "\"#{pane_id}\t${var}\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_tab_character() {
+        assert_eq!(
+            quote_arg_for_control_mode("col1\tcol2"),
+            "\"col1\tcol2\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_newline_character() {
+        assert_eq!(
+            quote_arg_for_control_mode("line1\nline2"),
+            "\"line1\nline2\""
+        );
+    }
+
+    #[test]
+    fn quote_arg_hyphen_no_quoting() {
+        assert_eq!(quote_arg_for_control_mode("-t"), "-t");
+    }
+
+    #[test]
+    fn quote_arg_tmux_special_keys_no_quoting() {
+        assert_eq!(quote_arg_for_control_mode("C-c"), "C-c");
+        assert_eq!(quote_arg_for_control_mode("M-x"), "M-x");
+        assert_eq!(quote_arg_for_control_mode("BTab"), "BTab");
+        assert_eq!(quote_arg_for_control_mode("Enter"), "Enter");
+    }
+
+    #[test]
+    fn quote_arg_pane_id_no_quoting() {
+        assert_eq!(quote_arg_for_control_mode("%42"), "%42");
+    }
+
+    #[test]
+    fn quote_arg_session_name_no_quoting() {
+        assert_eq!(
+            quote_arg_for_control_mode("wagner_my-task"),
+            "wagner_my-task"
+        );
+    }
+
+    #[test]
+    fn quote_arg_empty_string() {
+        assert_eq!(quote_arg_for_control_mode(""), "");
+    }
+
+    #[test]
+    fn quote_arg_path_no_spaces() {
+        assert_eq!(
+            quote_arg_for_control_mode("/home/user/project"),
+            "/home/user/project"
+        );
+    }
+
+    #[test]
+    fn quote_arg_path_with_spaces() {
+        assert_eq!(
+            quote_arg_for_control_mode("/home/user/my project"),
+            "\"/home/user/my project\""
+        );
+    }
+
+    #[test]
+    fn build_command_simple() {
+        let cmd = build_control_mode_command(&["list-sessions"]);
+        assert_eq!(cmd, "list-sessions");
+    }
+
+    #[test]
+    fn build_command_with_options() {
+        let cmd = build_control_mode_command(&["new-session", "-d", "-s", "mysession"]);
+        assert_eq!(cmd, "new-session -d -s mysession");
+    }
+
+    #[test]
+    fn build_command_with_format_string() {
+        let cmd = build_control_mode_command(&[
+            "list-panes",
+            "-F",
+            "#{pane_id}\t#{pane_current_path}",
+        ]);
+        assert_eq!(
+            cmd,
+            "list-panes -F \"#{pane_id}\t#{pane_current_path}\""
+        );
+    }
+
+    #[test]
+    fn build_command_with_path_spaces() {
+        let cmd = build_control_mode_command(&[
+            "new-window",
+            "-c",
+            "/home/user/my project",
+        ]);
+        assert_eq!(cmd, "new-window -c \"/home/user/my project\"");
+    }
+
+    #[test]
+    fn build_command_create_pane() {
+        let cmd = build_control_mode_command(&[
+            "new-window",
+            "-t",
+            "wagner_test",
+            "-c",
+            "/home/user/project",
+            "-P",
+            "-F",
+            "#{pane_id}",
+        ]);
+        assert_eq!(
+            cmd,
+            "new-window -t wagner_test -c /home/user/project -P -F \"#{pane_id}\""
+        );
+    }
+
+    #[test]
+    fn build_command_capture_pane() {
+        let cmd = build_control_mode_command(&[
+            "capture-pane",
+            "-t",
+            "%42",
+            "-p",
+            "-e",
+            "-S",
+            "-500",
+        ]);
+        assert_eq!(cmd, "capture-pane -t %42 -p -e -S -500");
+    }
+
+    #[test]
+    fn build_command_send_keys() {
+        let cmd = build_control_mode_command(&["send-keys", "-t", "%0", "-l", "hello world"]);
+        assert_eq!(cmd, "send-keys -t %0 -l \"hello world\"");
+    }
+
+    #[test]
+    fn build_command_empty_args() {
+        let cmd = build_control_mode_command(&[]);
+        assert_eq!(cmd, "");
+    }
+
+    #[test]
+    fn build_command_preserves_backslash_in_path() {
+        let cmd = build_control_mode_command(&["send-keys", "-l", "C:\\Users\\test"]);
+        assert_eq!(cmd, "send-keys -l \"C:\\\\Users\\\\test\"");
     }
 }

@@ -13,28 +13,6 @@ use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Default)]
-pub struct DoubleTap {
-    last: Option<Instant>,
-}
-
-impl DoubleTap {
-    pub fn check(&mut self) -> bool {
-        let is_double = self
-            .last
-            .map(|t| t.elapsed() < Duration::from_millis(300))
-            .unwrap_or(false);
-
-        if is_double {
-            self.last = None;
-            true
-        } else {
-            self.last = Some(Instant::now());
-            false
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppTab {
     #[default]
@@ -116,9 +94,9 @@ pub struct App<T: Terminal, A: Agent> {
     pub repo_stats: HashMap<String, RepoStats>,
 
     last_click: Option<(u16, u16, Instant)>,
-    pub double_esc: DoubleTap,
-    pub double_tab: DoubleTap,
     terminal_view_size: Option<(u16, u16)>,
+    last_resized_pane: Option<(String, u16, u16)>,
+    inactive_sessions: HashMap<String, Instant>,
     pub dragging_sidebar: bool,
 
     pub pending_task_name: Option<String>,
@@ -189,9 +167,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             repo_stats: HashMap::new(),
 
             last_click: None,
-            double_esc: DoubleTap::default(),
-            double_tab: DoubleTap::default(),
             terminal_view_size: None,
+            last_resized_pane: None,
+            inactive_sessions: HashMap::new(),
             dragging_sidebar: false,
 
             pending_task_name: None,
@@ -448,6 +426,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
     pub fn refresh_panes(&mut self) {
         self.panes.clear();
         if let Some(task_name) = &self.selected_task {
+            self.inactive_sessions.remove(task_name);
             let session_name = session_name_for_task(task_name);
             if let Ok(panes) = self
                 .wagner
@@ -489,24 +468,45 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn poll_background_sessions(&mut self, active_session: &str) {
-        let all_sessions: Vec<_> = self
-            .tasks
-            .iter()
-            .filter_map(|task| {
-                let session_name = session_name_for_task(&task.name);
-                self.wagner
+        let recheck_interval = Duration::from_secs(10);
+        let now = Instant::now();
+
+        let task_names: Vec<_> = self.tasks.iter().map(|t| t.name.clone()).collect();
+        let mut sessions_to_poll = Vec::new();
+
+        for task_name in task_names {
+            let session_name = session_name_for_task(&task_name);
+            if session_name == active_session {
+                continue;
+            }
+
+            if let Some(last_check) = self.inactive_sessions.get(&task_name) {
+                if last_check.elapsed() < recheck_interval {
+                    continue;
+                }
+            }
+
+            if self.wagner.terminal.session_exists(&task_name).unwrap_or(false) {
+                self.inactive_sessions.remove(&task_name);
+                if let Ok(panes) = self
+                    .wagner
                     .terminal
                     .list_panes(&SessionHandle(session_name.clone()))
-                    .ok()
-                    .map(|panes| (session_name, panes))
-            })
-            .collect();
+                {
+                    sessions_to_poll.push((session_name, panes));
+                }
+            } else {
+                self.inactive_sessions.insert(task_name, now);
+            }
+        }
 
-        self.status_monitor.poll_background(
-            &self.wagner.terminal,
-            &all_sessions,
-            Some(active_session),
-        );
+        if !sessions_to_poll.is_empty() {
+            self.status_monitor.poll_background(
+                &self.wagner.terminal,
+                &sessions_to_poll,
+                Some(active_session),
+            );
+        }
     }
 
     pub fn get_task_status(&self, task_name: &str) -> SessionAggregateStatus {
@@ -838,7 +838,15 @@ impl<T: Terminal, A: Agent> App<T, A> {
     fn capture_pane(&mut self, pane: &PaneHandle) {
         if let Some((w, h)) = self.terminal_view_size {
             if w > 0 && h > 0 {
-                let _ = self.wagner.terminal.resize_pane(pane, w, h);
+                let needs_resize = self
+                    .last_resized_pane
+                    .as_ref()
+                    .map(|(id, lw, lh)| id != &pane.0 || *lw != w || *lh != h)
+                    .unwrap_or(true);
+                if needs_resize {
+                    let _ = self.wagner.terminal.resize_pane(pane, w, h);
+                    self.last_resized_pane = Some((pane.0.clone(), w, h));
+                }
             }
         }
 

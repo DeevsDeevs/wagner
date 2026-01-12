@@ -276,17 +276,26 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         }
     }
 
-    if code == KeyCode::Esc {
-        let is_double = app.double_esc.check();
-        let send_to_pane = modifiers.contains(KeyModifiers::ALT) || is_double;
-
-        if send_to_pane {
-            if let Some(pane) = app.current_pane() {
-                let _ = app.wagner.terminal.send_key(&pane, "Escape");
-                let _ = app.refresh_terminal_output();
-                app.focus = Focus::Terminal;
+    // Ctrl+E sends Escape to pane, Ctrl+T sends Tab to pane (when in terminal focus)
+    if app.focus == Focus::Terminal && modifiers.contains(KeyModifiers::CONTROL) {
+        if let KeyCode::Char(c) = code {
+            let key_to_send = match c {
+                'e' => Some("Escape"),
+                't' => Some("Tab"),
+                _ => None,
+            };
+            if let Some(key) = key_to_send {
+                if let Some(pane) = app.current_pane() {
+                    let _ = app.wagner.terminal.send_key(&pane, key);
+                    let _ = app.refresh_terminal_output();
+                }
+                return;
             }
-        } else if app.focus == Focus::Terminal {
+        }
+    }
+
+    if code == KeyCode::Esc {
+        if app.focus == Focus::Terminal {
             app.focus = Focus::Sidebar;
         } else {
             app.should_quit = true;
@@ -295,18 +304,7 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     if matches_key(code, &kb.toggle_sidebar) {
-        let is_double = app.double_tab.check();
-        let send_to_pane = modifiers.contains(KeyModifiers::ALT) || is_double;
-
-        if send_to_pane {
-            if let Some(pane) = app.current_pane() {
-                let _ = app.wagner.terminal.send_key(&pane, "Tab");
-                let _ = app.refresh_terminal_output();
-                app.focus = Focus::Terminal;
-            }
-        } else {
-            app.next_tab();
-        }
+        app.next_tab();
         return;
     }
 
@@ -377,8 +375,10 @@ fn send_key_to_pane<T: Terminal, A: Agent>(
         match code {
             KeyCode::F(n) => format!("F{}", n),
             KeyCode::Char(c) => {
-                if modifiers.contains(KeyModifiers::ALT) {
+                if modifiers.contains(KeyModifiers::CONTROL) {
                     format!("C-{}", c)
+                } else if modifiers.contains(KeyModifiers::ALT) {
+                    format!("M-{}", c)
                 } else {
                     return send_literal_to_pane(app, c);
                 }
