@@ -1,8 +1,8 @@
-use crate::cli::{Cli, Commands, WorkspaceCommands, print_completions};
+use crate::cli::{ChainsCommands, Cli, Commands, PluginCommands, WorkspaceCommands, print_completions};
 use tracing::{debug, info};
 use wagner::{
     Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner,
-    default_branch_for_task,
+    default_branch_for_task, plugins,
 };
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -41,6 +41,9 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
         Some(Commands::Update { check }) => cmd_update(check),
+        Some(Commands::Repair { dry_run, execute }) => cmd_repair(&wagner.config, !execute || dry_run),
+        Some(Commands::Plugin { command }) => cmd_plugin(command),
+        Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
         None => cmd_tui(wagner),
     }
 }
@@ -337,6 +340,154 @@ fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> R
     wagner::tui::run(wagner)
 }
 
+fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
+    println!(
+        "{}",
+        if dry_run {
+            "Scanning for orphaned resources (dry run)..."
+        } else {
+            "Scanning and cleaning orphaned resources..."
+        }
+    );
+
+    let mut found_issues = false;
+
+    if config.tasks_root.exists() {
+        for entry in std::fs::read_dir(&config.tasks_root)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_dir() {
+                continue;
+            }
+
+            let task_json = path.join(".wagner").join("task.json");
+            if !task_json.exists() {
+                found_issues = true;
+                println!("  Orphaned task directory: {}", path.display());
+
+                if !dry_run {
+                    cleanup_orphaned_dir(&path);
+                    println!("    -> Removed");
+                }
+            }
+        }
+    }
+
+    for (ws_name, ws) in &config.workspaces {
+        for (repo_name, repo_path) in &ws.repos {
+            let expanded = shellexpand::tilde(repo_path).into_owned();
+            let repo_path = std::path::PathBuf::from(&expanded);
+
+            if !repo_path.exists() {
+                continue;
+            }
+
+            let output = std::process::Command::new("git")
+                .args(["-C", &repo_path.to_string_lossy(), "worktree", "list", "--porcelain"])
+                .output();
+
+            if let Ok(output) = output {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        if let Some(wt_path) = line.strip_prefix("worktree ") {
+                            let wt_path = std::path::PathBuf::from(wt_path);
+
+                            if wt_path.starts_with(&config.tasks_root) {
+                                if let Some(task_dir) = wt_path.parent() {
+                                    let task_json = task_dir.join(".wagner").join("task.json");
+                                    if !task_json.exists() && task_dir != config.tasks_root {
+                                        found_issues = true;
+                                        println!(
+                                            "  Orphaned worktree in {}/{}: {}",
+                                            ws_name, repo_name, wt_path.display()
+                                        );
+
+                                        if !dry_run {
+                                            let _ = std::process::Command::new("git")
+                                                .args([
+                                                    "-C",
+                                                    &repo_path.to_string_lossy(),
+                                                    "worktree",
+                                                    "remove",
+                                                    "--force",
+                                                    &wt_path.to_string_lossy(),
+                                                ])
+                                                .output();
+                                            println!("    -> Removed");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !dry_run {
+                        let _ = std::process::Command::new("git")
+                            .args(["-C", &repo_path.to_string_lossy(), "worktree", "prune"])
+                            .output();
+                    }
+                }
+            }
+        }
+    }
+
+    if !found_issues {
+        println!("No orphaned resources found.");
+    } else if dry_run {
+        println!("\nRun `wagner repair --execute` to clean up these resources.");
+    } else {
+        println!("\nCleanup complete.");
+    }
+
+    Ok(())
+}
+
+fn cleanup_orphaned_dir(path: &std::path::Path) {
+    for entry in std::fs::read_dir(path).into_iter().flatten() {
+        if let Ok(entry) = entry {
+            let subpath = entry.path();
+            let git_file = subpath.join(".git");
+            if subpath.is_dir() && git_file.exists() && git_file.is_file() {
+                if let Ok(content) = std::fs::read_to_string(&git_file) {
+                    if let Some(gitdir) = content.strip_prefix("gitdir: ") {
+                        let gitdir = gitdir.trim();
+                        let gitdir_path = std::path::PathBuf::from(gitdir);
+                        // gitdir: /path/to/repo/.git/worktrees/name (regular)
+                        // gitdir: /path/to/bare-repo/worktrees/name (bare)
+                        if let Some(worktrees_dir) = gitdir_path.parent() {
+                            if let Some(git_or_repo) = worktrees_dir.parent() {
+                                let main_repo =
+                                    if git_or_repo.file_name().map(|n| n == ".git").unwrap_or(false)
+                                    {
+                                        git_or_repo.parent().map(|p| p.to_path_buf())
+                                    } else {
+                                        Some(git_or_repo.to_path_buf())
+                                    };
+
+                                if let Some(main_repo) = main_repo {
+                                    let _ = std::process::Command::new("git")
+                                        .args([
+                                            "-C",
+                                            &main_repo.to_string_lossy(),
+                                            "worktree",
+                                            "remove",
+                                            "--force",
+                                            &subpath.to_string_lossy(),
+                                        ])
+                                        .output();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(path);
+}
+
 const REPO: &str = "DeevsDeevs/wagner";
 const BINARY_NAME: &str = "wagner";
 
@@ -582,6 +733,226 @@ fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {
 
             config.save()?;
             println!("Removed workspace: {}", name);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsCommands) -> Result<()> {
+    use wagner::plugins::chains;
+
+    if !wagner.config.plugins.chains.enabled {
+        eprintln!("Error: Chains plugin is not enabled");
+        eprintln!("Enable it with: wagner plugin enable chains");
+        std::process::exit(1);
+    }
+
+    match command {
+        ChainsCommands::List => {
+            let data = chains::load_all_chains(&wagner.config.tasks_root, None)?;
+
+            if data.total_chains() == 0 {
+                println!("No chains found");
+                println!("Create one with: /chain-link <name>");
+                return Ok(());
+            }
+
+            for repo in &data.repos {
+                println!("{} (repo)", repo.repo_name);
+                for chain in &repo.chains {
+                    let link_count = chain.link_count();
+                    let link_label = if link_count == 1 { "link" } else { "links" };
+                    let latest = chain.latest_link().map(|l| l.timestamp.as_str()).unwrap_or("");
+                    println!("  {} [{} {}] {}", chain.name, link_count, link_label, latest);
+                }
+            }
+
+            if !data.task_local.is_empty() {
+                println!("\nTask-local (not synced)");
+                for chain in &data.task_local {
+                    let link_count = chain.link_count();
+                    let link_label = if link_count == 1 { "link" } else { "links" };
+                    println!("  {} [{} {}]", chain.name, link_count, link_label);
+                }
+            }
+        }
+        ChainsCommands::Promote { chain, task } => {
+            let task_name = task
+                .or_else(|| detect_task_from_cwd(&wagner.config))
+                .unwrap_or_else(|| {
+                    eprintln!("Error: Not inside a task directory");
+                    eprintln!("Either cd into a task, or specify: wagner chains promote <chain> --task <task>");
+                    std::process::exit(1);
+                });
+
+            let task_path = wagner.config.tasks_root.join(&task_name);
+            let local_chain_dir = task_path.join(".claude").join("chains").join(&chain);
+
+            if !local_chain_dir.exists() {
+                eprintln!("Error: Chain '{}' not found in task '{}'", chain, task_name);
+                std::process::exit(1);
+            }
+
+            if local_chain_dir.is_symlink() {
+                eprintln!("Error: Chain '{}' is already at repo level (symlinked)", chain);
+                std::process::exit(1);
+            }
+
+            let plugins_link = task_path.join(".wagner").join("plugins");
+            if !plugins_link.exists() || !plugins_link.is_symlink() {
+                eprintln!("Error: Task '{}' doesn't have repo-level plugin storage set up", task_name);
+                eprintln!("This task may have been created before the chains plugin was enabled");
+                std::process::exit(1);
+            }
+
+            let repo_chains_dir = if let Ok(target) = std::fs::read_link(&plugins_link) {
+                if target.is_absolute() {
+                    target.join("chains")
+                } else {
+                    plugins_link.parent().unwrap().join(&target).join("chains")
+                }
+            } else {
+                eprintln!("Error: Could not resolve repo plugins directory");
+                std::process::exit(1);
+            };
+
+            let target_chain_dir = repo_chains_dir.join(&chain);
+            if target_chain_dir.exists() {
+                eprintln!("Error: Chain '{}' already exists at repo level", chain);
+                std::process::exit(1);
+            }
+
+            std::fs::create_dir_all(&repo_chains_dir)?;
+            std::fs::rename(&local_chain_dir, &target_chain_dir)?;
+
+            println!("Promoted chain '{}' to repo level", chain);
+            println!("  From: {}", local_chain_dir.display());
+            println!("  To:   {}", target_chain_dir.display());
+        }
+        ChainsCommands::Show { chain, link } => {
+            let data = chains::load_all_chains(&wagner.config.tasks_root, None)?;
+
+            let found_chain = data.all_chains().find(|c| c.name == chain);
+
+            let chain_data = found_chain.unwrap_or_else(|| {
+                eprintln!("Error: Chain '{}' not found", chain);
+                std::process::exit(1);
+            });
+
+            let link_data = if let Some(idx) = link {
+                chain_data.links.get(idx).unwrap_or_else(|| {
+                    eprintln!("Error: Link {} not found in chain '{}'", idx, chain);
+                    eprintln!("Chain has {} links", chain_data.links.len());
+                    std::process::exit(1);
+                })
+            } else {
+                chain_data.latest_link().unwrap_or_else(|| {
+                    eprintln!("Error: Chain '{}' has no links", chain);
+                    std::process::exit(1);
+                })
+            };
+
+            let content = std::fs::read_to_string(&link_data.file_path)?;
+            println!("{}", content);
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_plugin(command: PluginCommands) -> Result<()> {
+    let mut config = Config::load()?;
+
+    match command {
+        PluginCommands::List => {
+            let all_plugins = plugins::builtin_plugins();
+
+            if all_plugins.is_empty() {
+                println!("No plugins available");
+                return Ok(());
+            }
+
+            println!("Available plugins:\n");
+            for plugin in all_plugins {
+                let status = if plugin.is_enabled(&config) {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+                println!("  {} [{}]", plugin.id(), status);
+                println!("    {}", plugin.description());
+                println!();
+            }
+        }
+        PluginCommands::Enable { plugin: plugin_id } => {
+            let plugin = plugins::get_plugin(&plugin_id).unwrap_or_else(|| {
+                eprintln!("Plugin '{}' not found", plugin_id);
+                eprintln!("Run `wagner plugin list` to see available plugins");
+                std::process::exit(1);
+            });
+
+            match plugin_id.as_str() {
+                "chains" => config.plugins.chains.enabled = true,
+                _ => {
+                    eprintln!("Unknown plugin: {}", plugin_id);
+                    std::process::exit(1);
+                }
+            }
+
+            config.save()?;
+
+            if let Err(e) = plugins::install_skills(plugin.as_ref(), &config) {
+                eprintln!("Warning: Failed to install skills: {}", e);
+            }
+
+            info!(plugin = %plugin_id, "Plugin enabled");
+            println!("Enabled plugin: {}", plugin_id);
+            println!("Skills installed to ~/.claude/commands/");
+        }
+        PluginCommands::Disable { plugin: plugin_id } => {
+            let plugin = plugins::get_plugin(&plugin_id).unwrap_or_else(|| {
+                eprintln!("Plugin '{}' not found", plugin_id);
+                eprintln!("Run `wagner plugin list` to see available plugins");
+                std::process::exit(1);
+            });
+
+            match plugin_id.as_str() {
+                "chains" => config.plugins.chains.enabled = false,
+                _ => {
+                    eprintln!("Unknown plugin: {}", plugin_id);
+                    std::process::exit(1);
+                }
+            }
+
+            config.save()?;
+
+            if let Err(e) = plugins::uninstall_skills(plugin.as_ref()) {
+                eprintln!("Warning: Failed to uninstall skills: {}", e);
+            }
+
+            info!(plugin = %plugin_id, "Plugin disabled");
+            println!("Disabled plugin: {}", plugin_id);
+        }
+        PluginCommands::InstallSkills => {
+            let all_plugins = plugins::builtin_plugins();
+            let mut installed = 0;
+
+            for plugin in all_plugins {
+                if plugin.is_enabled(&config) {
+                    if let Err(e) = plugins::install_skills(plugin.as_ref(), &config) {
+                        eprintln!("Warning: Failed to install skills for {}: {}", plugin.id(), e);
+                    } else {
+                        installed += 1;
+                        println!("Installed skills for: {}", plugin.id());
+                    }
+                }
+            }
+
+            if installed == 0 {
+                println!("No enabled plugins with skills to install");
+                println!("Enable a plugin with: wagner plugin enable <plugin>");
+            }
         }
     }
 

@@ -372,10 +372,6 @@ fn test_add_pane_defaults() {
     wagner.add_pane("multi-pane-task", Some("repo1")).unwrap();
 }
 
-// =====================
-// WORKSPACE CONFIG TESTS
-// =====================
-
 #[test]
 fn test_create_task_from_workspace() {
     let ctx = TestContext::new();
@@ -429,10 +425,6 @@ fn test_workspace_custom_base_branch() {
     assert_eq!(ws.base_branch, "develop");
 }
 
-// =====================
-// REPO SPEC PARSING TESTS
-// =====================
-
 #[test]
 fn test_repo_spec_parse_full() {
     let spec = RepoSpec::parse("myrepo:/path/to/repo:feature/branch", None).unwrap();
@@ -463,10 +455,6 @@ fn test_repo_spec_parse_invalid() {
     let result = RepoSpec::parse("invalid", None);
     assert!(result.is_err());
 }
-
-// =====================
-// DELETE FORCE TESTS
-// =====================
 
 #[test]
 fn test_delete_task_force_deletes_branch() {
@@ -505,10 +493,6 @@ fn test_delete_task_force_deletes_branch() {
     );
 }
 
-// =====================
-// CONFIG TESTS
-// =====================
-
 #[test]
 fn test_config_default_values() {
     let config = Config::default();
@@ -542,10 +526,6 @@ fn test_config_save_and_load() {
     assert!(loaded.workspaces["my-ws"].repos.contains_key("test"));
 }
 
-// =====================
-// DEFAULT BRANCH TESTS
-// =====================
-
 #[test]
 fn test_default_branch_for_task() {
     use wagner::default_branch_for_task;
@@ -553,10 +533,6 @@ fn test_default_branch_for_task() {
     assert_eq!(default_branch_for_task("my-feature"), "feature/my-feature");
     assert_eq!(default_branch_for_task("fix-bug"), "feature/fix-bug");
 }
-
-// =====================
-// ERROR HANDLING TESTS
-// =====================
 
 #[test]
 fn test_repo_not_found_error() {
@@ -609,10 +585,6 @@ fn test_remove_nonexistent_repo_error() {
     assert!(result.is_err(), "Removing nonexistent repo should error");
 }
 
-// =====================
-// MOCK TERMINAL TESTS
-// =====================
-
 #[test]
 fn test_mock_terminal_send_key_tracking() {
     let terminal = MockTerminal::new();
@@ -656,10 +628,6 @@ fn test_mock_terminal_send_literal() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0], ("%0".to_string(), "hello world".to_string()));
 }
-
-// =====================
-// GET TASK / CD TESTS
-// =====================
 
 #[test]
 fn test_get_task_returns_worktree_path() {
@@ -727,4 +695,132 @@ fn test_get_task_not_found() {
 
     let result = wagner.get_task("nonexistent-task");
     assert!(result.is_err(), "Should error for nonexistent task");
+}
+
+#[test]
+fn test_config_repos_root_default() {
+    let config = Config::default();
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let expected = PathBuf::from(&home).join(".wagner").join("repos");
+    assert_eq!(config.repos_root, expected);
+}
+
+#[test]
+fn test_config_repos_root_custom() {
+    let temp_dir = TempDir::new().unwrap();
+    let custom_repos_root = temp_dir.path().join("custom-repos");
+
+    let config_json = format!(
+        r#"{{
+            "tasks_root": "{}",
+            "repos_root": "{}",
+            "default_agent": "claude"
+        }}"#,
+        temp_dir.path().join("tasks").to_string_lossy(),
+        custom_repos_root.to_string_lossy()
+    );
+
+    let config: Config = serde_json::from_str(&config_json).unwrap();
+    assert_eq!(config.repos_root, custom_repos_root);
+}
+
+#[test]
+fn test_create_task_rollback_on_second_repo_failure() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let specs = vec![
+        RepoSpec {
+            name: "repo1".to_string(),
+            source: RepoSource::Local(ctx.repo_path.clone()),
+            branch: "feature/rollback".to_string(),
+        },
+        RepoSpec {
+            name: "repo2".to_string(),
+            source: RepoSource::Local(PathBuf::from("/nonexistent/path")),
+            branch: "feature/rollback".to_string(),
+        },
+    ];
+
+    let result = wagner.create_task("rollback-task", &specs, None);
+    assert!(result.is_err());
+
+    let task_path = ctx.tasks_root.join("rollback-task");
+    assert!(
+        !task_path.exists(),
+        "Task directory should be cleaned up on failure"
+    );
+
+    let worktree1 = task_path.join("repo1");
+    assert!(
+        !worktree1.exists(),
+        "First worktree should be cleaned up on failure"
+    );
+
+    let tasks = wagner.list_tasks().unwrap();
+    assert!(
+        !tasks.iter().any(|t| t.name == "rollback-task"),
+        "Task should not be saved"
+    );
+}
+
+#[test]
+fn test_create_task_rollback_cleans_multiple_worktrees() {
+    let ctx = TestContext::new();
+    let repo2_path = ctx.add_second_repo();
+    let wagner = ctx.wagner();
+
+    let specs = vec![
+        RepoSpec {
+            name: "repo1".to_string(),
+            source: RepoSource::Local(ctx.repo_path.clone()),
+            branch: "feature/multi-rollback".to_string(),
+        },
+        RepoSpec {
+            name: "repo2".to_string(),
+            source: RepoSource::Local(repo2_path.clone()),
+            branch: "feature/multi-rollback".to_string(),
+        },
+        RepoSpec {
+            name: "repo3".to_string(),
+            source: RepoSource::Local(PathBuf::from("/nonexistent/path")),
+            branch: "feature/multi-rollback".to_string(),
+        },
+    ];
+
+    let result = wagner.create_task("multi-rollback-task", &specs, None);
+    assert!(result.is_err());
+
+    let task_path = ctx.tasks_root.join("multi-rollback-task");
+    assert!(
+        !task_path.exists(),
+        "Task directory should be cleaned up on failure"
+    );
+}
+
+#[test]
+fn test_create_task_rollback_first_repo_failure() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let specs = vec![RepoSpec {
+        name: "repo1".to_string(),
+        source: RepoSource::Local(PathBuf::from("/nonexistent/path")),
+        branch: "feature/first-fail".to_string(),
+    }];
+
+    let result = wagner.create_task("first-fail-task", &specs, None);
+    assert!(result.is_err());
+
+    let task_path = ctx.tasks_root.join("first-fail-task");
+    assert!(
+        !task_path.exists(),
+        "Task directory should be cleaned up when first repo fails"
+    );
+
+    let tasks = wagner.list_tasks().unwrap();
+    assert!(
+        !tasks.iter().any(|t| t.name == "first-fail-task"),
+        "Task should not be saved"
+    );
 }

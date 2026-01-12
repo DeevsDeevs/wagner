@@ -4,6 +4,7 @@ pub mod error;
 pub mod git;
 pub mod model;
 pub mod monitor;
+pub mod plugins;
 pub mod store;
 pub mod terminal;
 pub mod tui;

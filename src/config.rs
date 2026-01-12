@@ -3,6 +3,18 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PluginConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PluginsConfig {
+    #[serde(default)]
+    pub chains: PluginConfig,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Keybindings {
     #[serde(default = "default_quit")]
@@ -159,6 +171,8 @@ impl Default for Workspace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub tasks_root: PathBuf,
+    #[serde(default = "default_repos_root")]
+    pub repos_root: PathBuf,
     pub default_agent: String,
     #[serde(default = "default_refresh_ms")]
     pub refresh_interval_ms: u64,
@@ -178,10 +192,15 @@ pub struct Config {
     pub keybindings: Keybindings,
     #[serde(default)]
     pub workspaces: HashMap<String, Workspace>,
+    #[serde(default)]
+    pub plugins: PluginsConfig,
 }
 
 fn default_diff_base() -> String {
     "main".to_string()
+}
+fn default_repos_root() -> PathBuf {
+    home_dir().join(".wagner").join("repos")
 }
 fn default_refresh_ms() -> u64 {
     100
@@ -203,6 +222,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             tasks_root: home_dir().join("tasks"),
+            repos_root: default_repos_root(),
             default_agent: "claude".to_string(),
             refresh_interval_ms: default_refresh_ms(),
             show_hints: false,
@@ -213,6 +233,7 @@ impl Default for Config {
             diff_base: default_diff_base(),
             keybindings: Keybindings::default(),
             workspaces: HashMap::new(),
+            plugins: PluginsConfig::default(),
         }
     }
 }

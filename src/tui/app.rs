@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
+use crate::plugins::chains::ChainsData;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::wagner::{RepoSpec, Wagner, default_branch_for_task};
 
@@ -10,6 +11,21 @@ use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AppTab {
+    #[default]
+    Tasks,
+    Chains,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChainsViewMode {
+    #[default]
+    ChainList,
+    LinkList,
+    LinkPreview,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -90,6 +106,15 @@ pub struct App<T: Terminal, A: Agent> {
     pub pending_task_name: Option<String>,
     pub workspace_list: Vec<String>,
     pub workspace_index: usize,
+
+    pub current_tab: AppTab,
+    pub chains_data: Option<ChainsData>,
+    pub chains_view_mode: ChainsViewMode,
+    pub chains_list_state: ListState,
+    pub selected_chain_idx: Option<usize>,
+    pub selected_link_idx: Option<usize>,
+    pub chain_link_content: String,
+    pub chain_link_scroll: usize,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -158,6 +183,15 @@ impl<T: Terminal, A: Agent> App<T, A> {
             pending_task_name: None,
             workspace_list: Vec::new(),
             workspace_index: 0,
+
+            current_tab: AppTab::default(),
+            chains_data: None,
+            chains_view_mode: ChainsViewMode::default(),
+            chains_list_state: ListState::default(),
+            selected_chain_idx: None,
+            selected_link_idx: None,
+            chain_link_content: String::new(),
+            chain_link_scroll: 0,
         }
     }
 
@@ -1349,5 +1383,271 @@ impl<T: Terminal, A: Agent> App<T, A> {
             let key = repo.worktree.to_string_lossy().to_string();
             self.repo_stats.insert(key, stats);
         }
+    }
+
+    pub fn switch_tab(&mut self, tab: AppTab) {
+        if self.current_tab != tab {
+            self.current_tab = tab;
+            if tab == AppTab::Chains {
+                self.refresh_chains();
+            }
+        }
+    }
+
+    pub fn next_tab(&mut self) {
+        self.current_tab = match self.current_tab {
+            AppTab::Tasks => AppTab::Chains,
+            AppTab::Chains => AppTab::Tasks,
+        };
+        if self.current_tab == AppTab::Chains {
+            self.refresh_chains();
+        }
+    }
+
+    pub fn refresh_chains(&mut self) {
+        use crate::plugins::chains::load_all_chains;
+
+        match load_all_chains(&self.wagner.config.tasks_root, None) {
+            Ok(data) => {
+                self.chains_data = Some(data);
+                if self.selected_chain_idx.is_none() {
+                    self.chains_list_state.select(Some(0));
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to load chains");
+                self.chains_data = None;
+            }
+        }
+    }
+
+    pub fn chains_next(&mut self) {
+        match self.chains_view_mode {
+            ChainsViewMode::ChainList => {
+                let total = self.total_chain_count();
+                if total == 0 {
+                    return;
+                }
+                let current = self.chains_list_state.selected().unwrap_or(0);
+                let next = if current + 1 >= total { 0 } else { current + 1 };
+                self.chains_list_state.select(Some(next));
+            }
+            ChainsViewMode::LinkList => {
+                if let Some(chain_idx) = self.selected_chain_idx {
+                    if let Some(chain) = self.get_chain_at_index(chain_idx) {
+                        let current = self.selected_link_idx.unwrap_or(0);
+                        let next = if current + 1 >= chain.links.len() {
+                            0
+                        } else {
+                            current + 1
+                        };
+                        self.selected_link_idx = Some(next);
+                    }
+                }
+            }
+            ChainsViewMode::LinkPreview => {
+                self.chain_link_scroll = self.chain_link_scroll.saturating_add(1);
+            }
+        }
+    }
+
+    pub fn chains_prev(&mut self) {
+        match self.chains_view_mode {
+            ChainsViewMode::ChainList => {
+                let total = self.total_chain_count();
+                if total == 0 {
+                    return;
+                }
+                let current = self.chains_list_state.selected().unwrap_or(0);
+                let prev = if current == 0 { total - 1 } else { current - 1 };
+                self.chains_list_state.select(Some(prev));
+            }
+            ChainsViewMode::LinkList => {
+                if let Some(chain_idx) = self.selected_chain_idx {
+                    if let Some(chain) = self.get_chain_at_index(chain_idx) {
+                        let current = self.selected_link_idx.unwrap_or(0);
+                        let prev = if current == 0 {
+                            chain.links.len().saturating_sub(1)
+                        } else {
+                            current - 1
+                        };
+                        self.selected_link_idx = Some(prev);
+                    }
+                }
+            }
+            ChainsViewMode::LinkPreview => {
+                self.chain_link_scroll = self.chain_link_scroll.saturating_sub(1);
+            }
+        }
+    }
+
+    pub fn chains_select(&mut self) {
+        match self.chains_view_mode {
+            ChainsViewMode::ChainList => {
+                if let Some(idx) = self.chains_list_state.selected() {
+                    self.selected_chain_idx = Some(idx);
+                    self.selected_link_idx = Some(0);
+                    self.chains_view_mode = ChainsViewMode::LinkList;
+                }
+            }
+            ChainsViewMode::LinkList => {
+                if let Some(chain_idx) = self.selected_chain_idx {
+                    if let Some(link_idx) = self.selected_link_idx {
+                        if let Some(chain) = self.get_chain_at_index(chain_idx) {
+                            if let Some(link) = chain.links.get(link_idx) {
+                                if let Ok(content) = std::fs::read_to_string(&link.file_path) {
+                                    self.chain_link_content = content;
+                                    self.chain_link_scroll = 0;
+                                    self.chains_view_mode = ChainsViewMode::LinkPreview;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ChainsViewMode::LinkPreview => {}
+        }
+    }
+
+    pub fn chains_back(&mut self) {
+        match self.chains_view_mode {
+            ChainsViewMode::ChainList => {
+                self.switch_tab(AppTab::Tasks);
+            }
+            ChainsViewMode::LinkList => {
+                self.chains_view_mode = ChainsViewMode::ChainList;
+                self.selected_chain_idx = None;
+                self.selected_link_idx = None;
+            }
+            ChainsViewMode::LinkPreview => {
+                self.chains_view_mode = ChainsViewMode::LinkList;
+                self.chain_link_content.clear();
+                self.chain_link_scroll = 0;
+            }
+        }
+    }
+
+    fn total_chain_count(&self) -> usize {
+        self.chains_data
+            .as_ref()
+            .map(|d| d.total_chains())
+            .unwrap_or(0)
+    }
+
+    pub fn get_chain_at_index(&self, idx: usize) -> Option<&crate::plugins::chains::Chain> {
+        let data = self.chains_data.as_ref()?;
+        let mut current = 0;
+
+        for repo in &data.repos {
+            for chain in &repo.chains {
+                if current == idx {
+                    return Some(chain);
+                }
+                current += 1;
+            }
+        }
+
+        for chain in &data.task_local {
+            if current == idx {
+                return Some(chain);
+            }
+            current += 1;
+        }
+
+        None
+    }
+
+    pub fn promote_selected_chain(&mut self) {
+        use crate::plugins::chains::ChainSource;
+
+        let idx = match self.chains_list_state.selected() {
+            Some(i) => i,
+            None => return,
+        };
+
+        let chain = match self.get_chain_at_index(idx) {
+            Some(c) => c.clone(),
+            None => return,
+        };
+
+        let task_path = match &chain.source {
+            ChainSource::TaskLocal(p) => p.clone(),
+            ChainSource::Repo(_) => {
+                self.status_message = Some((
+                    "Chain is already at repo level".to_string(),
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+        };
+
+        let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
+        let local_chain_dir = task_path.join(".claude").join("chains").join(chain_name);
+
+        if !local_chain_dir.exists() {
+            self.status_message = Some((
+                format!("Error: Chain directory not found"),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+
+        let plugins_link = task_path.join(".wagner").join("plugins");
+        if !plugins_link.exists() || !plugins_link.is_symlink() {
+            self.status_message = Some((
+                "Error: No repo-level plugin storage".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+
+        let repo_chains_dir = match std::fs::read_link(&plugins_link) {
+            Ok(target) => {
+                if target.is_absolute() {
+                    target.join("chains")
+                } else {
+                    plugins_link.parent().unwrap().join(&target).join("chains")
+                }
+            }
+            Err(_) => {
+                self.status_message = Some((
+                    "Error: Could not resolve repo directory".to_string(),
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+        };
+
+        let target_chain_dir = repo_chains_dir.join(chain_name);
+        if target_chain_dir.exists() {
+            self.status_message = Some((
+                format!("Error: Chain already exists at repo level"),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+
+        if let Err(_) = std::fs::create_dir_all(&repo_chains_dir) {
+            self.status_message = Some((
+                "Error: Could not create chains directory".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+
+        if let Err(_) = std::fs::rename(&local_chain_dir, &target_chain_dir) {
+            self.status_message = Some((
+                "Error: Could not move chain".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+
+        self.status_message = Some((
+            format!("Promoted chain '{}'", chain_name),
+            std::time::Instant::now(),
+        ));
+
+        self.refresh_chains();
     }
 }

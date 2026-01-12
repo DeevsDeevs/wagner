@@ -1,3 +1,4 @@
+pub mod chains_view;
 pub mod components;
 pub mod diff_view;
 pub mod help_popup;

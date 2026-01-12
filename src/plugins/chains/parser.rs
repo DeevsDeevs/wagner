@@ -1,0 +1,240 @@
+use super::data::{Chain, ChainLink, ChainSource, ChainsData, RepoChains};
+use crate::error::Result;
+use std::path::{Path, PathBuf};
+use tracing::debug;
+
+pub fn load_chains_from_path(path: &Path, source: ChainSource) -> Result<Vec<Chain>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut chains = Vec::new();
+
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let chain_dir = entry.path();
+
+        if !chain_dir.is_dir() {
+            continue;
+        }
+
+        let chain_name = chain_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let links = load_links_from_chain_dir(&chain_dir)?;
+
+        if !links.is_empty() {
+            chains.push(Chain {
+                name: chain_name,
+                links,
+                source: source.clone(),
+            });
+        }
+    }
+
+    chains.sort_by(|a, b| {
+        let a_latest = a.latest_link().map(|l| &l.timestamp);
+        let b_latest = b.latest_link().map(|l| &l.timestamp);
+        b_latest.cmp(&a_latest)
+    });
+
+    Ok(chains)
+}
+
+fn load_links_from_chain_dir(chain_dir: &Path) -> Result<Vec<ChainLink>> {
+    let mut links = Vec::new();
+
+    for entry in std::fs::read_dir(chain_dir)? {
+        let entry = entry?;
+        let file_path = entry.path();
+
+        if !file_path.is_file() {
+            continue;
+        }
+
+        let file_name = match file_path.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => continue,
+        };
+
+        if !file_name.ends_with(".md") {
+            continue;
+        }
+
+        if let Some(link) = parse_chain_link_filename(&file_path) {
+            links.push(link);
+        }
+    }
+
+    links.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+    Ok(links)
+}
+
+fn parse_chain_link_filename(file_path: &Path) -> Option<ChainLink> {
+    let file_name = file_path.file_stem()?.to_string_lossy().to_string();
+
+    let parts: Vec<&str> = file_name.splitn(2, '-').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let timestamp_parts: Vec<&str> = file_name.split('-').collect();
+    if timestamp_parts.len() < 5 {
+        return None;
+    }
+
+    let timestamp = format!(
+        "{}-{}-{}-{}",
+        timestamp_parts[0],
+        timestamp_parts[1],
+        timestamp_parts[2],
+        timestamp_parts[3]
+    );
+    let slug = timestamp_parts[4..].join("-");
+
+    let (summary, next_step) = parse_chain_link_content(file_path);
+
+    Some(ChainLink {
+        timestamp,
+        slug,
+        file_path: file_path.to_path_buf(),
+        summary,
+        next_step,
+    })
+}
+
+fn parse_chain_link_content(file_path: &Path) -> (Option<String>, Option<String>) {
+    let content = match std::fs::read_to_string(file_path) {
+        Ok(c) => c,
+        Err(_) => return (None, None),
+    };
+
+    let summary = extract_section(&content, "Primary Request and Intent");
+    let next_step = extract_section(&content, "Next Step");
+
+    (summary, next_step)
+}
+
+fn extract_section(content: &str, section_name: &str) -> Option<String> {
+    let marker = format!("## ");
+    let section_header = content.lines().find(|line| {
+        line.starts_with(&marker) && line.to_lowercase().contains(&section_name.to_lowercase())
+    })?;
+
+    let start_idx = content.find(section_header)? + section_header.len();
+    let rest = &content[start_idx..];
+
+    let end_idx = rest
+        .find("\n## ")
+        .or_else(|| rest.find("\n---"))
+        .unwrap_or(rest.len());
+
+    let section_content = rest[..end_idx].trim();
+
+    if section_content.is_empty() {
+        None
+    } else {
+        let first_para = section_content
+            .split("\n\n")
+            .next()
+            .unwrap_or(section_content);
+        let truncated = if first_para.len() > 200 {
+            format!("{}...", &first_para[..200])
+        } else {
+            first_para.to_string()
+        };
+        Some(truncated)
+    }
+}
+
+pub fn load_all_chains(
+    tasks_root: &Path,
+    task_name: Option<&str>,
+) -> Result<ChainsData> {
+    let mut data = ChainsData::default();
+    let mut seen_repos: std::collections::HashMap<PathBuf, usize> = std::collections::HashMap::new();
+
+    if !tasks_root.exists() {
+        return Ok(data);
+    }
+
+    for entry in std::fs::read_dir(tasks_root)? {
+        let entry = entry?;
+        let task_path = entry.path();
+
+        if !task_path.is_dir() {
+            continue;
+        }
+
+        let current_task_name = task_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if let Some(filter_task) = task_name {
+            if current_task_name != filter_task {
+                continue;
+            }
+        }
+
+        let task_json = task_path.join(".wagner").join("task.json");
+        if !task_json.exists() {
+            continue;
+        }
+
+        let plugins_link = task_path.join(".wagner").join("plugins");
+        if plugins_link.is_symlink() {
+            if let Ok(target) = std::fs::read_link(&plugins_link) {
+                let chains_dir = if target.is_absolute() {
+                    target.join("chains")
+                } else {
+                    plugins_link.parent().unwrap().join(&target).join("chains")
+                };
+
+                if chains_dir.exists() {
+                    let repo_path = chains_dir.parent().and_then(|p| p.parent()).unwrap_or(&chains_dir).to_path_buf();
+
+                    if !seen_repos.contains_key(&repo_path) {
+                        let repo_name = repo_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+
+                        let chains = load_chains_from_path(&chains_dir, ChainSource::Repo(repo_path.clone()))?;
+
+                        seen_repos.insert(repo_path.clone(), data.repos.len());
+                        data.repos.push(RepoChains {
+                            repo_name,
+                            repo_path,
+                            chains,
+                        });
+                    }
+                }
+            }
+        }
+
+        let local_chains_dir = task_path.join(".claude").join("chains");
+        if local_chains_dir.exists() && !local_chains_dir.is_symlink() {
+            let local_chains = load_chains_from_path(
+                &local_chains_dir,
+                ChainSource::TaskLocal(task_path.clone()),
+            )?;
+
+            for mut chain in local_chains {
+                chain.name = format!("{}/{}", current_task_name, chain.name);
+                data.task_local.push(chain);
+            }
+        }
+    }
+
+    debug!(
+        repos = data.repos.len(),
+        task_local = data.task_local.len(),
+        "Loaded chains"
+    );
+
+    Ok(data)
+}

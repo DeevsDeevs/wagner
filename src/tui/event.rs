@@ -3,7 +3,7 @@ use crate::config::Keybindings;
 use crate::error::Result;
 use crate::terminal::Terminal;
 
-use super::app::{App, Focus, InputMode, SidebarSection};
+use super::app::{App, AppTab, Focus, InputMode, SidebarSection};
 
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -214,6 +214,11 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         return;
     }
 
+    if app.current_tab == AppTab::Chains {
+        handle_chains_mode(app, code);
+        return;
+    }
+
     if app.focus == Focus::Terminal {
         if code == KeyCode::Esc {
             if modifiers.contains(KeyModifiers::ALT) {
@@ -233,10 +238,7 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
                     let _ = app.refresh_terminal_output();
                 }
             } else {
-                app.focus = Focus::Sidebar;
-                if !app.show_sidebar {
-                    app.show_sidebar = true;
-                }
+                app.next_tab();
             }
             return;
         }
@@ -253,10 +255,15 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         }
     }
 
+    if matches_key(code, &kb.toggle_sidebar) {
+        app.next_tab();
+        return;
+    }
+
     match get_action(code, kb) {
         Some(Action::Quit) => app.should_quit = true,
         Some(Action::Help) => app.toggle_help(),
-        Some(Action::ToggleSidebar) => app.toggle_sidebar(),
+        Some(Action::ToggleSidebar) => app.next_tab(),
         Some(Action::Refresh) => {
             let _ = app.refresh_data();
         }
@@ -505,6 +512,49 @@ fn handle_workspace_select_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code
 
     if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
         app.workspace_prev();
+    }
+}
+
+fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Tab || matches_key(code, &kb.toggle_sidebar) {
+        app.next_tab();
+        return;
+    }
+
+    if code == KeyCode::Esc || matches_key(code, &kb.quit) {
+        app.chains_back();
+        return;
+    }
+
+    if matches_key(code, &kb.help) {
+        app.toggle_help();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.chains_next();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.chains_prev();
+        return;
+    }
+
+    if code == KeyCode::Enter {
+        app.chains_select();
+        return;
+    }
+
+    if matches_key(code, &kb.refresh) {
+        app.refresh_chains();
+        return;
+    }
+
+    if code == KeyCode::Char('p') {
+        app.promote_selected_chain();
     }
 }
 

@@ -119,6 +119,78 @@ pub enum Commands {
         #[arg(long)]
         check: bool,
     },
+
+    /// Clean up orphaned worktrees and task directories
+    Repair {
+        /// Show what would be cleaned up without making changes
+        #[arg(long, default_value = "true")]
+        dry_run: bool,
+
+        /// Actually perform cleanup (use with caution)
+        #[arg(long)]
+        execute: bool,
+    },
+
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommands,
+    },
+
+    /// Manage chains (requires chains plugin enabled)
+    Chains {
+        #[command(subcommand)]
+        command: ChainsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PluginCommands {
+    /// List all available plugins
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Enable a plugin
+    Enable {
+        /// Plugin ID (e.g., chains)
+        plugin: String,
+    },
+
+    /// Disable a plugin
+    Disable {
+        /// Plugin ID
+        plugin: String,
+    },
+
+    /// Install agent skills for enabled plugins
+    InstallSkills,
+}
+
+#[derive(Subcommand)]
+pub enum ChainsCommands {
+    /// List all chains
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Promote a task-local chain to repo level
+    Promote {
+        /// Chain name to promote
+        chain: String,
+
+        /// Task name (auto-detected if inside task dir)
+        #[arg(short, long)]
+        task: Option<String>,
+    },
+
+    /// Show chain content
+    Show {
+        /// Chain name
+        chain: String,
+
+        /// Link index (latest if not specified)
+        #[arg(short, long)]
+        link: Option<usize>,
+    },
 }
 
 #[derive(Subcommand)]
