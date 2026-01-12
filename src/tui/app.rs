@@ -1420,6 +1420,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn switch_tab(&mut self, tab: AppTab) {
+        if tab == AppTab::Chains && !self.is_chains_enabled() {
+            return;
+        }
         if self.current_tab != tab {
             self.current_tab = tab;
             if tab == AppTab::Chains {
@@ -1428,12 +1431,21 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
     }
 
+    pub fn is_chains_enabled(&self) -> bool {
+        self.wagner.config.plugins.chains.enabled
+    }
+
     pub fn next_tab(&mut self) {
+        if !self.is_chains_enabled() {
+            return;
+        }
         self.current_tab = match self.current_tab {
             AppTab::Tasks => AppTab::Chains,
             AppTab::Chains => AppTab::Tasks,
         };
         if self.current_tab == AppTab::Chains {
+            self.focus = Focus::Sidebar;
+            self.chains_view_mode = ChainsViewMode::ChainList;
             self.refresh_chains();
         }
     }
@@ -1456,76 +1468,107 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn chains_next(&mut self) {
-        match self.chains_view_mode {
-            ChainsViewMode::ChainList => {
-                let total = self.total_chain_count();
-                if total == 0 {
-                    return;
-                }
-                let current = self.chains_list_state.selected().unwrap_or(0);
-                let next = if current + 1 >= total { 0 } else { current + 1 };
-                self.chains_list_state.select(Some(next));
-            }
-            ChainsViewMode::LinkList => {
-                if let Some(chain_idx) = self.selected_chain_idx {
-                    if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                        let current = self.selected_link_idx.unwrap_or(0);
-                        let next = if current + 1 >= chain.links.len() {
-                            0
-                        } else {
-                            current + 1
-                        };
-                        self.selected_link_idx = Some(next);
-                    }
-                }
-            }
-            ChainsViewMode::LinkPreview => {
-                let total_lines = self.chain_link_content.lines().count();
-                let max_scroll = total_lines.saturating_sub(20);
-                if self.chain_link_scroll < max_scroll {
-                    self.chain_link_scroll = self.chain_link_scroll.saturating_add(1);
-                }
+        if self.focus == Focus::Sidebar {
+            self.navigate_chain_list_next();
+        } else {
+            match self.chains_view_mode {
+                ChainsViewMode::ChainList => self.navigate_chain_list_next(),
+                ChainsViewMode::LinkList => self.navigate_link_list_next(),
+                ChainsViewMode::LinkPreview => self.scroll_link_preview_down(),
             }
         }
     }
 
     pub fn chains_prev(&mut self) {
-        match self.chains_view_mode {
-            ChainsViewMode::ChainList => {
-                let total = self.total_chain_count();
-                if total == 0 {
-                    return;
-                }
-                let current = self.chains_list_state.selected().unwrap_or(0);
-                let prev = if current == 0 { total - 1 } else { current - 1 };
-                self.chains_list_state.select(Some(prev));
-            }
-            ChainsViewMode::LinkList => {
-                if let Some(chain_idx) = self.selected_chain_idx {
-                    if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                        let current = self.selected_link_idx.unwrap_or(0);
-                        let prev = if current == 0 {
-                            chain.links.len().saturating_sub(1)
-                        } else {
-                            current - 1
-                        };
-                        self.selected_link_idx = Some(prev);
-                    }
-                }
-            }
-            ChainsViewMode::LinkPreview => {
-                self.chain_link_scroll = self.chain_link_scroll.saturating_sub(1);
+        if self.focus == Focus::Sidebar {
+            self.navigate_chain_list_prev();
+        } else {
+            match self.chains_view_mode {
+                ChainsViewMode::ChainList => self.navigate_chain_list_prev(),
+                ChainsViewMode::LinkList => self.navigate_link_list_prev(),
+                ChainsViewMode::LinkPreview => self.scroll_link_preview_up(),
             }
         }
     }
 
+    pub fn navigate_chain_list_next(&mut self) {
+        let total = self.total_chain_count();
+        if total == 0 {
+            return;
+        }
+        let current = self.chains_list_state.selected().unwrap_or(0);
+        let next = if current + 1 >= total { 0 } else { current + 1 };
+        self.chains_list_state.select(Some(next));
+    }
+
+    pub fn navigate_chain_list_prev(&mut self) {
+        let total = self.total_chain_count();
+        if total == 0 {
+            return;
+        }
+        let current = self.chains_list_state.selected().unwrap_or(0);
+        let prev = if current == 0 { total - 1 } else { current - 1 };
+        self.chains_list_state.select(Some(prev));
+    }
+
+    pub fn navigate_link_list_next(&mut self) {
+        if let Some(chain_idx) = self.selected_chain_idx {
+            if let Some(chain) = self.get_chain_at_index(chain_idx) {
+                let current = self.selected_link_idx.unwrap_or(0);
+                let next = if current + 1 >= chain.links.len() {
+                    0
+                } else {
+                    current + 1
+                };
+                self.selected_link_idx = Some(next);
+            }
+        }
+    }
+
+    pub fn navigate_link_list_prev(&mut self) {
+        if let Some(chain_idx) = self.selected_chain_idx {
+            if let Some(chain) = self.get_chain_at_index(chain_idx) {
+                let current = self.selected_link_idx.unwrap_or(0);
+                let prev = if current == 0 {
+                    chain.links.len().saturating_sub(1)
+                } else {
+                    current - 1
+                };
+                self.selected_link_idx = Some(prev);
+            }
+        }
+    }
+
+    pub fn scroll_link_preview_down(&mut self) {
+        let total_lines = self.chain_link_content.lines().count();
+        let max_scroll = total_lines.saturating_sub(20);
+        if self.chain_link_scroll < max_scroll {
+            self.chain_link_scroll = self.chain_link_scroll.saturating_add(1);
+        }
+    }
+
+    pub fn scroll_link_preview_up(&mut self) {
+        self.chain_link_scroll = self.chain_link_scroll.saturating_sub(1);
+    }
+
     pub fn chains_select(&mut self) {
+        if self.focus == Focus::Sidebar {
+            if let Some(idx) = self.chains_list_state.selected() {
+                self.selected_chain_idx = Some(idx);
+                self.selected_link_idx = Some(0);
+                self.chains_view_mode = ChainsViewMode::LinkList;
+                self.focus = Focus::Terminal;
+            }
+            return;
+        }
+
         match self.chains_view_mode {
             ChainsViewMode::ChainList => {
                 if let Some(idx) = self.chains_list_state.selected() {
                     self.selected_chain_idx = Some(idx);
                     self.selected_link_idx = Some(0);
                     self.chains_view_mode = ChainsViewMode::LinkList;
+                    self.focus = Focus::Terminal;
                 }
             }
             ChainsViewMode::LinkList => {
@@ -1549,13 +1592,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn chains_back(&mut self) {
         match self.chains_view_mode {
-            ChainsViewMode::ChainList => {
-                self.switch_tab(AppTab::Tasks);
-            }
+            ChainsViewMode::ChainList => {}
             ChainsViewMode::LinkList => {
                 self.chains_view_mode = ChainsViewMode::ChainList;
                 self.selected_chain_idx = None;
                 self.selected_link_idx = None;
+                self.focus = Focus::Sidebar;
             }
             ChainsViewMode::LinkPreview => {
                 self.chains_view_mode = ChainsViewMode::LinkList;
@@ -1570,6 +1612,22 @@ impl<T: Terminal, A: Agent> App<T, A> {
             .as_ref()
             .map(|d| d.total_chains())
             .unwrap_or(0)
+    }
+
+    fn find_task_root(&self, start_path: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut current = start_path.to_path_buf();
+        loop {
+            if current.join(".wagner").join("task.json").exists() {
+                return Some(current);
+            }
+            if !current.pop() {
+                break;
+            }
+            if current == self.wagner.config.tasks_root {
+                break;
+            }
+        }
+        None
     }
 
     pub fn get_chain_at_index(&self, idx: usize) -> Option<&crate::plugins::chains::Chain> {
@@ -1608,7 +1666,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             None => return,
         };
 
-        let task_path = match &chain.source {
+        let source_path = match &chain.source {
             ChainSource::TaskLocal(p) => p.clone(),
             ChainSource::Repo(_) => {
                 self.status_message = Some((
@@ -1620,7 +1678,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
 
         let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
-        let local_chain_dir = task_path.join(".claude").join("chains").join(chain_name);
+        let local_chain_dir = source_path.join(".claude").join("chains").join(chain_name);
 
         if !local_chain_dir.exists() {
             self.status_message = Some((
@@ -1630,10 +1688,22 @@ impl<T: Terminal, A: Agent> App<T, A> {
             return;
         }
 
+        let task_path = self.find_task_root(&source_path);
+        let task_path = match task_path {
+            Some(p) => p,
+            None => {
+                self.status_message = Some((
+                    "Error: Could not find task directory".to_string(),
+                    std::time::Instant::now(),
+                ));
+                return;
+            }
+        };
+
         let plugins_link = task_path.join(".wagner").join("plugins");
         if !plugins_link.exists() || !plugins_link.is_symlink() {
             self.status_message = Some((
-                "Error: No repo-level plugin storage".to_string(),
+                "Error: No repo-level plugin storage (task created before plugin enabled?)".to_string(),
                 std::time::Instant::now(),
             ));
             return;

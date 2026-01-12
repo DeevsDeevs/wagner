@@ -1,12 +1,18 @@
 use std::time::Duration;
 
 use crate::monitor::{
-    Activity, ActivityKind, AgentDetector, AgentStatus, AgentType, ClaudeActivity, IDLE_THRESHOLD,
-    WaitReason,
+    Activity, ActivityKind, AgentDetector, AgentStatus, AgentType, ClaudeActivity, WaitReason,
 };
 
 const BRAILLE_SPINNERS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const ACTIVITY_SPINNER: char = '✻';
+const ACTIVITY_INDICATOR: char = '✻';
+const IDLE_GRAY: (u8, u8, u8) = (136, 136, 136);
+const GRAY_TOLERANCE: u8 = 20;
+
+const ACTIVE_STATUS_WORDS: &[&str] = &[
+    "Thinking", "Working", "Reading", "Writing", "Editing", "Searching",
+    "Exploring", "Running", "Executing", "Planning", "Analyzing",
+];
 
 const TOOL_PATTERNS: &[(&[&str], ClaudeActivity)] = &[
     (&["● Bash"], ClaudeActivity::ToolBash),
@@ -84,15 +90,73 @@ pub struct ClaudeCodeDetector;
 impl ClaudeCodeDetector {
     fn has_spinner(output: &str) -> bool {
         let tail: String = output.lines().rev().take(10).collect::<Vec<_>>().join("\n");
-        tail.contains(ACTIVITY_SPINNER) || BRAILLE_SPINNERS.iter().any(|&c| tail.contains(c))
+        BRAILLE_SPINNERS.iter().any(|&c| tail.contains(c))
     }
 
     fn has_active_status(output: &str) -> bool {
-        output
-            .lines()
-            .rev()
-            .take(5)
-            .any(|line| line.contains("…") || line.contains("tokens)"))
+        let tail: String = output.lines().rev().take(5).collect::<Vec<_>>().join("\n");
+        tail.contains("⎿  …") || tail.contains("⎿ …") || tail.contains("Running")
+    }
+
+    fn has_active_indicator(raw_output: &str, clean_output: &str) -> bool {
+        let clean_lines: Vec<&str> = clean_output.lines().rev().take(15).collect();
+        let raw_lines: Vec<&str> = raw_output.lines().rev().take(15).collect();
+
+        for (clean_line, raw_line) in clean_lines.iter().zip(raw_lines.iter()) {
+            if !clean_line.contains(ACTIVITY_INDICATOR) {
+                continue;
+            }
+
+            let has_active_word = ACTIVE_STATUS_WORDS
+                .iter()
+                .any(|word| clean_line.contains(word));
+            if !has_active_word {
+                continue;
+            }
+
+            if let Some(pos) = raw_line.find(ACTIVITY_INDICATOR) {
+                if let Some(rgb) = Self::find_last_rgb_color(&raw_line[..pos]) {
+                    if !Self::is_gray_color(rgb) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn find_last_rgb_color(text: &str) -> Option<(u8, u8, u8)> {
+        let mut last_color = None;
+        let mut search_from = 0;
+        while let Some(pos) = text[search_from..].find("38;2;") {
+            let start = search_from + pos + 5;
+            if let Some(color) = Self::parse_rgb_at(&text[start..]) {
+                last_color = Some(color);
+            }
+            search_from = search_from + pos + 1;
+        }
+        last_color
+    }
+
+    fn parse_rgb_at(text: &str) -> Option<(u8, u8, u8)> {
+        let parts: Vec<&str> = text.split(|c| c == ';' || c == 'm').take(3).collect();
+        if parts.len() >= 3 {
+            let r = parts[0].parse::<u8>().ok()?;
+            let g = parts[1].parse::<u8>().ok()?;
+            let b = parts[2].parse::<u8>().ok()?;
+            return Some((r, g, b));
+        }
+        None
+    }
+
+    fn is_gray_color((r, g, b): (u8, u8, u8)) -> bool {
+        let is_uniform = r.abs_diff(g) <= GRAY_TOLERANCE
+            && g.abs_diff(b) <= GRAY_TOLERANCE
+            && r.abs_diff(b) <= GRAY_TOLERANCE;
+        let is_gray_level = r.abs_diff(IDLE_GRAY.0) <= GRAY_TOLERANCE * 2
+            && g.abs_diff(IDLE_GRAY.1) <= GRAY_TOLERANCE * 2
+            && b.abs_diff(IDLE_GRAY.2) <= GRAY_TOLERANCE * 2;
+        is_uniform && is_gray_level
     }
 
     fn detect_tool(output: &str) -> Option<ClaudeActivity> {
@@ -145,26 +209,24 @@ impl AgentDetector for ClaudeCodeDetector {
 
     fn detect_status(
         &self,
-        output: &str,
+        raw_output: &str,
+        clean_output: &str,
         output_changed: bool,
-        since_change: Duration,
+        _since_change: Duration,
     ) -> AgentStatus {
-        let has_spinner = Self::has_spinner(output);
-        let is_active = has_spinner || (output_changed && Self::has_active_status(output));
-
-        if is_active {
-            let activity = Self::detect_tool(output).unwrap_or(ClaudeActivity::Thinking);
-            return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
-        }
-
-        if let Some(reason) = Self::detect_wait(output) {
+        if let Some(reason) = Self::detect_wait(clean_output) {
             return AgentStatus::Waiting(reason);
         }
 
-        if since_change > IDLE_THRESHOLD {
-            AgentStatus::Idle
-        } else {
-            AgentStatus::Active(Activity::generic_working())
+        let has_spinner = Self::has_spinner(clean_output);
+        let has_active_text = Self::has_active_status(clean_output);
+        let has_active_indicator = Self::has_active_indicator(raw_output, clean_output);
+
+        if has_spinner || has_active_text || has_active_indicator || output_changed {
+            let activity = Self::detect_tool(clean_output).unwrap_or(ClaudeActivity::Thinking);
+            return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
         }
+
+        AgentStatus::Idle
     }
 }

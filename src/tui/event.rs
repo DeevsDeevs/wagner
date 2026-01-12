@@ -3,7 +3,7 @@ use crate::config::Keybindings;
 use crate::error::Result;
 use crate::terminal::Terminal;
 
-use super::app::{App, AppTab, Focus, InputMode, SidebarSection};
+use super::app::{App, AppTab, ChainsViewMode, Focus, InputMode, SidebarSection};
 
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -162,8 +162,17 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
         }
         MouseEventKind::ScrollUp => {
             if app.input_mode == InputMode::Normal {
+                let on_sidebar = app.show_sidebar && mouse.column < app.wagner.config.sidebar_width;
                 if app.current_tab == AppTab::Chains {
-                    app.chains_prev();
+                    if on_sidebar {
+                        app.navigate_chain_list_prev();
+                    } else {
+                        match app.chains_view_mode {
+                            ChainsViewMode::ChainList => app.navigate_chain_list_prev(),
+                            ChainsViewMode::LinkList => app.navigate_link_list_prev(),
+                            ChainsViewMode::LinkPreview => app.scroll_link_preview_up(),
+                        }
+                    }
                 } else if app.focus == Focus::Terminal {
                     app.scroll_terminal_up();
                 }
@@ -171,8 +180,17 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
         }
         MouseEventKind::ScrollDown => {
             if app.input_mode == InputMode::Normal {
+                let on_sidebar = app.show_sidebar && mouse.column < app.wagner.config.sidebar_width;
                 if app.current_tab == AppTab::Chains {
-                    app.chains_next();
+                    if on_sidebar {
+                        app.navigate_chain_list_next();
+                    } else {
+                        match app.chains_view_mode {
+                            ChainsViewMode::ChainList => app.navigate_chain_list_next(),
+                            ChainsViewMode::LinkList => app.navigate_link_list_next(),
+                            ChainsViewMode::LinkPreview => app.scroll_link_preview_down(),
+                        }
+                    }
                 } else if app.focus == Focus::Terminal {
                     app.scroll_terminal_down();
                 }
@@ -223,8 +241,14 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     if app.current_tab == AppTab::Chains {
-        handle_chains_mode(app, code);
-        return;
+        let in_main_view = matches!(
+            app.chains_view_mode,
+            ChainsViewMode::LinkList | ChainsViewMode::LinkPreview
+        );
+        if in_main_view || app.focus == Focus::Sidebar {
+            handle_chains_mode(app, code);
+            return;
+        }
     }
 
     if code == KeyCode::Esc {
@@ -577,6 +601,14 @@ fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
 
     if code == KeyCode::Char('p') {
         app.promote_selected_chain();
+        return;
+    }
+
+    if matches_key(code, &kb.switch_section) {
+        app.focus = match app.focus {
+            Focus::Sidebar => Focus::Terminal,
+            Focus::Terminal => Focus::Sidebar,
+        };
     }
 }
 

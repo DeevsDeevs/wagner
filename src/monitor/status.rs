@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use crate::terminal::PaneHandle;
 
-use super::detector::IDLE_THRESHOLD;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentType {
@@ -265,13 +264,12 @@ pub struct TrackedPane {
 
 impl TrackedPane {
     pub fn new(handle: PaneHandle) -> Self {
-        let past_time = Instant::now() - IDLE_THRESHOLD - Duration::from_millis(100);
         Self {
             handle,
             agent_type: None,
             status: PaneStatus::Unknown,
             output_hash: [0u8; 32],
-            last_change: past_time,
+            last_change: Instant::now(),
         }
     }
 }

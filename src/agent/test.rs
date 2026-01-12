@@ -52,7 +52,8 @@ impl AgentDetector for TestAgentDetector {
 
     fn detect_status(
         &self,
-        _output: &str,
+        _raw_output: &str,
+        _clean_output: &str,
         _output_changed: bool,
         _since_change: Duration,
     ) -> AgentStatus {

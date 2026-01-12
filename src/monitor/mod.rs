@@ -158,6 +158,7 @@ impl StatusMonitor {
                 current_agent.or_else(|| self.detect_agent(&pane_command, &clean_output));
             let mut new_status = self.detect_status(
                 agent_type.as_ref(),
+                &output,
                 &clean_output,
                 output_changed,
                 since_change,
@@ -218,7 +219,8 @@ impl StatusMonitor {
     fn detect_status(
         &self,
         agent_type: Option<&AgentType>,
-        output: &str,
+        raw_output: &str,
+        clean_output: &str,
         output_changed: bool,
         since_change: Duration,
     ) -> PaneStatus {
@@ -228,7 +230,7 @@ impl StatusMonitor {
                 match detector {
                     Some(d) => PaneStatus::Agent {
                         agent_type: at.clone(),
-                        status: d.detect_status(output, output_changed, since_change),
+                        status: d.detect_status(raw_output, clean_output, output_changed, since_change),
                     },
                     None => TerminalDetector::detect_status(output_changed, since_change),
                 }
