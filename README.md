@@ -13,6 +13,9 @@ Multi-repo task manager for AI agent sessions. Orchestrates agent instances acro
 ## Installation
 
 ```bash
+# Quick install (recommended)
+curl -fsSL https://raw.githubusercontent.com/DeevsDeevs/wagner/main/install.sh | sh
+
 # From crates.io
 cargo install wagner
 
@@ -22,6 +25,13 @@ nix profile install github:DeevsDeevs/wagner
 # From source
 git clone https://github.com/DeevsDeevs/wagner.git
 cd wagner && cargo build --release
+```
+
+### Updating
+
+```bash
+wagner update           # Update to latest version
+wagner update --check   # Check for updates without installing
 ```
 
 ## Quick Start
@@ -50,11 +60,26 @@ wagner new my-feature -w myproject
 # Opens tmux with pane per repo + central pane
 ```
 
+### Remote repos
+
+Wagner can clone remote repos automatically. Remote repos are cloned once (as bare repos) to `repos_root` and reused across tasks:
+
+```bash
+# Add remote repo to task
+wagner add-repo my-task api:git@github.com:org/api.git:feature/my-task
+
+# Or in workspace config
+wagner ws add myproject \
+  frontend:~/local/frontend \
+  backend:git@github.com:org/backend.git
+```
+
 ### Other common commands
 
 ```bash
 wagner ls                    # List tasks
 wagner a my-feature          # Attach to task
+wagner cd my-feature         # Open shell in task worktree
 wagner rm my-feature         # Delete task
 wagner rm my-feature -f      # Delete task + branches
 ```
@@ -72,7 +97,10 @@ wagner rm my-feature -f      # Delete task + branches
 | `wagner add-repo <task> <spec>` | | Add repo to task |
 | `wagner rm-repo <task> <repo>` | | Remove repo from task |
 | `wagner delete <task>` | `rm` | Delete task |
+| `wagner cd <task> [repo]` | | Open shell in task worktree |
 | `wagner workspace` | `ws` | Manage workspaces |
+| `wagner repair` | | Clean up orphaned worktrees |
+| `wagner update` | | Update to latest version |
 
 ### Workspace commands
 
@@ -91,6 +119,7 @@ wagner ws rm <name>                          # Delete workspace
 ```json
 {
   "tasks_root": "/home/user/tasks",
+  "repos_root": "~/repos",
   "default_agent": "claude",
   "diff_base": "main",
   "workspaces": {
@@ -102,6 +131,26 @@ wagner ws rm <name>                          # Delete workspace
   }
 }
 ```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `tasks_root` | `~/tasks` | Where task directories are created |
+| `repos_root` | `~/repos` | Where remote repos are cloned (bare) |
+| `default_agent` | `claude` | Agent to launch in panes |
+| `diff_base` | `main` | Default branch for diffs |
+
+### Repair & Cleanup
+
+Wagner automatically cleans up on task creation failure. For manual cleanup of orphaned resources:
+
+```bash
+wagner repair            # Scan for orphans (dry run)
+wagner repair --execute  # Actually clean up
+```
+
+This finds and removes:
+- Task directories without valid `task.json`
+- Worktrees pointing to deleted tasks
 
 ## Shell Completions
 

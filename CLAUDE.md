@@ -4,16 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Development Commands
 
+Use `devbox run` for all cargo commands:
+
 ```bash
-cargo build                  # Build debug
-cargo build --release        # Build release
-cargo run                    # Run TUI (no subcommand)
-cargo run -- new my-task     # Run with CLI args
-cargo test                   # Run all tests
-cargo test --test integration # Run integration tests only
-cargo test test_name         # Run specific test
-RUST_LOG=debug cargo run     # Enable debug logging
-WAGNER_LOG=/tmp/wagner.log cargo run  # Log to file
+devbox run cargo build                  # Build debug
+devbox run cargo build --release        # Build release
+devbox run cargo run                    # Run TUI (no subcommand)
+devbox run cargo run -- new my-task     # Run with CLI args
+devbox run cargo test                   # Run all tests
+devbox run cargo test --test integration # Run integration tests only
+devbox run cargo test test_name         # Run specific test
+RUST_LOG=debug devbox run cargo run     # Enable debug logging
+WAGNER_LOG=/tmp/wagner.log devbox run cargo run  # Log to file
 ```
 
 ## Architecture

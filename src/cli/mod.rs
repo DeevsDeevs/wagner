@@ -112,6 +112,85 @@ pub enum Commands {
         #[command(subcommand)]
         command: WorkspaceCommands,
     },
+
+    /// Update wagner to the latest version
+    Update {
+        /// Check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Clean up orphaned worktrees and task directories
+    Repair {
+        /// Show what would be cleaned up without making changes
+        #[arg(long, default_value = "true")]
+        dry_run: bool,
+
+        /// Actually perform cleanup (use with caution)
+        #[arg(long)]
+        execute: bool,
+    },
+
+    /// Manage plugins
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommands,
+    },
+
+    /// Manage chains (requires chains plugin enabled)
+    Chains {
+        #[command(subcommand)]
+        command: ChainsCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PluginCommands {
+    /// List all available plugins
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Enable a plugin
+    Enable {
+        /// Plugin ID (e.g., chains)
+        plugin: String,
+    },
+
+    /// Disable a plugin
+    Disable {
+        /// Plugin ID
+        plugin: String,
+    },
+
+    /// Install agent skills for enabled plugins
+    InstallSkills,
+}
+
+#[derive(Subcommand)]
+pub enum ChainsCommands {
+    /// List all chains
+    #[command(visible_alias = "ls")]
+    List,
+
+    /// Promote a task-local chain to repo level
+    Promote {
+        /// Chain name to promote
+        chain: String,
+
+        /// Task name (auto-detected if inside task dir)
+        #[arg(short, long)]
+        task: Option<String>,
+    },
+
+    /// Show chain content
+    Show {
+        /// Chain name
+        chain: String,
+
+        /// Link index (latest if not specified)
+        #[arg(short, long)]
+        link: Option<usize>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -201,6 +280,18 @@ _wagner_task_repos() {{
     fi
 }}
 
+_wagner_plugins() {{
+    local -a plugins
+    plugins=('chains:Session workflow chains for context across conversations')
+    _describe 'plugin' plugins
+}}
+
+_wagner_chains() {{
+    local -a chains
+    chains=(${{(f)"$(wagner chains list 2>/dev/null | grep -E '^\s+\S' | awk '{{print $1}}')"}} )
+    _describe 'chain' chains
+}}
+
 _wagner() {{
     local -a commands
     commands=(
@@ -218,6 +309,10 @@ _wagner() {{
         'completions:Generate shell completions'
         'workspace:Manage workspaces'
         'ws:Manage workspaces'
+        'update:Update wagner to latest version'
+        'repair:Clean up orphaned worktrees'
+        'plugin:Manage plugins'
+        'chains:Manage chains (requires chains plugin)'
     )
 
     _arguments -C \
@@ -270,6 +365,9 @@ _wagner() {{
                 completions)
                     _arguments '1:shell:(bash zsh fish powershell elvish)'
                     ;;
+                update)
+                    _arguments '--check[Check for updates without installing]'
+                    ;;
                 workspace|ws)
                     local -a ws_commands
                     ws_commands=(
@@ -305,6 +403,64 @@ _wagner() {{
                                     ;;
                                 remove|rm)
                                     _arguments '1:workspace:_wagner_workspaces'
+                                    ;;
+                            esac
+                            ;;
+                    esac
+                    ;;
+                plugin)
+                    local -a plugin_commands
+                    plugin_commands=(
+                        'list:List all available plugins'
+                        'ls:List all available plugins'
+                        'enable:Enable a plugin'
+                        'disable:Disable a plugin'
+                        'install-skills:Install agent skills for enabled plugins'
+                    )
+                    _arguments -C \
+                        '1: :->plugin_command' \
+                        '*::arg:->plugin_args'
+                    case $state in
+                        plugin_command)
+                            _describe 'plugin command' plugin_commands
+                            ;;
+                        plugin_args)
+                            case $words[1] in
+                                enable|disable)
+                                    _arguments '1:plugin:_wagner_plugins'
+                                    ;;
+                            esac
+                            ;;
+                    esac
+                    ;;
+                chains)
+                    local -a chains_commands
+                    chains_commands=(
+                        'list:List all chains'
+                        'ls:List all chains'
+                        'promote:Promote a task-local chain to repo level'
+                        'show:Show chain content'
+                    )
+                    _arguments -C \
+                        '1: :->chains_command' \
+                        '*::arg:->chains_args'
+                    case $state in
+                        chains_command)
+                            _describe 'chains command' chains_commands
+                            ;;
+                        chains_args)
+                            case $words[1] in
+                                promote)
+                                    _arguments \
+                                        '1:chain:_wagner_chains' \
+                                        '-t[Task name]:task:_wagner_tasks' \
+                                        '--task=[Task name]:task:_wagner_tasks'
+                                    ;;
+                                show)
+                                    _arguments \
+                                        '1:chain:_wagner_chains' \
+                                        '-l[Link index]:link:' \
+                                        '--link=[Link index]:link:'
                                     ;;
                             esac
                             ;;

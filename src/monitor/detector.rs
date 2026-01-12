@@ -9,7 +9,8 @@ pub trait AgentDetector: Send + Sync {
     fn detect_agent(&self, pane_command: &str, output: &str) -> bool;
     fn detect_status(
         &self,
-        output: &str,
+        raw_output: &str,
+        clean_output: &str,
         output_changed: bool,
         since_change: Duration,
     ) -> AgentStatus;

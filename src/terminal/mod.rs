@@ -1,3 +1,4 @@
+mod control_mode;
 mod mock;
 mod tmux;
 

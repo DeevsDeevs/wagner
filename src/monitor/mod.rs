@@ -6,6 +6,8 @@ pub mod status;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+const STATUS_HYSTERESIS: Duration = Duration::from_millis(500);
+
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
@@ -158,6 +160,7 @@ impl StatusMonitor {
                 current_agent.or_else(|| self.detect_agent(&pane_command, &clean_output));
             let mut new_status = self.detect_status(
                 agent_type.as_ref(),
+                &output,
                 &clean_output,
                 output_changed,
                 since_change,
@@ -177,7 +180,11 @@ impl StatusMonitor {
                 };
             }
 
-            if new_status != current_status {
+            let dominated_by_hysteresis = current_status.is_active()
+                && new_status.is_idle()
+                && since_change < STATUS_HYSTERESIS;
+
+            if new_status != current_status && !dominated_by_hysteresis {
                 tracked.status = new_status.clone();
                 updates.push(StatusUpdate {
                     pane: pane.clone(),
@@ -218,7 +225,8 @@ impl StatusMonitor {
     fn detect_status(
         &self,
         agent_type: Option<&AgentType>,
-        output: &str,
+        raw_output: &str,
+        clean_output: &str,
         output_changed: bool,
         since_change: Duration,
     ) -> PaneStatus {
@@ -228,7 +236,12 @@ impl StatusMonitor {
                 match detector {
                     Some(d) => PaneStatus::Agent {
                         agent_type: at.clone(),
-                        status: d.detect_status(output, output_changed, since_change),
+                        status: d.detect_status(
+                            raw_output,
+                            clean_output,
+                            output_changed,
+                            since_change,
+                        ),
                     },
                     None => TerminalDetector::detect_status(output_changed, since_change),
                 }

@@ -1,9 +1,10 @@
 use crate::agent::Agent;
 use crate::config::Keybindings;
 use crate::error::Result;
+use crate::plugins::chains::ChainsViewMode;
 use crate::terminal::Terminal;
 
-use super::app::{App, Focus, InputMode, SidebarSection};
+use super::app::{App, AppTab, Focus, InputMode, SidebarSection};
 
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -32,6 +33,22 @@ enum TextInputAction {
     Submit,
     Edit,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Quit,
+    Help,
+    ToggleSidebar,
+    Refresh,
+    Attach,
+    NewTask,
+    AddPane,
+    Delete,
+    SendMessage,
+    Settings,
+    SwitchSection,
+    OpenDiff,
 }
 
 fn handle_text_editing<T: Terminal, A: Agent>(
@@ -71,7 +88,7 @@ fn handle_text_editing<T: Terminal, A: Agent>(
 }
 
 pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> Result<bool> {
-    if !event::poll(Duration::from_millis(100))? {
+    if !event::poll(Duration::from_millis(16))? {
         return Ok(false);
     }
 
@@ -91,6 +108,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
                 InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
                 InputMode::DiffContent => handle_diff_content_mode(app, key.code),
+                InputMode::ChainSearch => handle_chain_search_mode(app, key.code, key.modifiers),
             }
         }
         Event::Mouse(mouse) => {
@@ -135,6 +153,9 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
                 app.workspace_index = 0;
                 app.input_mode = InputMode::Normal;
             }
+            InputMode::ChainSearch => {
+                app.cancel_chain_search();
+            }
         },
         MouseEventKind::Up(MouseButton::Left) => {
             app.dragging_sidebar = false;
@@ -145,37 +166,83 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             }
         }
         MouseEventKind::ScrollUp => {
-            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
-                app.scroll_terminal_up();
+            if app.input_mode == InputMode::Normal {
+                let sidebar_width = app.wagner.config.sidebar_width;
+                let on_sidebar = app.show_sidebar && mouse.column < sidebar_width;
+                if app.current_tab == AppTab::Chains {
+                    if on_sidebar {
+                        app.navigate_chain_list_prev();
+                    } else {
+                        match app.chains_view_mode() {
+                            ChainsViewMode::ChainList => app.navigate_chain_list_prev(),
+                            ChainsViewMode::LinkList => app.navigate_link_list_prev(),
+                            ChainsViewMode::LinkPreview => {
+                                let main_start = if app.show_sidebar { sidebar_width } else { 0 };
+                                let main_width = area.width.saturating_sub(main_start);
+                                let split_point = main_start + (main_width * 30 / 100);
+                                if mouse.column < split_point {
+                                    app.navigate_link_list_prev();
+                                } else {
+                                    app.scroll_link_preview_up();
+                                }
+                            }
+                        }
+                    }
+                } else if app.focus == Focus::Terminal {
+                    app.scroll_terminal_up();
+                }
             }
         }
         MouseEventKind::ScrollDown => {
-            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
-                app.scroll_terminal_down();
+            if app.input_mode == InputMode::Normal {
+                let sidebar_width = app.wagner.config.sidebar_width;
+                let on_sidebar = app.show_sidebar && mouse.column < sidebar_width;
+                if app.current_tab == AppTab::Chains {
+                    if on_sidebar {
+                        app.navigate_chain_list_next();
+                    } else {
+                        match app.chains_view_mode() {
+                            ChainsViewMode::ChainList => app.navigate_chain_list_next(),
+                            ChainsViewMode::LinkList => app.navigate_link_list_next(),
+                            ChainsViewMode::LinkPreview => {
+                                let main_start = if app.show_sidebar { sidebar_width } else { 0 };
+                                let main_width = area.width.saturating_sub(main_start);
+                                let split_point = main_start + (main_width * 30 / 100);
+                                if mouse.column < split_point {
+                                    app.navigate_link_list_next();
+                                } else {
+                                    app.scroll_link_preview_down();
+                                }
+                            }
+                        }
+                    }
+                } else if app.focus == Focus::Terminal {
+                    app.scroll_terminal_down();
+                }
             }
         }
         _ => {}
     }
 }
 
-fn get_action(code: KeyCode, kb: &Keybindings) -> Option<&'static str> {
+fn get_action(code: KeyCode, kb: &Keybindings) -> Option<Action> {
     if code == KeyCode::Esc {
-        return Some("quit");
+        return Some(Action::Quit);
     }
 
-    let bindings: &[(&str, &str)] = &[
-        (&kb.quit, "quit"),
-        (&kb.help, "help"),
-        (&kb.toggle_sidebar, "toggle_sidebar"),
-        (&kb.refresh, "refresh"),
-        (&kb.attach, "attach"),
-        (&kb.new_task, "new_task"),
-        (&kb.add_pane, "add_pane"),
-        (&kb.delete, "delete"),
-        (&kb.send_message, "send_message"),
-        (&kb.settings, "settings"),
-        (&kb.switch_section, "switch_section"),
-        (&kb.open_diff, "open_diff"),
+    let bindings: &[(&str, Action)] = &[
+        (&kb.quit, Action::Quit),
+        (&kb.help, Action::Help),
+        (&kb.toggle_sidebar, Action::ToggleSidebar),
+        (&kb.refresh, Action::Refresh),
+        (&kb.attach, Action::Attach),
+        (&kb.new_task, Action::NewTask),
+        (&kb.add_pane, Action::AddPane),
+        (&kb.delete, Action::Delete),
+        (&kb.send_message, Action::SendMessage),
+        (&kb.settings, Action::Settings),
+        (&kb.switch_section, Action::SwitchSection),
+        (&kb.open_diff, Action::OpenDiff),
     ];
 
     bindings
@@ -198,32 +265,50 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         return;
     }
 
+    if app.current_tab == AppTab::Chains {
+        let in_main_view = matches!(
+            app.chains_view_mode(),
+            ChainsViewMode::LinkList | ChainsViewMode::LinkPreview
+        );
+        if in_main_view || app.focus == Focus::Sidebar {
+            handle_chains_mode(app, code);
+            return;
+        }
+    }
+
+    // Ctrl+E sends Escape to pane, Ctrl+T sends Tab to pane (when in terminal focus)
+    if app.focus == Focus::Terminal && modifiers.contains(KeyModifiers::CONTROL) {
+        if let KeyCode::Char(c) = code {
+            let key_to_send = match c {
+                'e' => Some("Escape"),
+                't' => Some("Tab"),
+                _ => None,
+            };
+            if let Some(key) = key_to_send {
+                if let Some(pane) = app.current_pane() {
+                    let _ = app.wagner.terminal.send_key(&pane, key);
+                    let _ = app.refresh_terminal_output();
+                }
+                return;
+            }
+        }
+    }
+
+    if code == KeyCode::Esc {
+        if app.focus == Focus::Terminal {
+            app.focus = Focus::Sidebar;
+        } else {
+            app.should_quit = true;
+        }
+        return;
+    }
+
+    if matches_key(code, &kb.toggle_sidebar) {
+        app.next_tab();
+        return;
+    }
+
     if app.focus == Focus::Terminal {
-        if code == KeyCode::Esc {
-            if modifiers.contains(KeyModifiers::CONTROL) {
-                if let Some(pane) = app.current_pane() {
-                    let _ = app.wagner.terminal.send_key(&pane, "Escape");
-                    let _ = app.refresh_terminal_output();
-                }
-            } else {
-                app.focus = Focus::Sidebar;
-            }
-            return;
-        }
-        if matches_key(code, &kb.toggle_sidebar) {
-            if modifiers.contains(KeyModifiers::CONTROL) {
-                if let Some(pane) = app.current_pane() {
-                    let _ = app.wagner.terminal.send_key(&pane, "Tab");
-                    let _ = app.refresh_terminal_output();
-                }
-            } else {
-                app.focus = Focus::Sidebar;
-                if !app.show_sidebar {
-                    app.show_sidebar = true;
-                }
-            }
-            return;
-        }
         send_key_to_pane(app, code, modifiers);
         return;
     }
@@ -237,53 +322,69 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         }
     }
 
+    if matches_key(code, &kb.toggle_sidebar) {
+        app.next_tab();
+        return;
+    }
+
     match get_action(code, kb) {
-        Some("quit") => app.should_quit = true,
-        Some("help") => app.toggle_help(),
-        Some("toggle_sidebar") => app.toggle_sidebar(),
-        Some("refresh") => {
+        Some(Action::Quit) => app.should_quit = true,
+        Some(Action::Help) => app.toggle_help(),
+        Some(Action::ToggleSidebar) => app.next_tab(),
+        Some(Action::Refresh) => {
             let _ = app.refresh_data();
         }
-        Some("attach") => app.attach_current(),
-        Some("new_task") => app.start_new_task(),
-        Some("add_pane") => app.add_pane(),
-        Some("delete") => app.start_delete(),
-        Some("send_message") => app.start_send_message(),
-        Some("settings") => app.open_settings(),
-        Some("switch_section") if app.focus == Focus::Sidebar => app.toggle_sidebar_section(),
-        Some("open_diff") => app.open_diff_view(),
+        Some(Action::Attach) => app.attach_current(),
+        Some(Action::NewTask) => app.start_new_task(),
+        Some(Action::AddPane) => app.add_pane(),
+        Some(Action::Delete) => app.start_delete(),
+        Some(Action::SendMessage) => app.start_send_message(),
+        Some(Action::Settings) => app.open_settings(),
+        Some(Action::SwitchSection) if app.focus == Focus::Sidebar => app.toggle_sidebar_section(),
+        Some(Action::OpenDiff) => app.open_diff_view(),
         _ => handle_navigation(app, code),
     }
 }
+
+const TMUX_KEY_MAP: &[(KeyCode, &str)] = &[
+    (KeyCode::Enter, "Enter"),
+    (KeyCode::Backspace, "BSpace"),
+    (KeyCode::Left, "Left"),
+    (KeyCode::Right, "Right"),
+    (KeyCode::Up, "Up"),
+    (KeyCode::Down, "Down"),
+    (KeyCode::Home, "Home"),
+    (KeyCode::End, "End"),
+    (KeyCode::PageUp, "PageUp"),
+    (KeyCode::PageDown, "PageDown"),
+    (KeyCode::Tab, "Tab"),
+    (KeyCode::BackTab, "BTab"),
+    (KeyCode::Delete, "DC"),
+    (KeyCode::Insert, "IC"),
+    (KeyCode::Esc, "Escape"),
+];
 
 fn send_key_to_pane<T: Terminal, A: Agent>(
     app: &mut App<T, A>,
     code: KeyCode,
     modifiers: KeyModifiers,
 ) {
-    let key_str = match code {
-        KeyCode::Enter => "Enter".to_string(),
-        KeyCode::Backspace => "BSpace".to_string(),
-        KeyCode::Left => "Left".to_string(),
-        KeyCode::Right => "Right".to_string(),
-        KeyCode::Up => "Up".to_string(),
-        KeyCode::Down => "Down".to_string(),
-        KeyCode::Home => "Home".to_string(),
-        KeyCode::End => "End".to_string(),
-        KeyCode::PageUp => "PageUp".to_string(),
-        KeyCode::PageDown => "PageDown".to_string(),
-        KeyCode::Tab => "Tab".to_string(),
-        KeyCode::Delete => "DC".to_string(),
-        KeyCode::Insert => "IC".to_string(),
-        KeyCode::F(n) => format!("F{}", n),
-        KeyCode::Char(c) => {
-            if modifiers.contains(KeyModifiers::CONTROL) {
-                format!("C-{}", c)
-            } else {
-                return send_literal_to_pane(app, c);
+    let key_str = if let Some((_, tmux_key)) = TMUX_KEY_MAP.iter().find(|(k, _)| *k == code) {
+        (*tmux_key).to_string()
+    } else {
+        match code {
+            KeyCode::F(n) => format!("F{}", n),
+            KeyCode::Char(c) => {
+                if modifiers.contains(KeyModifiers::CONTROL) {
+                    format!("C-{}", c)
+                } else if modifiers.contains(KeyModifiers::ALT) {
+                    format!("M-{}", c)
+                } else {
+                    return send_literal_to_pane(app, c);
+                }
             }
+            _ => return,
         }
-        _ => return,
     };
 
     if let Some(pane) = app.current_pane() {
@@ -482,5 +583,198 @@ fn handle_workspace_select_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code
 
     if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
         app.workspace_prev();
+    }
+}
+
+fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Tab || matches_key(code, &kb.toggle_sidebar) {
+        app.next_tab();
+        return;
+    }
+
+    if code == KeyCode::Esc || matches_key(code, &kb.quit) {
+        app.chains_back();
+        return;
+    }
+
+    if matches_key(code, &kb.help) {
+        app.toggle_help();
+        return;
+    }
+
+    if matches_key(code, &kb.settings) {
+        app.open_settings();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.chains_next();
+        return;
+    }
+
+    if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.chains_prev();
+        return;
+    }
+
+    if code == KeyCode::Enter {
+        app.chains_select();
+        return;
+    }
+
+    if matches_key(code, &kb.refresh) {
+        app.refresh_chains();
+        return;
+    }
+
+    if code == KeyCode::Char('p') {
+        app.promote_selected_chain();
+        return;
+    }
+
+    if matches_key(code, &kb.delete) {
+        app.start_delete_chain();
+        return;
+    }
+
+    if matches_key(code, &kb.page_down) || code == KeyCode::PageDown {
+        app.scroll_link_preview_down();
+        return;
+    }
+
+    if matches_key(code, &kb.page_up) || code == KeyCode::PageUp {
+        app.scroll_link_preview_up();
+        return;
+    }
+
+    if matches_key(code, &kb.switch_section) {
+        app.focus = match app.focus {
+            Focus::Sidebar => Focus::Terminal,
+            Focus::Terminal => Focus::Sidebar,
+        };
+        return;
+    }
+
+    if matches_key(code, &kb.nav_left) || code == KeyCode::Left {
+        app.focus = Focus::Sidebar;
+        return;
+    }
+
+    if matches_key(code, &kb.nav_right) || code == KeyCode::Right {
+        app.focus = Focus::Terminal;
+        return;
+    }
+
+    if code == KeyCode::Char('/') {
+        app.start_chain_search();
+        return;
+    }
+
+    if code == KeyCode::Esc && !app.plugin_states.chains.filter.is_empty() {
+        app.clear_chain_filter();
+    }
+}
+
+fn handle_chain_search_mode<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    match handle_text_editing(app, code, modifiers) {
+        TextInputAction::Cancel => app.cancel_chain_search(),
+        TextInputAction::Submit => app.submit_chain_search(),
+        TextInputAction::Edit | TextInputAction::None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Keybindings;
+
+    #[test]
+    fn matches_key_char() {
+        assert!(matches_key(KeyCode::Char('q'), "q"));
+        assert!(matches_key(KeyCode::Char('?'), "?"));
+        assert!(!matches_key(KeyCode::Char('q'), "Q"));
+        assert!(!matches_key(KeyCode::Char('a'), "b"));
+    }
+
+    #[test]
+    fn matches_key_special() {
+        assert!(matches_key(KeyCode::Tab, "Tab"));
+        assert!(matches_key(KeyCode::Esc, "Esc"));
+        assert!(matches_key(KeyCode::Enter, "Enter"));
+        assert!(!matches_key(KeyCode::Tab, "tab"));
+        assert!(!matches_key(KeyCode::Backspace, "Backspace"));
+    }
+
+    #[test]
+    fn get_action_returns_quit_for_esc() {
+        let kb = Keybindings::default();
+        assert_eq!(get_action(KeyCode::Esc, &kb), Some(Action::Quit));
+    }
+
+    #[test]
+    fn get_action_maps_default_bindings() {
+        let kb = Keybindings::default();
+
+        assert_eq!(get_action(KeyCode::Char('q'), &kb), Some(Action::Quit));
+        assert_eq!(get_action(KeyCode::Char('?'), &kb), Some(Action::Help));
+        assert_eq!(get_action(KeyCode::Char('r'), &kb), Some(Action::Refresh));
+        assert_eq!(get_action(KeyCode::Char('a'), &kb), Some(Action::Attach));
+        assert_eq!(get_action(KeyCode::Char('n'), &kb), Some(Action::NewTask));
+        assert_eq!(get_action(KeyCode::Char('p'), &kb), Some(Action::AddPane));
+        assert_eq!(get_action(KeyCode::Char('d'), &kb), Some(Action::Delete));
+        assert_eq!(
+            get_action(KeyCode::Char('s'), &kb),
+            Some(Action::SendMessage)
+        );
+        assert_eq!(get_action(KeyCode::Tab, &kb), Some(Action::ToggleSidebar));
+        assert_eq!(
+            get_action(KeyCode::Char('o'), &kb),
+            Some(Action::SwitchSection)
+        );
+        assert_eq!(get_action(KeyCode::Char('S'), &kb), Some(Action::Settings));
+        assert_eq!(get_action(KeyCode::Char('c'), &kb), Some(Action::OpenDiff));
+    }
+
+    #[test]
+    fn get_action_returns_none_for_unbound() {
+        let kb = Keybindings::default();
+        assert_eq!(get_action(KeyCode::Char('z'), &kb), None);
+        assert_eq!(get_action(KeyCode::F(1), &kb), None);
+    }
+
+    #[test]
+    fn tmux_key_map_contains_expected_keys() {
+        let expected = [
+            (KeyCode::Enter, "Enter"),
+            (KeyCode::Backspace, "BSpace"),
+            (KeyCode::Left, "Left"),
+            (KeyCode::Right, "Right"),
+            (KeyCode::Up, "Up"),
+            (KeyCode::Down, "Down"),
+            (KeyCode::Tab, "Tab"),
+        ];
+
+        for (code, tmux_str) in expected {
+            let found = TMUX_KEY_MAP.iter().find(|(k, _)| *k == code);
+            assert!(found.is_some(), "Missing {:?} in TMUX_KEY_MAP", code);
+            assert_eq!(found.unwrap().1, tmux_str);
+        }
+    }
+
+    #[test]
+    fn tmux_key_map_lookup() {
+        let code = KeyCode::PageUp;
+        let result = TMUX_KEY_MAP.iter().find(|(k, _)| *k == code);
+        assert_eq!(result, Some(&(KeyCode::PageUp, "PageUp")));
+
+        let code = KeyCode::Char('x');
+        let result = TMUX_KEY_MAP.iter().find(|(k, _)| *k == code);
+        assert!(result.is_none());
     }
 }
