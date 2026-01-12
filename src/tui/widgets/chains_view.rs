@@ -1,11 +1,11 @@
 use crate::agent::Agent;
-use crate::plugins::chains::{Chain, ChainSource, ChainsData};
+use crate::plugins::chains::{Chain, ChainSource, ChainsData, ChainsViewMode};
 use crate::terminal::Terminal;
-use crate::tui::app::{App, AppTab, ChainsViewMode, Focus};
+use crate::tui::app::{App, AppTab, Focus};
 
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -29,7 +29,7 @@ pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, a
         block = block.title_bottom(" [Enter] open ");
     }
 
-    let Some(chains_data) = &app.chains_data else {
+    let Some(chains_data) = &app.plugin_states.chains.data else {
         let empty_msg = Paragraph::new("No chains found")
             .style(Style::default().fg(Color::DarkGray))
             .block(block);
@@ -38,7 +38,7 @@ pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, a
     };
 
     let mut items: Vec<ListItem> = Vec::new();
-    let selected_idx = app.chains_list_state.selected();
+    let selected_idx = app.plugin_states.chains.list_state.selected();
     let mut current_idx = 0;
 
     let grouped = group_chains_by_task(chains_data);
@@ -116,19 +116,28 @@ fn extract_task_name(chain_name: &str) -> Option<String> {
 }
 
 pub fn draw_main<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    match app.chains_view_mode {
+    match app.plugin_states.chains.view_mode {
         ChainsViewMode::ChainList => {}
         ChainsViewMode::LinkList => draw_link_list(frame, area, app),
-        ChainsViewMode::LinkPreview => draw_link_preview(frame, area, app),
+        ChainsViewMode::LinkPreview => {
+            let chunks = Layout::horizontal([
+                Constraint::Percentage(30),
+                Constraint::Percentage(70),
+            ])
+            .split(area);
+            draw_link_list(frame, chunks[0], app);
+            draw_link_preview(frame, chunks[1], app);
+        }
     }
 }
 
 fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let Some(chain_idx) = app.selected_chain_idx else {
+    let cs = &app.plugin_states.chains;
+    let Some(chain_idx) = cs.selected_chain_idx else {
         return;
     };
 
-    let Some(chain) = app.get_chain_at_index(chain_idx) else {
+    let Some(chain) = cs.get_chain_at_index(chain_idx) else {
         return;
     };
 
@@ -149,7 +158,7 @@ fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
         .border_style(Style::default().fg(Color::Cyan));
 
     let mut items: Vec<ListItem> = Vec::new();
-    let selected_idx = app.selected_link_idx;
+    let selected_idx = cs.selected_link_idx;
 
     for (idx, link) in chain.links.iter().enumerate() {
         let is_selected = selected_idx == Some(idx);
@@ -190,19 +199,20 @@ fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
 }
 
 fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let Some(chain_idx) = app.selected_chain_idx else {
+    let cs = &app.plugin_states.chains;
+    let Some(chain_idx) = cs.selected_chain_idx else {
         return;
     };
 
-    let chain = match app.get_chain_at_index(chain_idx) {
+    let chain = match cs.get_chain_at_index(chain_idx) {
         Some(c) => c,
         None => return,
     };
 
-    let link_info = app.selected_link_idx.and_then(|idx| chain.links.get(idx));
-    let total_lines = app.chain_link_content.lines().count();
+    let link_info = cs.selected_link_idx.and_then(|idx| chain.links.get(idx));
+    let total_lines = cs.link_content.lines().count();
     let visible_lines = area.height.saturating_sub(2) as usize;
-    let scroll_pos = app.chain_link_scroll;
+    let scroll_pos = cs.link_scroll;
 
     let title = link_info
         .map(|l| {
@@ -225,8 +235,8 @@ fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let lines: Vec<Line> = app
-        .chain_link_content
+    let lines: Vec<Line> = cs
+        .link_content
         .lines()
         .skip(scroll_pos)
         .take(visible_lines)

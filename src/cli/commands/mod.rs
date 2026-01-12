@@ -16,7 +16,7 @@ pub fn run(cli: Cli) -> Result<()> {
     let config = Config::load()?;
     debug!("Loaded config from {:?}", Config::config_path());
 
-    let terminal = Tmux::new();
+    let terminal = Tmux::with_config(config.terminal.clone());
     let agent = ClaudeCode::new();
     let wagner = Wagner::new(terminal, agent, config);
 

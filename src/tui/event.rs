@@ -1,9 +1,10 @@
 use crate::agent::Agent;
 use crate::config::Keybindings;
 use crate::error::Result;
+use crate::plugins::chains::ChainsViewMode;
 use crate::terminal::Terminal;
 
-use super::app::{App, AppTab, ChainsViewMode, Focus, InputMode, SidebarSection};
+use super::app::{App, AppTab, Focus, InputMode, SidebarSection};
 
 use crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
@@ -87,7 +88,7 @@ fn handle_text_editing<T: Terminal, A: Agent>(
 }
 
 pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> Result<bool> {
-    if !event::poll(Duration::from_millis(100))? {
+    if !event::poll(Duration::from_millis(16))? {
         return Ok(false);
     }
 
@@ -162,15 +163,25 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
         }
         MouseEventKind::ScrollUp => {
             if app.input_mode == InputMode::Normal {
-                let on_sidebar = app.show_sidebar && mouse.column < app.wagner.config.sidebar_width;
+                let sidebar_width = app.wagner.config.sidebar_width;
+                let on_sidebar = app.show_sidebar && mouse.column < sidebar_width;
                 if app.current_tab == AppTab::Chains {
                     if on_sidebar {
                         app.navigate_chain_list_prev();
                     } else {
-                        match app.chains_view_mode {
+                        match app.chains_view_mode() {
                             ChainsViewMode::ChainList => app.navigate_chain_list_prev(),
                             ChainsViewMode::LinkList => app.navigate_link_list_prev(),
-                            ChainsViewMode::LinkPreview => app.scroll_link_preview_up(),
+                            ChainsViewMode::LinkPreview => {
+                                let main_start = if app.show_sidebar { sidebar_width } else { 0 };
+                                let main_width = area.width.saturating_sub(main_start);
+                                let split_point = main_start + (main_width * 30 / 100);
+                                if mouse.column < split_point {
+                                    app.navigate_link_list_prev();
+                                } else {
+                                    app.scroll_link_preview_up();
+                                }
+                            }
                         }
                     }
                 } else if app.focus == Focus::Terminal {
@@ -180,15 +191,25 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
         }
         MouseEventKind::ScrollDown => {
             if app.input_mode == InputMode::Normal {
-                let on_sidebar = app.show_sidebar && mouse.column < app.wagner.config.sidebar_width;
+                let sidebar_width = app.wagner.config.sidebar_width;
+                let on_sidebar = app.show_sidebar && mouse.column < sidebar_width;
                 if app.current_tab == AppTab::Chains {
                     if on_sidebar {
                         app.navigate_chain_list_next();
                     } else {
-                        match app.chains_view_mode {
+                        match app.chains_view_mode() {
                             ChainsViewMode::ChainList => app.navigate_chain_list_next(),
                             ChainsViewMode::LinkList => app.navigate_link_list_next(),
-                            ChainsViewMode::LinkPreview => app.scroll_link_preview_down(),
+                            ChainsViewMode::LinkPreview => {
+                                let main_start = if app.show_sidebar { sidebar_width } else { 0 };
+                                let main_width = area.width.saturating_sub(main_start);
+                                let split_point = main_start + (main_width * 30 / 100);
+                                if mouse.column < split_point {
+                                    app.navigate_link_list_next();
+                                } else {
+                                    app.scroll_link_preview_down();
+                                }
+                            }
                         }
                     }
                 } else if app.focus == Focus::Terminal {
@@ -242,7 +263,7 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
 
     if app.current_tab == AppTab::Chains {
         let in_main_view = matches!(
-            app.chains_view_mode,
+            app.chains_view_mode(),
             ChainsViewMode::LinkList | ChainsViewMode::LinkPreview
         );
         if in_main_view || app.focus == Focus::Sidebar {
@@ -579,6 +600,11 @@ fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
         return;
     }
 
+    if matches_key(code, &kb.settings) {
+        app.open_settings();
+        return;
+    }
+
     if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
         app.chains_next();
         return;
@@ -604,11 +630,31 @@ fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
         return;
     }
 
+    if matches_key(code, &kb.page_down) || code == KeyCode::PageDown {
+        app.scroll_link_preview_down();
+        return;
+    }
+
+    if matches_key(code, &kb.page_up) || code == KeyCode::PageUp {
+        app.scroll_link_preview_up();
+        return;
+    }
+
     if matches_key(code, &kb.switch_section) {
         app.focus = match app.focus {
             Focus::Sidebar => Focus::Terminal,
             Focus::Terminal => Focus::Sidebar,
         };
+        return;
+    }
+
+    if matches_key(code, &kb.nav_left) || code == KeyCode::Left {
+        app.focus = Focus::Sidebar;
+        return;
+    }
+
+    if matches_key(code, &kb.nav_right) || code == KeyCode::Right {
+        app.focus = Focus::Terminal;
     }
 }
 

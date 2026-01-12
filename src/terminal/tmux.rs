@@ -1,16 +1,68 @@
+use super::control_mode::TmuxControlMode;
 use super::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
+use crate::config::TerminalConfig;
 use crate::error::{Result, WagnerError};
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
 
-pub struct Tmux;
+pub struct Tmux {
+    control_mode: Mutex<Option<TmuxControlMode>>,
+    config: TerminalConfig,
+}
 
 impl Tmux {
     pub fn new() -> Self {
-        Self
+        Self::with_config(TerminalConfig::default())
+    }
+
+    pub fn with_config(config: TerminalConfig) -> Self {
+        Self {
+            control_mode: Mutex::new(None),
+            config,
+        }
     }
 
     fn run(&self, args: &[&str]) -> Result<String> {
+        if self.config.use_control_mode {
+            if let Some(result) = self.try_control_mode(args) {
+                return result;
+            }
+        }
+        self.run_spawn(args)
+    }
+
+    fn try_control_mode(&self, args: &[&str]) -> Option<Result<String>> {
+        let mut cm_guard = self.control_mode.lock().ok()?;
+
+        if cm_guard.is_none() {
+            match TmuxControlMode::connect_with_timeout(self.config.control_mode_timeout_ms) {
+                Ok(cm) => *cm_guard = Some(cm),
+                Err(_) => return None,
+            }
+        }
+
+        let cm = cm_guard.as_ref()?;
+        if !cm.is_alive() {
+            *cm_guard = None;
+            return None;
+        }
+
+        let command = args.join(" ");
+        match cm.execute(&command) {
+            Ok(output) => Some(Ok(output)),
+            Err(e) => {
+                if !cm.is_alive() {
+                    *cm_guard = None;
+                    None
+                } else {
+                    Some(Err(e))
+                }
+            }
+        }
+    }
+
+    fn run_spawn(&self, args: &[&str]) -> Result<String> {
         let output = Command::new("tmux")
             .args(args)
             .output()
@@ -92,6 +144,7 @@ impl Terminal for Tmux {
     }
 
     fn attach(&self, session: &SessionHandle) -> Result<()> {
+        // attach must use spawn - can't do interactive attach via control mode
         let status = Command::new("tmux")
             .args(["attach-session", "-t", &session.0])
             .status()

@@ -1,7 +1,8 @@
 use crate::agent::Agent;
+use crate::plugins::chains::ChainsViewMode;
 use crate::terminal::Terminal;
 
-use super::app::{App, AppTab, ChainsViewMode, Focus, InputMode};
+use super::app::{App, AppTab, Focus, InputMode};
 use super::widgets::components::{Selector, TextInput};
 use super::widgets::{
     chains_view, diff_view, help_popup, pane_list, settings_popup, task_tree, terminal_view,
@@ -141,14 +142,14 @@ fn draw_terminal_view<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app:
         app.input_mode == InputMode::DiffFileList || app.input_mode == InputMode::DiffContent;
     let is_chains_main = app.current_tab == AppTab::Chains
         && matches!(
-            app.chains_view_mode,
+            app.chains_view_mode(),
             ChainsViewMode::LinkList | ChainsViewMode::LinkPreview
         );
 
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).split(area);
 
     let (title, header_style, hints) = if is_chains_main {
-        let mode_hint = match app.chains_view_mode {
+        let mode_hint = match app.chains_view_mode() {
             ChainsViewMode::LinkList => "links",
             ChainsViewMode::LinkPreview => "preview",
             _ => "",

@@ -1,4 +1,7 @@
 pub mod chains;
+pub mod states;
+
+pub use states::PluginStates;
 
 use crate::config::Config;
 use crate::error::Result;

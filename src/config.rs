@@ -16,6 +16,31 @@ pub struct PluginsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalConfig {
+    #[serde(default = "default_use_control_mode")]
+    pub use_control_mode: bool,
+    #[serde(default = "default_control_mode_timeout_ms")]
+    pub control_mode_timeout_ms: u64,
+}
+
+fn default_use_control_mode() -> bool {
+    true
+}
+
+fn default_control_mode_timeout_ms() -> u64 {
+    5000
+}
+
+impl Default for TerminalConfig {
+    fn default() -> Self {
+        Self {
+            use_control_mode: default_use_control_mode(),
+            control_mode_timeout_ms: default_control_mode_timeout_ms(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Keybindings {
     #[serde(default = "default_quit")]
     pub quit: String,
@@ -194,6 +219,8 @@ pub struct Config {
     pub workspaces: HashMap<String, Workspace>,
     #[serde(default)]
     pub plugins: PluginsConfig,
+    #[serde(default)]
+    pub terminal: TerminalConfig,
 }
 
 fn default_diff_base() -> String {
@@ -234,6 +261,7 @@ impl Default for Config {
             keybindings: Keybindings::default(),
             workspaces: HashMap::new(),
             plugins: PluginsConfig::default(),
+            terminal: TerminalConfig::default(),
         }
     }
 }

@@ -1,10 +1,12 @@
 pub mod data;
 pub mod parser;
+pub mod state;
 
 use crate::config::Config;
 use crate::plugins::Plugin;
 
 pub use data::{Chain, ChainLink, ChainSource, ChainsData, RepoChains};
+pub use state::{ChainsState, ChainsViewMode};
 pub use parser::load_all_chains;
 
 pub struct ChainsPlugin;

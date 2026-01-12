@@ -11,7 +11,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
-const GENERAL_SETTINGS_COUNT: usize = 7;
+const GENERAL_SETTINGS_COUNT: usize = 10;
 
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
     let block = Block::default()

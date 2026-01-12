@@ -3,7 +3,8 @@ use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
-use crate::plugins::chains::ChainsData;
+use crate::plugins::PluginStates;
+use crate::plugins::chains::ChainsViewMode;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::wagner::{RepoSpec, Wagner, default_branch_for_task};
 
@@ -39,14 +40,6 @@ pub enum AppTab {
     #[default]
     Tasks,
     Chains,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ChainsViewMode {
-    #[default]
-    ChainList,
-    LinkList,
-    LinkPreview,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,13 +125,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub workspace_index: usize,
 
     pub current_tab: AppTab,
-    pub chains_data: Option<ChainsData>,
-    pub chains_view_mode: ChainsViewMode,
-    pub chains_list_state: ListState,
-    pub selected_chain_idx: Option<usize>,
-    pub selected_link_idx: Option<usize>,
-    pub chain_link_content: String,
-    pub chain_link_scroll: usize,
+    pub plugin_states: PluginStates,
 }
 
 impl<T: Terminal, A: Agent> App<T, A> {
@@ -211,13 +198,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             workspace_index: 0,
 
             current_tab: AppTab::default(),
-            chains_data: None,
-            chains_view_mode: ChainsViewMode::default(),
-            chains_list_state: ListState::default(),
-            selected_chain_idx: None,
-            selected_link_idx: None,
-            chain_link_content: String::new(),
-            chain_link_scroll: 0,
+            plugin_states: PluginStates::new(),
         }
     }
 
@@ -1152,6 +1133,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 cfg.tasks_root.display().to_string(),
             ),
             (
+                "repos_root".to_string(),
+                cfg.repos_root.display().to_string(),
+            ),
+            (
                 "refresh_interval_ms".to_string(),
                 cfg.refresh_interval_ms.to_string(),
             ),
@@ -1161,6 +1146,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
             (
                 "page_scroll_lines".to_string(),
                 cfg.page_scroll_lines.to_string(),
+            ),
+            ("capture_lines".to_string(), cfg.capture_lines.to_string()),
+            (
+                "background_poll_interval_ms".to_string(),
+                cfg.background_poll_interval_ms.to_string(),
             ),
             ("diff_base".to_string(), cfg.diff_base.clone()),
             ("key.quit".to_string(), kb.quit.clone()),
@@ -1190,6 +1180,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let cfg = &mut self.wagner.config;
         match key {
             "tasks_root" => cfg.tasks_root = std::path::PathBuf::from(value),
+            "repos_root" => cfg.repos_root = std::path::PathBuf::from(value),
             "refresh_interval_ms" => {
                 if let Ok(v) = value.parse() {
                     cfg.refresh_interval_ms = v;
@@ -1206,6 +1197,16 @@ impl<T: Terminal, A: Agent> App<T, A> {
             "page_scroll_lines" => {
                 if let Ok(v) = value.parse() {
                     cfg.page_scroll_lines = v;
+                }
+            }
+            "capture_lines" => {
+                if let Ok(v) = value.parse() {
+                    cfg.capture_lines = v;
+                }
+            }
+            "background_poll_interval_ms" => {
+                if let Ok(v) = value.parse() {
+                    cfg.background_poll_interval_ms = v;
                 }
             }
             "diff_base" => cfg.diff_base = value.to_string(),
@@ -1445,7 +1446,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         };
         if self.current_tab == AppTab::Chains {
             self.focus = Focus::Sidebar;
-            self.chains_view_mode = ChainsViewMode::ChainList;
+            self.plugin_states.chains.view_mode = ChainsViewMode::ChainList;
             self.refresh_chains();
         }
     }
@@ -1455,135 +1456,95 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         match load_all_chains(&self.wagner.config.tasks_root, None) {
             Ok(data) => {
-                self.chains_data = Some(data);
-                if self.selected_chain_idx.is_none() {
-                    self.chains_list_state.select(Some(0));
+                let total = data.total_chains();
+                self.plugin_states.chains.data = Some(data);
+
+                if total == 0 {
+                    self.plugin_states.chains.list_state.select(None);
+                    self.plugin_states.chains.selected_chain_idx = None;
+                } else if self.plugin_states.chains.list_state.selected().is_none() {
+                    self.plugin_states.chains.list_state.select(Some(0));
+                } else if let Some(idx) = self.plugin_states.chains.list_state.selected() {
+                    if idx >= total {
+                        self.plugin_states.chains.list_state.select(Some(total.saturating_sub(1)));
+                    }
                 }
             }
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to load chains");
-                self.chains_data = None;
+                self.plugin_states.chains.data = None;
             }
         }
     }
 
     pub fn chains_next(&mut self) {
+        let cs = &mut self.plugin_states.chains;
         if self.focus == Focus::Sidebar {
-            self.navigate_chain_list_next();
+            cs.navigate_chain_list_next();
         } else {
-            match self.chains_view_mode {
-                ChainsViewMode::ChainList => self.navigate_chain_list_next(),
-                ChainsViewMode::LinkList => self.navigate_link_list_next(),
-                ChainsViewMode::LinkPreview => self.scroll_link_preview_down(),
+            match cs.view_mode {
+                ChainsViewMode::ChainList => cs.navigate_chain_list_next(),
+                ChainsViewMode::LinkList => cs.navigate_link_list_next(),
+                ChainsViewMode::LinkPreview => cs.navigate_link_list_next(),
             }
         }
     }
 
     pub fn chains_prev(&mut self) {
+        let cs = &mut self.plugin_states.chains;
         if self.focus == Focus::Sidebar {
-            self.navigate_chain_list_prev();
+            cs.navigate_chain_list_prev();
         } else {
-            match self.chains_view_mode {
-                ChainsViewMode::ChainList => self.navigate_chain_list_prev(),
-                ChainsViewMode::LinkList => self.navigate_link_list_prev(),
-                ChainsViewMode::LinkPreview => self.scroll_link_preview_up(),
+            match cs.view_mode {
+                ChainsViewMode::ChainList => cs.navigate_chain_list_prev(),
+                ChainsViewMode::LinkList => cs.navigate_link_list_prev(),
+                ChainsViewMode::LinkPreview => cs.navigate_link_list_prev(),
             }
         }
     }
 
     pub fn navigate_chain_list_next(&mut self) {
-        let total = self.total_chain_count();
-        if total == 0 {
-            return;
-        }
-        let current = self.chains_list_state.selected().unwrap_or(0);
-        let next = if current + 1 >= total { 0 } else { current + 1 };
-        self.chains_list_state.select(Some(next));
+        self.plugin_states.chains.navigate_chain_list_next();
     }
 
     pub fn navigate_chain_list_prev(&mut self) {
-        let total = self.total_chain_count();
-        if total == 0 {
-            return;
-        }
-        let current = self.chains_list_state.selected().unwrap_or(0);
-        let prev = if current == 0 { total - 1 } else { current - 1 };
-        self.chains_list_state.select(Some(prev));
+        self.plugin_states.chains.navigate_chain_list_prev();
     }
 
     pub fn navigate_link_list_next(&mut self) {
-        if let Some(chain_idx) = self.selected_chain_idx {
-            if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                let current = self.selected_link_idx.unwrap_or(0);
-                let next = if current + 1 >= chain.links.len() {
-                    0
-                } else {
-                    current + 1
-                };
-                self.selected_link_idx = Some(next);
-            }
-        }
+        self.plugin_states.chains.navigate_link_list_next();
     }
 
     pub fn navigate_link_list_prev(&mut self) {
-        if let Some(chain_idx) = self.selected_chain_idx {
-            if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                let current = self.selected_link_idx.unwrap_or(0);
-                let prev = if current == 0 {
-                    chain.links.len().saturating_sub(1)
-                } else {
-                    current - 1
-                };
-                self.selected_link_idx = Some(prev);
-            }
-        }
+        self.plugin_states.chains.navigate_link_list_prev();
     }
 
     pub fn scroll_link_preview_down(&mut self) {
-        let total_lines = self.chain_link_content.lines().count();
-        let max_scroll = total_lines.saturating_sub(20);
-        if self.chain_link_scroll < max_scroll {
-            self.chain_link_scroll = self.chain_link_scroll.saturating_add(1);
-        }
+        self.plugin_states.chains.scroll_link_preview_down();
     }
 
     pub fn scroll_link_preview_up(&mut self) {
-        self.chain_link_scroll = self.chain_link_scroll.saturating_sub(1);
+        self.plugin_states.chains.scroll_link_preview_up();
     }
 
     pub fn chains_select(&mut self) {
+        let cs = &mut self.plugin_states.chains;
         if self.focus == Focus::Sidebar {
-            if let Some(idx) = self.chains_list_state.selected() {
-                self.selected_chain_idx = Some(idx);
-                self.selected_link_idx = Some(0);
-                self.chains_view_mode = ChainsViewMode::LinkList;
+            if cs.select_chain() {
                 self.focus = Focus::Terminal;
             }
             return;
         }
 
-        match self.chains_view_mode {
+        match cs.view_mode {
             ChainsViewMode::ChainList => {
-                if let Some(idx) = self.chains_list_state.selected() {
-                    self.selected_chain_idx = Some(idx);
-                    self.selected_link_idx = Some(0);
-                    self.chains_view_mode = ChainsViewMode::LinkList;
+                if cs.select_chain() {
                     self.focus = Focus::Terminal;
                 }
             }
             ChainsViewMode::LinkList => {
-                if let Some(chain_idx) = self.selected_chain_idx {
-                    if let Some(link_idx) = self.selected_link_idx {
-                        if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                            if let Some(link) = chain.links.get(link_idx) {
-                                if let Ok(content) = std::fs::read_to_string(&link.file_path) {
-                                    self.chain_link_content = content;
-                                    self.chain_link_scroll = 0;
-                                    self.chains_view_mode = ChainsViewMode::LinkPreview;
-                                }
-                            }
-                        }
-                    }
+                if let Err(e) = cs.select_link() {
+                    self.status_message = Some((format!("Error: {}", e), std::time::Instant::now()));
                 }
             }
             ChainsViewMode::LinkPreview => {}
@@ -1591,172 +1552,33 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn chains_back(&mut self) {
-        match self.chains_view_mode {
-            ChainsViewMode::ChainList => {}
-            ChainsViewMode::LinkList => {
-                self.chains_view_mode = ChainsViewMode::ChainList;
-                self.selected_chain_idx = None;
-                self.selected_link_idx = None;
-                self.focus = Focus::Sidebar;
-            }
-            ChainsViewMode::LinkPreview => {
-                self.chains_view_mode = ChainsViewMode::LinkList;
-                self.chain_link_content.clear();
-                self.chain_link_scroll = 0;
-            }
+        let cs = &mut self.plugin_states.chains;
+        let was_link_list = cs.view_mode == ChainsViewMode::LinkList;
+        let did_navigate = cs.back();
+
+        if !did_navigate {
+            // Already at ChainList - switch to Tasks tab
+            self.current_tab = AppTab::Tasks;
+            self.focus = Focus::Sidebar;
+        } else if was_link_list {
+            self.focus = Focus::Sidebar;
         }
     }
 
-    fn total_chain_count(&self) -> usize {
-        self.chains_data
-            .as_ref()
-            .map(|d| d.total_chains())
-            .unwrap_or(0)
-    }
-
-    fn find_task_root(&self, start_path: &std::path::Path) -> Option<std::path::PathBuf> {
-        let mut current = start_path.to_path_buf();
-        loop {
-            if current.join(".wagner").join("task.json").exists() {
-                return Some(current);
-            }
-            if !current.pop() {
-                break;
-            }
-            if current == self.wagner.config.tasks_root {
-                break;
-            }
-        }
-        None
-    }
-
-    pub fn get_chain_at_index(&self, idx: usize) -> Option<&crate::plugins::chains::Chain> {
-        let data = self.chains_data.as_ref()?;
-        let mut current = 0;
-
-        for repo in &data.repos {
-            for chain in &repo.chains {
-                if current == idx {
-                    return Some(chain);
-                }
-                current += 1;
-            }
-        }
-
-        for chain in &data.task_local {
-            if current == idx {
-                return Some(chain);
-            }
-            current += 1;
-        }
-
-        None
+    pub fn chains_view_mode(&self) -> ChainsViewMode {
+        self.plugin_states.chains.view_mode
     }
 
     pub fn promote_selected_chain(&mut self) {
-        use crate::plugins::chains::ChainSource;
-
-        let idx = match self.chains_list_state.selected() {
-            Some(i) => i,
-            None => return,
-        };
-
-        let chain = match self.get_chain_at_index(idx) {
-            Some(c) => c.clone(),
-            None => return,
-        };
-
-        let source_path = match &chain.source {
-            ChainSource::TaskLocal(p) => p.clone(),
-            ChainSource::Repo(_) => {
-                self.status_message = Some((
-                    "Chain is already at repo level".to_string(),
-                    std::time::Instant::now(),
-                ));
-                return;
+        let tasks_root = self.wagner.config.tasks_root.clone();
+        match self.plugin_states.chains.promote_chain(&tasks_root) {
+            Ok(msg) => {
+                self.status_message = Some((msg, std::time::Instant::now()));
+                self.refresh_chains();
             }
-        };
-
-        let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
-        let local_chain_dir = source_path.join(".claude").join("chains").join(chain_name);
-
-        if !local_chain_dir.exists() {
-            self.status_message = Some((
-                format!("Error: Chain directory not found"),
-                std::time::Instant::now(),
-            ));
-            return;
-        }
-
-        let task_path = self.find_task_root(&source_path);
-        let task_path = match task_path {
-            Some(p) => p,
-            None => {
-                self.status_message = Some((
-                    "Error: Could not find task directory".to_string(),
-                    std::time::Instant::now(),
-                ));
-                return;
+            Err(msg) => {
+                self.status_message = Some((format!("Error: {}", msg), std::time::Instant::now()));
             }
-        };
-
-        let plugins_link = task_path.join(".wagner").join("plugins");
-        if !plugins_link.exists() || !plugins_link.is_symlink() {
-            self.status_message = Some((
-                "Error: No repo-level plugin storage (task created before plugin enabled?)"
-                    .to_string(),
-                std::time::Instant::now(),
-            ));
-            return;
         }
-
-        let repo_chains_dir = match std::fs::read_link(&plugins_link) {
-            Ok(target) => {
-                if target.is_absolute() {
-                    target.join("chains")
-                } else {
-                    plugins_link.parent().unwrap().join(&target).join("chains")
-                }
-            }
-            Err(_) => {
-                self.status_message = Some((
-                    "Error: Could not resolve repo directory".to_string(),
-                    std::time::Instant::now(),
-                ));
-                return;
-            }
-        };
-
-        let target_chain_dir = repo_chains_dir.join(chain_name);
-        if target_chain_dir.exists() {
-            self.status_message = Some((
-                format!("Error: Chain already exists at repo level"),
-                std::time::Instant::now(),
-            ));
-            return;
-        }
-
-        if let Err(_) = std::fs::create_dir_all(&repo_chains_dir) {
-            self.status_message = Some((
-                "Error: Could not create chains directory".to_string(),
-                std::time::Instant::now(),
-            ));
-            return;
-        }
-
-        if let Err(_) = std::fs::rename(&local_chain_dir, &target_chain_dir) {
-            self.status_message = Some((
-                "Error: Could not move chain".to_string(),
-                std::time::Instant::now(),
-            ));
-            return;
-        }
-
-        self.status_message = Some((
-            format!("Promoted chain '{}'", chain_name),
-            std::time::Instant::now(),
-        ));
-
-        self.refresh_chains();
     }
 }

@@ -5,23 +5,9 @@ use crate::monitor::{
 };
 
 const BRAILLE_SPINNERS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const ACTIVITY_INDICATOR: char = '✻';
+const STAR_SPINNERS: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '*'];
 const IDLE_GRAY: (u8, u8, u8) = (136, 136, 136);
 const GRAY_TOLERANCE: u8 = 20;
-
-const ACTIVE_STATUS_WORDS: &[&str] = &[
-    "Thinking",
-    "Working",
-    "Reading",
-    "Writing",
-    "Editing",
-    "Searching",
-    "Exploring",
-    "Running",
-    "Executing",
-    "Planning",
-    "Analyzing",
-];
 
 const TOOL_PATTERNS: &[(&[&str], ClaudeActivity)] = &[
     (&["● Bash"], ClaudeActivity::ToolBash),
@@ -107,23 +93,23 @@ impl ClaudeCodeDetector {
         tail.contains("⎿  …") || tail.contains("⎿ …") || tail.contains("Running")
     }
 
+    fn find_star_spinner(line: &str) -> Option<usize> {
+        STAR_SPINNERS
+            .iter()
+            .filter_map(|&c| line.find(c))
+            .min()
+    }
+
     fn has_active_indicator(raw_output: &str, clean_output: &str) -> bool {
         let clean_lines: Vec<&str> = clean_output.lines().rev().take(15).collect();
         let raw_lines: Vec<&str> = raw_output.lines().rev().take(15).collect();
 
         for (clean_line, raw_line) in clean_lines.iter().zip(raw_lines.iter()) {
-            if !clean_line.contains(ACTIVITY_INDICATOR) {
+            let Some(_) = Self::find_star_spinner(clean_line) else {
                 continue;
-            }
+            };
 
-            let has_active_word = ACTIVE_STATUS_WORDS
-                .iter()
-                .any(|word| clean_line.contains(word));
-            if !has_active_word {
-                continue;
-            }
-
-            if let Some(pos) = raw_line.find(ACTIVITY_INDICATOR) {
+            if let Some(pos) = Self::find_star_spinner(raw_line) {
                 if let Some(rgb) = Self::find_last_rgb_color(&raw_line[..pos]) {
                     if !Self::is_gray_color(rgb) {
                         return true;
