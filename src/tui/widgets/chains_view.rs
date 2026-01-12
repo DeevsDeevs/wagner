@@ -234,21 +234,30 @@ fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
         return;
     };
 
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+        .split(area);
+
     let source_label = match &chain.source {
         ChainSource::Repo(_) => "repo",
         ChainSource::TaskLocal(_) => "local",
     };
 
-    let block = Block::default()
+    let list_block = Block::default()
         .title(format!(" {} ({}) ", chain.name, source_label))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
     let mut items: Vec<ListItem> = Vec::new();
     let selected_idx = app.selected_link_idx;
+    let mut selected_link = None;
 
     for (idx, link) in chain.links.iter().enumerate() {
         let is_selected = selected_idx == Some(idx);
+        if is_selected {
+            selected_link = Some(link);
+        }
         let style = if is_selected {
             Style::default()
                 .fg(Color::Cyan)
@@ -257,45 +266,88 @@ fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
             Style::default()
         };
 
-        let summary_preview = link
-            .summary
-            .as_ref()
-            .map(|s: &String| {
-                let truncated = if s.len() > 50 {
-                    format!("{}...", &s[..50])
-                } else {
-                    s.clone()
-                };
-                truncated.replace('\n', " ")
-            })
-            .unwrap_or_default();
-
         items.push(ListItem::new(Line::from(vec![
             Span::styled(&link.timestamp, Style::default().fg(Color::DarkGray)),
             Span::raw(" "),
             Span::styled(&link.slug, style),
         ])));
-
-        if !summary_preview.is_empty() {
-            items.push(ListItem::new(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(summary_preview, Style::default().fg(Color::DarkGray)),
-            ])));
-        }
     }
 
     if items.is_empty() {
         items.push(ListItem::new(Line::from(vec![Span::styled(
-            "  No links in this chain",
+            "No links",
             Style::default().fg(Color::DarkGray),
         )])));
     }
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().bg(Color::DarkGray));
+    let list = List::new(items).block(list_block);
+    frame.render_widget(list, chunks[0]);
 
-    frame.render_widget(list, area);
+    draw_link_details(frame, chunks[1], selected_link);
+}
+
+fn draw_link_details(frame: &mut Frame, area: Rect, link: Option<&crate::plugins::chains::ChainLink>) {
+    let block = Block::default()
+        .title(" Link Details ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let Some(link) = link else {
+        let msg = Paragraph::new("Select a link to view details")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(block);
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    let available_lines = area.height.saturating_sub(2) as usize;
+    let summary_max = available_lines / 2;
+    let next_step_max = available_lines.saturating_sub(summary_max).saturating_sub(6);
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled(&link.timestamp, Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
+            Span::styled(&link.slug, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+    ];
+
+    if let Some(summary) = &link.summary {
+        lines.push(Line::from(vec![
+            Span::styled("Summary", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+        ]));
+        for line in summary.lines().take(summary_max.max(8)) {
+            lines.push(Line::from(Span::raw(line)));
+        }
+        if summary.lines().count() > summary_max.max(8) {
+            lines.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
+        }
+    }
+
+    if let Some(next_step) = &link.next_step {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Next Step", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        ]));
+        for line in next_step.lines().take(next_step_max.max(5)) {
+            lines.push(Line::from(Span::raw(line)));
+        }
+        if next_step.lines().count() > next_step_max.max(5) {
+            lines.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Enter", Style::default().fg(Color::Cyan)),
+        Span::styled(" full view  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("q", Style::default().fg(Color::Cyan)),
+        Span::styled(" back", Style::default().fg(Color::DarkGray)),
+    ]));
+
+    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

@@ -161,13 +161,21 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             }
         }
         MouseEventKind::ScrollUp => {
-            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
-                app.scroll_terminal_up();
+            if app.input_mode == InputMode::Normal {
+                if app.current_tab == AppTab::Chains {
+                    app.chains_prev();
+                } else if app.focus == Focus::Terminal {
+                    app.scroll_terminal_up();
+                }
             }
         }
         MouseEventKind::ScrollDown => {
-            if app.input_mode == InputMode::Normal && app.focus == Focus::Terminal {
-                app.scroll_terminal_down();
+            if app.input_mode == InputMode::Normal {
+                if app.current_tab == AppTab::Chains {
+                    app.chains_next();
+                } else if app.focus == Focus::Terminal {
+                    app.scroll_terminal_down();
+                }
             }
         }
         _ => {}
@@ -291,8 +299,10 @@ const TMUX_KEY_MAP: &[(KeyCode, &str)] = &[
     (KeyCode::PageUp, "PageUp"),
     (KeyCode::PageDown, "PageDown"),
     (KeyCode::Tab, "Tab"),
+    (KeyCode::BackTab, "BTab"),
     (KeyCode::Delete, "DC"),
     (KeyCode::Insert, "IC"),
+    (KeyCode::Esc, "Escape"),
 ];
 
 fn send_key_to_pane<T: Terminal, A: Agent>(
