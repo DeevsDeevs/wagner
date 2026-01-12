@@ -13,6 +13,9 @@ Multi-repo task manager for AI agent sessions. Orchestrates agent instances acro
 ## Installation
 
 ```bash
+# Quick install (recommended)
+curl -fsSL https://raw.githubusercontent.com/DeevsDeevs/wagner/main/install.sh | sh
+
 # From crates.io
 cargo install wagner
 
@@ -22,6 +25,13 @@ nix profile install github:DeevsDeevs/wagner
 # From source
 git clone https://github.com/DeevsDeevs/wagner.git
 cd wagner && cargo build --release
+```
+
+### Updating
+
+```bash
+wagner update           # Update to latest version
+wagner update --check   # Check for updates without installing
 ```
 
 ## Quick Start
@@ -73,6 +83,7 @@ wagner rm my-feature -f      # Delete task + branches
 | `wagner rm-repo <task> <repo>` | | Remove repo from task |
 | `wagner delete <task>` | `rm` | Delete task |
 | `wagner workspace` | `ws` | Manage workspaces |
+| `wagner update` | | Update to latest version |
 
 ### Workspace commands
 

@@ -40,6 +40,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Cd { task, repo }) => cmd_cd(&wagner, &task, repo.as_deref()),
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
+        Some(Commands::Update { check }) => cmd_update(check),
         None => cmd_tui(wagner),
     }
 }
@@ -334,6 +335,145 @@ fn cmd_cd<T: Terminal, A: Agent>(
 fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {
     info!("Launching TUI");
     wagner::tui::run(wagner)
+}
+
+const REPO: &str = "DeevsDeevs/wagner";
+const BINARY_NAME: &str = "wagner";
+
+fn cmd_update(check_only: bool) -> Result<()> {
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    println!("Checking for updates...");
+
+    let latest = get_latest_version()?;
+
+    if latest == current_version {
+        println!("wagner is up to date (v{})", current_version);
+        return Ok(());
+    }
+
+    println!("Current version: v{}", current_version);
+    println!("Latest version:  v{}", latest);
+
+    if check_only {
+        println!("\nRun `wagner update` to install the latest version.");
+        return Ok(());
+    }
+
+    println!("\nUpdating...");
+
+    let platform = detect_platform()?;
+    download_and_install(&latest, &platform)?;
+
+    println!("\nwagner updated to v{}", latest);
+
+    Ok(())
+}
+
+fn get_latest_version() -> Result<String> {
+    let output = std::process::Command::new("curl")
+        .args(["-fsSL", &format!("https://api.github.com/repos/{}/releases/latest", REPO)])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(wagner::WagnerError::Update("Failed to fetch latest version from GitHub".into()));
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let version = body
+        .lines()
+        .find(|line| line.contains("\"tag_name\""))
+        .and_then(|line| {
+            let start = line.find('"')? + 1;
+            let rest = &line[start..];
+            let end = rest.find('"')?;
+            let rest = &rest[end + 1..];
+            let start = rest.find('"')? + 1;
+            let rest = &rest[start..];
+            let end = rest.find('"')?;
+            Some(rest[..end].trim_start_matches('v').to_string())
+        })
+        .ok_or_else(|| wagner::WagnerError::Update("Failed to parse version from GitHub response".into()))?;
+
+    Ok(version)
+}
+
+fn detect_platform() -> Result<String> {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+
+    let os_str = match os {
+        "linux" => "linux",
+        "macos" => "darwin",
+        _ => return Err(wagner::WagnerError::Update(format!("Unsupported OS: {}", os))),
+    };
+
+    let arch_str = match arch {
+        "x86_64" => "x86_64",
+        "aarch64" => "aarch64",
+        _ => return Err(wagner::WagnerError::Update(format!("Unsupported architecture: {}", arch))),
+    };
+
+    Ok(format!("{}-{}-{}", BINARY_NAME, os_str, arch_str))
+}
+
+fn download_and_install(version: &str, platform: &str) -> Result<()> {
+    let current_exe = std::env::current_exe()?;
+    let install_dir = current_exe.parent().unwrap_or(std::path::Path::new("/usr/local/bin"));
+
+    let download_url = format!(
+        "https://github.com/{}/releases/download/v{}/{}.tar.gz",
+        REPO, version, platform
+    );
+
+    println!("Downloading {}...", download_url);
+
+    let tmpdir = std::env::temp_dir().join(format!("wagner-update-{}", std::process::id()));
+    std::fs::create_dir_all(&tmpdir)?;
+
+    let tarball = tmpdir.join(format!("{}.tar.gz", platform));
+    let status = std::process::Command::new("curl")
+        .args(["-fsSL", &download_url, "-o"])
+        .arg(&tarball)
+        .status()?;
+
+    if !status.success() {
+        std::fs::remove_dir_all(&tmpdir).ok();
+        return Err(wagner::WagnerError::Update("Failed to download release".into()));
+    }
+
+    println!("Extracting...");
+    let status = std::process::Command::new("tar")
+        .args(["-xzf"])
+        .arg(&tarball)
+        .arg("-C")
+        .arg(&tmpdir)
+        .status()?;
+
+    if !status.success() {
+        std::fs::remove_dir_all(&tmpdir).ok();
+        return Err(wagner::WagnerError::Update("Failed to extract release".into()));
+    }
+
+    let new_binary = tmpdir.join(BINARY_NAME);
+    let target = install_dir.join(BINARY_NAME);
+
+    println!("Installing to {}...", target.display());
+
+    if target.exists() {
+        std::fs::remove_file(&target)?;
+    }
+    std::fs::copy(&new_binary, &target)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    std::fs::remove_dir_all(&tmpdir).ok();
+
+    Ok(())
 }
 
 fn cmd_workspace(command: WorkspaceCommands) -> Result<()> {

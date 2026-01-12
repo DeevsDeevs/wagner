@@ -112,6 +112,13 @@ pub enum Commands {
         #[command(subcommand)]
         command: WorkspaceCommands,
     },
+
+    /// Update wagner to the latest version
+    Update {
+        /// Check for updates without installing
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -218,6 +225,7 @@ _wagner() {{
         'completions:Generate shell completions'
         'workspace:Manage workspaces'
         'ws:Manage workspaces'
+        'update:Update wagner to latest version'
     )
 
     _arguments -C \
@@ -269,6 +277,9 @@ _wagner() {{
                     ;;
                 completions)
                     _arguments '1:shell:(bash zsh fish powershell elvish)'
+                    ;;
+                update)
+                    _arguments '--check[Check for updates without installing]'
                     ;;
                 workspace|ws)
                     local -a ws_commands
