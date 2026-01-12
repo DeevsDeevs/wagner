@@ -100,6 +100,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub repo_stats: HashMap<String, RepoStats>,
 
     last_click: Option<(u16, u16, Instant)>,
+    last_esc: Option<Instant>,
     terminal_view_size: Option<(u16, u16)>,
     pub dragging_sidebar: bool,
 
@@ -177,6 +178,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             repo_stats: HashMap::new(),
 
             last_click: None,
+            last_esc: None,
             terminal_view_size: None,
             dragging_sidebar: false,
 
@@ -345,6 +347,21 @@ impl<T: Terminal, A: Agent> App<T, A> {
             }
         }
         self.wagner.config.diff_base.clone()
+    }
+
+    pub fn check_double_esc(&mut self) -> bool {
+        let is_double_esc = self
+            .last_esc
+            .map(|t| t.elapsed() < Duration::from_millis(300))
+            .unwrap_or(false);
+
+        if is_double_esc {
+            self.last_esc = None;
+            true
+        } else {
+            self.last_esc = Some(Instant::now());
+            false
+        }
     }
 
     pub fn run(

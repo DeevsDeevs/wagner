@@ -227,18 +227,25 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         return;
     }
 
-    if app.focus == Focus::Terminal {
-        if code == KeyCode::Esc {
-            if modifiers.contains(KeyModifiers::ALT) {
-                if let Some(pane) = app.current_pane() {
-                    let _ = app.wagner.terminal.send_key(&pane, "Escape");
-                    let _ = app.refresh_terminal_output();
-                }
-            } else {
-                app.focus = Focus::Sidebar;
+    if code == KeyCode::Esc {
+        let is_double = app.check_double_esc();
+        let send_to_pane = modifiers.contains(KeyModifiers::ALT) || is_double;
+
+        if send_to_pane {
+            if let Some(pane) = app.current_pane() {
+                let _ = app.wagner.terminal.send_key(&pane, "Escape");
+                let _ = app.refresh_terminal_output();
+                app.focus = Focus::Terminal;
             }
-            return;
+        } else if app.focus == Focus::Terminal {
+            app.focus = Focus::Sidebar;
+        } else {
+            app.should_quit = true;
         }
+        return;
+    }
+
+    if app.focus == Focus::Terminal {
         if matches_key(code, &kb.toggle_sidebar) {
             if modifiers.contains(KeyModifiers::ALT) {
                 if let Some(pane) = app.current_pane() {
