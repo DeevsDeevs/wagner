@@ -228,6 +228,31 @@ pub fn load_all_chains(
                 data.task_local.push(chain);
             }
         }
+
+        for entry in std::fs::read_dir(&task_path).into_iter().flatten().flatten() {
+            let repo_path = entry.path();
+            if !repo_path.is_dir() {
+                continue;
+            }
+            let repo_name = repo_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if repo_name.starts_with('.') {
+                continue;
+            }
+            let repo_chains_dir = repo_path.join(".claude").join("chains");
+            if repo_chains_dir.exists() && !repo_chains_dir.is_symlink() {
+                let repo_chains = load_chains_from_path(
+                    &repo_chains_dir,
+                    ChainSource::TaskLocal(repo_path.clone()),
+                )?;
+                for mut chain in repo_chains {
+                    chain.name = format!("{}/{}/{}", current_task_name, repo_name, chain.name);
+                    data.task_local.push(chain);
+                }
+            }
+        }
     }
 
     debug!(

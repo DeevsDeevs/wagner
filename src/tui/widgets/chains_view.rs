@@ -154,6 +154,12 @@ fn draw_chain_details(frame: &mut Frame, area: Rect, chain: Option<&Chain>) {
     let link_count = chain.link_count();
     let link_label = if link_count == 1 { "link" } else { "links" };
 
+    let available_lines = area.height.saturating_sub(2) as usize;
+    let header_lines = 7;
+    let remaining = available_lines.saturating_sub(header_lines);
+    let summary_lines = remaining / 2;
+    let next_step_lines = remaining.saturating_sub(summary_lines);
+
     let mut lines: Vec<Line> = vec![
         Line::from(vec![
             Span::styled(&chain.name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -183,11 +189,11 @@ fn draw_chain_details(frame: &mut Frame, area: Rect, chain: Option<&Chain>) {
             lines.push(Line::from(vec![
                 Span::styled("Summary", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
             ]));
-            // Wrap summary text
-            for line in summary.lines().take(4) {
+            let summary_line_count = summary.lines().count();
+            for line in summary.lines().take(summary_lines.max(6)) {
                 lines.push(Line::from(Span::raw(line)));
             }
-            if summary.lines().count() > 4 {
+            if summary_line_count > summary_lines.max(6) {
                 lines.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
             }
         }
@@ -197,10 +203,11 @@ fn draw_chain_details(frame: &mut Frame, area: Rect, chain: Option<&Chain>) {
             lines.push(Line::from(vec![
                 Span::styled("Next Step", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             ]));
-            for line in next_step.lines().take(3) {
+            let next_line_count = next_step.lines().count();
+            for line in next_step.lines().take(next_step_lines.max(4)) {
                 lines.push(Line::from(Span::raw(line)));
             }
-            if next_step.lines().count() > 3 {
+            if next_line_count > next_step_lines.max(4) {
                 lines.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
             }
         }
@@ -208,9 +215,10 @@ fn draw_chain_details(frame: &mut Frame, area: Rect, chain: Option<&Chain>) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("Press ", Style::default().fg(Color::DarkGray)),
         Span::styled("Enter", Style::default().fg(Color::Cyan)),
-        Span::styled(" to view links", Style::default().fg(Color::DarkGray)),
+        Span::styled(" view links  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("j/k", Style::default().fg(Color::Cyan)),
+        Span::styled(" navigate", Style::default().fg(Color::DarkGray)),
     ]));
 
     let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
@@ -301,8 +309,18 @@ fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
     };
 
     let link_info = app.selected_link_idx.and_then(|idx| chain.links.get(idx));
+    let total_lines = app.chain_link_content.lines().count();
+    let visible_lines = area.height.saturating_sub(2) as usize;
+    let scroll_pos = app.chain_link_scroll;
+
     let title = link_info
-        .map(|l| format!(" {} - {} ", l.timestamp, l.slug))
+        .map(|l| {
+            if total_lines > visible_lines {
+                format!(" {} - {} [{}/{}] ", l.timestamp, l.slug, scroll_pos + 1, total_lines.saturating_sub(visible_lines) + 1)
+            } else {
+                format!(" {} - {} ", l.timestamp, l.slug)
+            }
+        })
         .unwrap_or_else(|| " Chain Link ".to_string());
 
     let block = Block::default()
@@ -313,8 +331,8 @@ fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
     let lines: Vec<Line> = app
         .chain_link_content
         .lines()
-        .skip(app.chain_link_scroll)
-        .take(area.height.saturating_sub(2) as usize)
+        .skip(scroll_pos)
+        .take(visible_lines)
         .map(|line| {
             if line.starts_with("# ") {
                 Line::from(Span::styled(

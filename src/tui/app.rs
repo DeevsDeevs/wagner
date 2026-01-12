@@ -497,9 +497,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn refresh_terminal_output(&mut self) -> Result<()> {
-        let old_len = self.terminal_output.len();
+        let old_line_count = self.terminal_output.lines().count();
         let max_scroll_before = self.get_max_scroll();
-        let was_near_bottom = self.terminal_scroll >= max_scroll_before.saturating_sub(3);
+        let scroll_before = self.terminal_scroll;
 
         if let Some(pane) = self.current_pane() {
             self.capture_pane(&pane);
@@ -524,7 +524,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 String::from("No task selected. Press 'n' to create a new task.");
         }
 
-        if self.terminal_output.len() > old_len && was_near_bottom {
+        let new_line_count = self.terminal_output.lines().count();
+        let was_near_bottom = max_scroll_before < 5
+            || scroll_before >= max_scroll_before.saturating_sub(3);
+
+        if new_line_count > old_line_count && was_near_bottom {
             self.scroll_terminal_bottom();
         }
         Ok(())
@@ -1448,7 +1452,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
             }
             ChainsViewMode::LinkPreview => {
-                self.chain_link_scroll = self.chain_link_scroll.saturating_add(1);
+                let total_lines = self.chain_link_content.lines().count();
+                let max_scroll = total_lines.saturating_sub(20);
+                if self.chain_link_scroll < max_scroll {
+                    self.chain_link_scroll = self.chain_link_scroll.saturating_add(1);
+                }
             }
         }
     }
