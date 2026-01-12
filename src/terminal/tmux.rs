@@ -5,6 +5,8 @@ use crate::error::{Result, WagnerError};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::Instant;
+use tracing::{debug, warn};
 
 pub struct Tmux {
     control_mode: Mutex<Option<TmuxControlMode>>,
