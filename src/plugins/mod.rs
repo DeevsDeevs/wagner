@@ -81,10 +81,15 @@ fn find_skill_source_dir(relative_path: &str) -> Option<std::path::PathBuf> {
     let exe_path = std::env::current_exe().ok()?;
 
     let candidates = [
-        exe_path.parent().and_then(|p| p.parent()).map(|p| p.join(relative_path)),
+        exe_path
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join(relative_path)),
         exe_path.parent().map(|p| p.join(relative_path)),
         Some(std::path::PathBuf::from(relative_path)),
-        std::env::var("CARGO_MANIFEST_DIR").ok().map(|p| std::path::PathBuf::from(p).join(relative_path)),
+        std::env::var("CARGO_MANIFEST_DIR")
+            .ok()
+            .map(|p| std::path::PathBuf::from(p).join(relative_path)),
     ];
 
     for candidate in candidates.into_iter().flatten() {

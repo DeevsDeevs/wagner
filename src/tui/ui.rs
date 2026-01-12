@@ -3,7 +3,9 @@ use crate::terminal::Terminal;
 
 use super::app::{App, AppTab, ChainsViewMode, Focus, InputMode};
 use super::widgets::components::{Selector, TextInput};
-use super::widgets::{chains_view, diff_view, help_popup, pane_list, settings_popup, task_tree, terminal_view};
+use super::widgets::{
+    chains_view, diff_view, help_popup, pane_list, settings_popup, task_tree, terminal_view,
+};
 
 use ratatui::{
     Frame,
@@ -89,7 +91,9 @@ fn draw_sidebar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<
     let mut spans = vec![];
 
     let tasks_style = if app.current_tab == AppTab::Tasks {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -98,7 +102,9 @@ fn draw_sidebar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<
     if show_chains_tab {
         spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
         let chains_style = if app.current_tab == AppTab::Chains {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
@@ -111,8 +117,11 @@ fn draw_sidebar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<
         Style::default().fg(Color::DarkGray)
     };
 
-    let header = Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::BOTTOM).border_style(border_style));
+    let header = Paragraph::new(Line::from(spans)).block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(border_style),
+    );
     frame.render_widget(header, chunks[0]);
 
     match app.current_tab {

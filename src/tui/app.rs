@@ -551,8 +551,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
 
         let new_line_count = self.terminal_output.lines().count();
-        let was_near_bottom = max_scroll_before < 5
-            || scroll_before >= max_scroll_before.saturating_sub(3);
+        let was_near_bottom =
+            max_scroll_before < 5 || scroll_before >= max_scroll_before.saturating_sub(3);
 
         if new_line_count > old_line_count && was_near_bottom {
             self.scroll_terminal_bottom();
@@ -1703,7 +1703,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let plugins_link = task_path.join(".wagner").join("plugins");
         if !plugins_link.exists() || !plugins_link.is_symlink() {
             self.status_message = Some((
-                "Error: No repo-level plugin storage (task created before plugin enabled?)".to_string(),
+                "Error: No repo-level plugin storage (task created before plugin enabled?)"
+                    .to_string(),
                 std::time::Instant::now(),
             ));
             return;

@@ -88,10 +88,7 @@ fn parse_chain_link_filename(file_path: &Path) -> Option<ChainLink> {
 
     let timestamp = format!(
         "{}-{}-{}-{}",
-        timestamp_parts[0],
-        timestamp_parts[1],
-        timestamp_parts[2],
-        timestamp_parts[3]
+        timestamp_parts[0], timestamp_parts[1], timestamp_parts[2], timestamp_parts[3]
     );
     let slug = timestamp_parts[4..].join("-");
 
@@ -150,12 +147,10 @@ fn extract_section(content: &str, section_name: &str) -> Option<String> {
     }
 }
 
-pub fn load_all_chains(
-    tasks_root: &Path,
-    task_name: Option<&str>,
-) -> Result<ChainsData> {
+pub fn load_all_chains(tasks_root: &Path, task_name: Option<&str>) -> Result<ChainsData> {
     let mut data = ChainsData::default();
-    let mut seen_repos: std::collections::HashMap<PathBuf, usize> = std::collections::HashMap::new();
+    let mut seen_repos: std::collections::HashMap<PathBuf, usize> =
+        std::collections::HashMap::new();
 
     if !tasks_root.exists() {
         return Ok(data);
@@ -195,7 +190,11 @@ pub fn load_all_chains(
                 };
 
                 if chains_dir.exists() {
-                    let repo_path = chains_dir.parent().and_then(|p| p.parent()).unwrap_or(&chains_dir).to_path_buf();
+                    let repo_path = chains_dir
+                        .parent()
+                        .and_then(|p| p.parent())
+                        .unwrap_or(&chains_dir)
+                        .to_path_buf();
 
                     if !seen_repos.contains_key(&repo_path) {
                         let repo_name = repo_path
@@ -203,7 +202,10 @@ pub fn load_all_chains(
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| "unknown".to_string());
 
-                        let chains = load_chains_from_path(&chains_dir, ChainSource::Repo(repo_path.clone()))?;
+                        let chains = load_chains_from_path(
+                            &chains_dir,
+                            ChainSource::Repo(repo_path.clone()),
+                        )?;
 
                         seen_repos.insert(repo_path.clone(), data.repos.len());
                         data.repos.push(RepoChains {
@@ -229,7 +231,11 @@ pub fn load_all_chains(
             }
         }
 
-        for entry in std::fs::read_dir(&task_path).into_iter().flatten().flatten() {
+        for entry in std::fs::read_dir(&task_path)
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
             let repo_path = entry.path();
             if !repo_path.is_dir() {
                 continue;
@@ -419,31 +425,27 @@ Add integration tests for the auth handler
     #[test]
     fn test_chain_data_total_chains() {
         let data = ChainsData {
-            repos: vec![
-                RepoChains {
-                    repo_name: "repo1".to_string(),
-                    repo_path: PathBuf::from("/repo1"),
-                    chains: vec![
-                        Chain {
-                            name: "chain1".to_string(),
-                            links: vec![],
-                            source: ChainSource::Repo(PathBuf::from("/repo1")),
-                        },
-                        Chain {
-                            name: "chain2".to_string(),
-                            links: vec![],
-                            source: ChainSource::Repo(PathBuf::from("/repo1")),
-                        },
-                    ],
-                },
-            ],
-            task_local: vec![
-                Chain {
-                    name: "local1".to_string(),
-                    links: vec![],
-                    source: ChainSource::TaskLocal(PathBuf::from("/task1")),
-                },
-            ],
+            repos: vec![RepoChains {
+                repo_name: "repo1".to_string(),
+                repo_path: PathBuf::from("/repo1"),
+                chains: vec![
+                    Chain {
+                        name: "chain1".to_string(),
+                        links: vec![],
+                        source: ChainSource::Repo(PathBuf::from("/repo1")),
+                    },
+                    Chain {
+                        name: "chain2".to_string(),
+                        links: vec![],
+                        source: ChainSource::Repo(PathBuf::from("/repo1")),
+                    },
+                ],
+            }],
+            task_local: vec![Chain {
+                name: "local1".to_string(),
+                links: vec![],
+                source: ChainSource::TaskLocal(PathBuf::from("/task1")),
+            }],
         };
 
         assert_eq!(data.total_chains(), 3);

@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use crate::terminal::PaneHandle;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentType {
     ClaudeCode,

@@ -4,7 +4,7 @@ use crate::error::{Result, WagnerError};
 use crate::model::{RepoSource, Task, TaskRepo};
 use crate::plugins::builtin_plugins;
 use crate::store::Store;
-use crate::terminal::{session_name_for_task, PaneHandle, SessionHandle, Terminal};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::debug;
@@ -356,7 +356,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
     fn get_default_ref(&self, repo: &PathBuf) -> Option<String> {
         let is_bare = Command::new("git")
-            .args(["-C", &repo.to_string_lossy(), "rev-parse", "--is-bare-repository"])
+            .args([
+                "-C",
+                &repo.to_string_lossy(),
+                "rev-parse",
+                "--is-bare-repository",
+            ])
             .output()
             .ok()
             .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "true")
@@ -365,7 +370,13 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if is_bare {
             for branch in ["origin/main", "origin/master"] {
                 let output = Command::new("git")
-                    .args(["-C", &repo.to_string_lossy(), "rev-parse", "--verify", branch])
+                    .args([
+                        "-C",
+                        &repo.to_string_lossy(),
+                        "rev-parse",
+                        "--verify",
+                        branch,
+                    ])
                     .output()
                     .ok()?;
                 if output.status.success() {
@@ -386,7 +397,13 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         for branch in ["origin/main", "origin/master"] {
             let output = Command::new("git")
-                .args(["-C", &repo.to_string_lossy(), "rev-parse", "--verify", branch])
+                .args([
+                    "-C",
+                    &repo.to_string_lossy(),
+                    "rev-parse",
+                    "--verify",
+                    branch,
+                ])
                 .output()
                 .ok()?;
             if output.status.success() {
@@ -597,7 +614,11 @@ fn url_to_repo_path(url: &str) -> PathBuf {
             let after_colon = &without_user[colon_pos + 1..];
             if after_colon.starts_with(|c: char| c.is_ascii_digit()) {
                 if let Some(slash_pos) = after_colon.find('/') {
-                    format!("{}{}", &without_user[..colon_pos], &after_colon[slash_pos..])
+                    format!(
+                        "{}{}",
+                        &without_user[..colon_pos],
+                        &after_colon[slash_pos..]
+                    )
                 } else {
                     without_user.to_string()
                 }

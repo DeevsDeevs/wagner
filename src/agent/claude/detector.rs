@@ -10,8 +10,17 @@ const IDLE_GRAY: (u8, u8, u8) = (136, 136, 136);
 const GRAY_TOLERANCE: u8 = 20;
 
 const ACTIVE_STATUS_WORDS: &[&str] = &[
-    "Thinking", "Working", "Reading", "Writing", "Editing", "Searching",
-    "Exploring", "Running", "Executing", "Planning", "Analyzing",
+    "Thinking",
+    "Working",
+    "Reading",
+    "Writing",
+    "Editing",
+    "Searching",
+    "Exploring",
+    "Running",
+    "Executing",
+    "Planning",
+    "Analyzing",
 ];
 
 const TOOL_PATTERNS: &[(&[&str], ClaudeActivity)] = &[

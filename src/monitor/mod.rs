@@ -230,7 +230,12 @@ impl StatusMonitor {
                 match detector {
                     Some(d) => PaneStatus::Agent {
                         agent_type: at.clone(),
-                        status: d.detect_status(raw_output, clean_output, output_changed, since_change),
+                        status: d.detect_status(
+                            raw_output,
+                            clean_output,
+                            output_changed,
+                            since_change,
+                        ),
                     },
                     None => TerminalDetector::detect_status(output_changed, since_change),
                 }

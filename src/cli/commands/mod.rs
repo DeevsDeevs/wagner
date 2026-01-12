@@ -1,4 +1,6 @@
-use crate::cli::{ChainsCommands, Cli, Commands, PluginCommands, WorkspaceCommands, print_completions};
+use crate::cli::{
+    ChainsCommands, Cli, Commands, PluginCommands, WorkspaceCommands, print_completions,
+};
 use tracing::{debug, info};
 use wagner::{
     Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner,
@@ -41,7 +43,9 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
         Some(Commands::Update { check }) => cmd_update(check),
-        Some(Commands::Repair { dry_run, execute }) => cmd_repair(&wagner.config, !execute || dry_run),
+        Some(Commands::Repair { dry_run, execute }) => {
+            cmd_repair(&wagner.config, !execute || dry_run)
+        }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
         None => cmd_tui(wagner),
@@ -384,7 +388,13 @@ fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
             }
 
             let output = std::process::Command::new("git")
-                .args(["-C", &repo_path.to_string_lossy(), "worktree", "list", "--porcelain"])
+                .args([
+                    "-C",
+                    &repo_path.to_string_lossy(),
+                    "worktree",
+                    "list",
+                    "--porcelain",
+                ])
                 .output();
 
             if let Ok(output) = output {
@@ -401,7 +411,9 @@ fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
                                         found_issues = true;
                                         println!(
                                             "  Orphaned worktree in {}/{}: {}",
-                                            ws_name, repo_name, wt_path.display()
+                                            ws_name,
+                                            repo_name,
+                                            wt_path.display()
                                         );
 
                                         if !dry_run {
@@ -458,13 +470,15 @@ fn cleanup_orphaned_dir(path: &std::path::Path) {
                         // gitdir: /path/to/bare-repo/worktrees/name (bare)
                         if let Some(worktrees_dir) = gitdir_path.parent() {
                             if let Some(git_or_repo) = worktrees_dir.parent() {
-                                let main_repo =
-                                    if git_or_repo.file_name().map(|n| n == ".git").unwrap_or(false)
-                                    {
-                                        git_or_repo.parent().map(|p| p.to_path_buf())
-                                    } else {
-                                        Some(git_or_repo.to_path_buf())
-                                    };
+                                let main_repo = if git_or_repo
+                                    .file_name()
+                                    .map(|n| n == ".git")
+                                    .unwrap_or(false)
+                                {
+                                    git_or_repo.parent().map(|p| p.to_path_buf())
+                                } else {
+                                    Some(git_or_repo.to_path_buf())
+                                };
 
                                 if let Some(main_repo) = main_repo {
                                     let _ = std::process::Command::new("git")
@@ -763,8 +777,14 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
                 for chain in &repo.chains {
                     let link_count = chain.link_count();
                     let link_label = if link_count == 1 { "link" } else { "links" };
-                    let latest = chain.latest_link().map(|l| l.timestamp.as_str()).unwrap_or("");
-                    println!("  {} [{} {}] {}", chain.name, link_count, link_label, latest);
+                    let latest = chain
+                        .latest_link()
+                        .map(|l| l.timestamp.as_str())
+                        .unwrap_or("");
+                    println!(
+                        "  {} [{} {}] {}",
+                        chain.name, link_count, link_label, latest
+                    );
                 }
             }
 
@@ -795,13 +815,19 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
             }
 
             if local_chain_dir.is_symlink() {
-                eprintln!("Error: Chain '{}' is already at repo level (symlinked)", chain);
+                eprintln!(
+                    "Error: Chain '{}' is already at repo level (symlinked)",
+                    chain
+                );
                 std::process::exit(1);
             }
 
             let plugins_link = task_path.join(".wagner").join("plugins");
             if !plugins_link.exists() || !plugins_link.is_symlink() {
-                eprintln!("Error: Task '{}' doesn't have repo-level plugin storage set up", task_name);
+                eprintln!(
+                    "Error: Task '{}' doesn't have repo-level plugin storage set up",
+                    task_name
+                );
                 eprintln!("This task may have been created before the chains plugin was enabled");
                 std::process::exit(1);
             }
@@ -945,7 +971,11 @@ fn cmd_plugin(command: PluginCommands) -> Result<()> {
             for plugin in all_plugins {
                 if plugin.is_enabled(&config) {
                     if let Err(e) = plugins::install_skills(plugin.as_ref(), &config) {
-                        eprintln!("Warning: Failed to install skills for {}: {}", plugin.id(), e);
+                        eprintln!(
+                            "Warning: Failed to install skills for {}: {}",
+                            plugin.id(),
+                            e
+                        );
                     } else {
                         installed += 1;
                         println!("Installed skills for: {}", plugin.id());
