@@ -701,7 +701,7 @@ fn test_get_task_not_found() {
 fn test_config_repos_root_default() {
     let config = Config::default();
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let expected = PathBuf::from(&home).join(".wagner").join("repos");
+    let expected = PathBuf::from(&home).join("repos");
     assert_eq!(config.repos_root, expected);
 }
 

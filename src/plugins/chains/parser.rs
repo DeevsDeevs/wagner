@@ -238,3 +238,189 @@ pub fn load_all_chains(
 
     Ok(data)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn create_chain_file(dir: &std::path::Path, chain_name: &str, filename: &str, content: &str) {
+        let chain_dir = dir.join(chain_name);
+        std::fs::create_dir_all(&chain_dir).unwrap();
+        std::fs::write(chain_dir.join(filename), content).unwrap();
+    }
+
+    #[test]
+    fn test_load_chains_from_empty_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let chains = load_chains_from_path(
+            &temp_dir.path().join("nonexistent"),
+            ChainSource::Repo(temp_dir.path().to_path_buf()),
+        )
+        .unwrap();
+        assert!(chains.is_empty());
+    }
+
+    #[test]
+    fn test_load_chains_from_path_with_chains() {
+        let temp_dir = TempDir::new().unwrap();
+        let chains_dir = temp_dir.path().join("chains");
+        std::fs::create_dir_all(&chains_dir).unwrap();
+
+        create_chain_file(
+            &chains_dir,
+            "my-feature",
+            "2025-01-12-1030-initial-setup.md",
+            "# Chain Link Summary\n\n## 1. Primary Request and Intent\nImplement feature X\n\n## 9. Next Step\nAdd tests",
+        );
+
+        let chains = load_chains_from_path(
+            &chains_dir,
+            ChainSource::Repo(temp_dir.path().to_path_buf()),
+        )
+        .unwrap();
+
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].name, "my-feature");
+        assert_eq!(chains[0].links.len(), 1);
+        assert_eq!(chains[0].links[0].timestamp, "2025-01-12-1030");
+        assert_eq!(chains[0].links[0].slug, "initial-setup");
+    }
+
+    #[test]
+    fn test_load_chains_multiple_links() {
+        let temp_dir = TempDir::new().unwrap();
+        let chains_dir = temp_dir.path().join("chains");
+        std::fs::create_dir_all(&chains_dir).unwrap();
+
+        create_chain_file(
+            &chains_dir,
+            "my-feature",
+            "2025-01-10-0900-first-link.md",
+            "# First link",
+        );
+        create_chain_file(
+            &chains_dir,
+            "my-feature",
+            "2025-01-11-1400-second-link.md",
+            "# Second link",
+        );
+        create_chain_file(
+            &chains_dir,
+            "my-feature",
+            "2025-01-12-1030-third-link.md",
+            "# Third link",
+        );
+
+        let chains = load_chains_from_path(
+            &chains_dir,
+            ChainSource::Repo(temp_dir.path().to_path_buf()),
+        )
+        .unwrap();
+
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].links.len(), 3);
+        assert_eq!(chains[0].links[0].timestamp, "2025-01-10-0900");
+        assert_eq!(chains[0].links[2].timestamp, "2025-01-12-1030");
+        assert_eq!(chains[0].latest_link().unwrap().slug, "third-link");
+    }
+
+    #[test]
+    fn test_load_chains_multiple_chains() {
+        let temp_dir = TempDir::new().unwrap();
+        let chains_dir = temp_dir.path().join("chains");
+        std::fs::create_dir_all(&chains_dir).unwrap();
+
+        create_chain_file(
+            &chains_dir,
+            "feature-a",
+            "2025-01-10-0900-setup.md",
+            "# Feature A",
+        );
+        create_chain_file(
+            &chains_dir,
+            "feature-b",
+            "2025-01-12-1400-setup.md",
+            "# Feature B",
+        );
+
+        let chains = load_chains_from_path(
+            &chains_dir,
+            ChainSource::Repo(temp_dir.path().to_path_buf()),
+        )
+        .unwrap();
+
+        assert_eq!(chains.len(), 2);
+        assert_eq!(chains[0].name, "feature-b");
+        assert_eq!(chains[1].name, "feature-a");
+    }
+
+    #[test]
+    fn test_extract_section_primary_request() {
+        let content = r#"# Chain Link Summary
+
+## 1. Primary Request and Intent
+Implement a new authentication system with OAuth support.
+
+## 2. Key Technical Concepts
+- OAuth 2.0
+- JWT tokens
+"#;
+        let section = extract_section(content, "Primary Request and Intent");
+        assert!(section.is_some());
+        assert!(section.unwrap().contains("authentication system"));
+    }
+
+    #[test]
+    fn test_extract_section_next_step() {
+        let content = r#"## 8. Current Work
+Working on tests
+
+## 9. Next Step
+Add integration tests for the auth handler
+"#;
+        let section = extract_section(content, "Next Step");
+        assert!(section.is_some());
+        assert!(section.unwrap().contains("integration tests"));
+    }
+
+    #[test]
+    fn test_extract_section_not_found() {
+        let content = "# Some content\nNo sections here";
+        let section = extract_section(content, "Nonexistent Section");
+        assert!(section.is_none());
+    }
+
+    #[test]
+    fn test_chain_data_total_chains() {
+        let data = ChainsData {
+            repos: vec![
+                RepoChains {
+                    repo_name: "repo1".to_string(),
+                    repo_path: PathBuf::from("/repo1"),
+                    chains: vec![
+                        Chain {
+                            name: "chain1".to_string(),
+                            links: vec![],
+                            source: ChainSource::Repo(PathBuf::from("/repo1")),
+                        },
+                        Chain {
+                            name: "chain2".to_string(),
+                            links: vec![],
+                            source: ChainSource::Repo(PathBuf::from("/repo1")),
+                        },
+                    ],
+                },
+            ],
+            task_local: vec![
+                Chain {
+                    name: "local1".to_string(),
+                    links: vec![],
+                    source: ChainSource::TaskLocal(PathBuf::from("/task1")),
+                },
+            ],
+        };
+
+        assert_eq!(data.total_chains(), 3);
+    }
+}

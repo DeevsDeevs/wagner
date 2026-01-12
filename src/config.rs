@@ -200,7 +200,7 @@ fn default_diff_base() -> String {
     "main".to_string()
 }
 fn default_repos_root() -> PathBuf {
-    home_dir().join(".wagner").join("repos")
+    home_dir().join("repos")
 }
 fn default_refresh_ms() -> u64 {
     100

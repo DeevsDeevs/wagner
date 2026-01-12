@@ -116,3 +116,51 @@ fn home_dir() -> std::path::PathBuf {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builtin_plugins_contains_chains() {
+        let plugins = builtin_plugins();
+        assert!(!plugins.is_empty());
+        assert!(plugins.iter().any(|p| p.id() == "chains"));
+    }
+
+    #[test]
+    fn test_get_plugin_chains() {
+        let plugin = get_plugin("chains");
+        assert!(plugin.is_some());
+        let plugin = plugin.unwrap();
+        assert_eq!(plugin.id(), "chains");
+        assert_eq!(plugin.name(), "Chains");
+        assert_eq!(plugin.data_dir(), "chains");
+    }
+
+    #[test]
+    fn test_get_plugin_unknown() {
+        let plugin = get_plugin("nonexistent");
+        assert!(plugin.is_none());
+    }
+
+    #[test]
+    fn test_chains_plugin_skills() {
+        let plugin = get_plugin("chains").unwrap();
+        let skills = plugin.agent_skills();
+        assert!(skills.contains(&"chain-link.md"));
+        assert!(skills.contains(&"chain-load.md"));
+        assert!(skills.contains(&"chain-list.md"));
+    }
+
+    #[test]
+    fn test_chains_plugin_enabled_disabled() {
+        let mut config = Config::default();
+
+        let plugin = get_plugin("chains").unwrap();
+        assert!(!plugin.is_enabled(&config));
+
+        config.plugins.chains.enabled = true;
+        assert!(plugin.is_enabled(&config));
+    }
+}

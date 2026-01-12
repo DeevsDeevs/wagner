@@ -902,13 +902,15 @@ fn cmd_plugin(command: PluginCommands) -> Result<()> {
 
             config.save()?;
 
-            if let Err(e) = plugins::install_skills(plugin.as_ref(), &config) {
-                eprintln!("Warning: Failed to install skills: {}", e);
-            }
-
             info!(plugin = %plugin_id, "Plugin enabled");
             println!("Enabled plugin: {}", plugin_id);
-            println!("Skills installed to ~/.claude/commands/");
+
+            let skills = plugin.agent_skills();
+            if !skills.is_empty() {
+                println!("\nThis plugin provides agent skills: {}", skills.join(", "));
+                println!("If you don't have these from another source (e.g., agent-system),");
+                println!("install them with: wagner plugin install-skills");
+            }
         }
         PluginCommands::Disable { plugin: plugin_id } => {
             let plugin = plugins::get_plugin(&plugin_id).unwrap_or_else(|| {
@@ -927,12 +929,14 @@ fn cmd_plugin(command: PluginCommands) -> Result<()> {
 
             config.save()?;
 
-            if let Err(e) = plugins::uninstall_skills(plugin.as_ref()) {
-                eprintln!("Warning: Failed to uninstall skills: {}", e);
-            }
-
             info!(plugin = %plugin_id, "Plugin disabled");
             println!("Disabled plugin: {}", plugin_id);
+
+            let skills = plugin.agent_skills();
+            if !skills.is_empty() {
+                println!("\nNote: Agent skills were not removed from ~/.claude/commands/");
+                println!("Remove them manually if desired: {}", skills.join(", "));
+            }
         }
         PluginCommands::InstallSkills => {
             let all_plugins = plugins::builtin_plugins();

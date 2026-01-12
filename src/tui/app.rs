@@ -498,6 +498,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn refresh_terminal_output(&mut self) -> Result<()> {
         let old_len = self.terminal_output.len();
+        let max_scroll_before = self.get_max_scroll();
+        let was_near_bottom = self.terminal_scroll >= max_scroll_before.saturating_sub(3);
 
         if let Some(pane) = self.current_pane() {
             self.capture_pane(&pane);
@@ -522,7 +524,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 String::from("No task selected. Press 'n' to create a new task.");
         }
 
-        if self.terminal_output.len() > old_len {
+        if self.terminal_output.len() > old_len && was_near_bottom {
             self.scroll_terminal_bottom();
         }
         Ok(())
