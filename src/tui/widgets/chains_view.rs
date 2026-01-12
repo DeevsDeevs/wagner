@@ -1,11 +1,11 @@
 use crate::agent::Agent;
-use crate::plugins::chains::ChainSource;
+use crate::plugins::chains::{Chain, ChainSource};
 use crate::terminal::Terminal;
 use crate::tui::app::{App, AppTab, ChainsViewMode};
 
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -24,12 +24,11 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
 }
 
 fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    let block = Block::default()
-        .title(" Chains ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-
     let Some(chains_data) = &app.chains_data else {
+        let block = Block::default()
+            .title(" Chains ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
         let empty_msg = Paragraph::new("No chains found. Use /chain-link to create one.")
             .style(Style::default().fg(Color::DarkGray))
             .block(block);
@@ -37,9 +36,17 @@ fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &A
         return;
     };
 
+    // Split into list (left) and details (right)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+
+    // Build chain list items
     let mut items: Vec<ListItem> = Vec::new();
-    let selected_idx = app.chains_list_state.selected();
+    let selected_chain_idx = app.chains_list_state.selected();
     let mut current_idx = 0;
+    let mut selected_chain: Option<&Chain> = None;
 
     for repo in &chains_data.repos {
         items.push(ListItem::new(Line::from(vec![
@@ -49,7 +56,10 @@ fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &A
         ])));
 
         for chain in &repo.chains {
-            let is_selected = selected_idx == Some(current_idx);
+            let is_selected = selected_chain_idx == Some(current_idx);
+            if is_selected {
+                selected_chain = Some(chain);
+            }
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Cyan)
@@ -59,15 +69,10 @@ fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &A
             };
 
             let link_count = chain.link_count();
-            let link_label = if link_count == 1 { "link" } else { "links" };
-
             items.push(ListItem::new(Line::from(vec![
                 Span::raw("  ├─ "),
                 Span::styled(&chain.name, style),
-                Span::styled(
-                    format!(" [{} {}]", link_count, link_label),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!(" [{}]", link_count), Style::default().fg(Color::DarkGray)),
             ])));
             current_idx += 1;
         }
@@ -81,7 +86,10 @@ fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &A
         ])));
 
         for chain in &chains_data.task_local {
-            let is_selected = selected_idx == Some(current_idx);
+            let is_selected = selected_chain_idx == Some(current_idx);
+            if is_selected {
+                selected_chain = Some(chain);
+            }
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Cyan)
@@ -91,16 +99,11 @@ fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &A
             };
 
             let link_count = chain.link_count();
-            let link_label = if link_count == 1 { "link" } else { "links" };
-
             items.push(ListItem::new(Line::from(vec![
                 Span::raw("  ├─ "),
                 Span::styled(&chain.name, style),
-                Span::styled(
-                    format!(" [{} {}]", link_count, link_label),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(" local", Style::default().fg(Color::Yellow)),
+                Span::styled(format!(" [{}]", link_count), Style::default().fg(Color::DarkGray)),
+                Span::styled(" ●", Style::default().fg(Color::Yellow)),
             ])));
             current_idx += 1;
         }
@@ -117,11 +120,101 @@ fn draw_chain_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &A
         )])));
     }
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().bg(Color::DarkGray));
+    // Left panel: Chain list
+    let list_block = Block::default()
+        .title(" Chains ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let list = List::new(items).block(list_block);
+    frame.render_widget(list, chunks[0]);
 
-    frame.render_stateful_widget(list, area, &mut app.chains_list_state.clone());
+    // Right panel: Selected chain details
+    draw_chain_details(frame, chunks[1], selected_chain);
+}
+
+fn draw_chain_details(frame: &mut Frame, area: Rect, chain: Option<&Chain>) {
+    let block = Block::default()
+        .title(" Details ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let Some(chain) = chain else {
+        let msg = Paragraph::new("Select a chain to view details")
+            .style(Style::default().fg(Color::DarkGray))
+            .block(block);
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    let source_label = match &chain.source {
+        ChainSource::Repo(p) => format!("Repo: {}", p.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
+        ChainSource::TaskLocal(p) => format!("Task: {}", p.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()),
+    };
+
+    let link_count = chain.link_count();
+    let link_label = if link_count == 1 { "link" } else { "links" };
+
+    let mut lines: Vec<Line> = vec![
+        Line::from(vec![
+            Span::styled(&chain.name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Source: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&source_label),
+        ]),
+        Line::from(vec![
+            Span::styled("Links: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{} {}", link_count, link_label)),
+        ]),
+    ];
+
+    if let Some(latest) = chain.latest_link() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::styled("Latest: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(&latest.timestamp),
+            Span::raw(" "),
+            Span::styled(&latest.slug, Style::default().fg(Color::White)),
+        ]));
+
+        if let Some(summary) = &latest.summary {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Summary", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
+            ]));
+            // Wrap summary text
+            for line in summary.lines().take(4) {
+                lines.push(Line::from(Span::raw(line)));
+            }
+            if summary.lines().count() > 4 {
+                lines.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
+            }
+        }
+
+        if let Some(next_step) = &latest.next_step {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Next Step", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            ]));
+            for line in next_step.lines().take(3) {
+                lines.push(Line::from(Span::raw(line)));
+            }
+            if next_step.lines().count() > 3 {
+                lines.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
+            }
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("Press ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Enter", Style::default().fg(Color::Cyan)),
+        Span::styled(" to view links", Style::default().fg(Color::DarkGray)),
+    ]));
+
+    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, area);
 }
 
 fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
