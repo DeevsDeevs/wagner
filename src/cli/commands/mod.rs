@@ -372,11 +372,16 @@ fn cmd_update(check_only: bool) -> Result<()> {
 
 fn get_latest_version() -> Result<String> {
     let output = std::process::Command::new("curl")
-        .args(["-fsSL", &format!("https://api.github.com/repos/{}/releases/latest", REPO)])
+        .args([
+            "-fsSL",
+            &format!("https://api.github.com/repos/{}/releases/latest", REPO),
+        ])
         .output()?;
 
     if !output.status.success() {
-        return Err(wagner::WagnerError::Update("Failed to fetch latest version from GitHub".into()));
+        return Err(wagner::WagnerError::Update(
+            "Failed to fetch latest version from GitHub".into(),
+        ));
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
@@ -393,7 +398,9 @@ fn get_latest_version() -> Result<String> {
             let end = rest.find('"')?;
             Some(rest[..end].trim_start_matches('v').to_string())
         })
-        .ok_or_else(|| wagner::WagnerError::Update("Failed to parse version from GitHub response".into()))?;
+        .ok_or_else(|| {
+            wagner::WagnerError::Update("Failed to parse version from GitHub response".into())
+        })?;
 
     Ok(version)
 }
@@ -405,13 +412,23 @@ fn detect_platform() -> Result<String> {
     let os_str = match os {
         "linux" => "linux",
         "macos" => "darwin",
-        _ => return Err(wagner::WagnerError::Update(format!("Unsupported OS: {}", os))),
+        _ => {
+            return Err(wagner::WagnerError::Update(format!(
+                "Unsupported OS: {}",
+                os
+            )));
+        }
     };
 
     let arch_str = match arch {
         "x86_64" => "x86_64",
         "aarch64" => "aarch64",
-        _ => return Err(wagner::WagnerError::Update(format!("Unsupported architecture: {}", arch))),
+        _ => {
+            return Err(wagner::WagnerError::Update(format!(
+                "Unsupported architecture: {}",
+                arch
+            )));
+        }
     };
 
     Ok(format!("{}-{}-{}", BINARY_NAME, os_str, arch_str))
@@ -419,7 +436,9 @@ fn detect_platform() -> Result<String> {
 
 fn download_and_install(version: &str, platform: &str) -> Result<()> {
     let current_exe = std::env::current_exe()?;
-    let install_dir = current_exe.parent().unwrap_or(std::path::Path::new("/usr/local/bin"));
+    let install_dir = current_exe
+        .parent()
+        .unwrap_or(std::path::Path::new("/usr/local/bin"));
 
     let download_url = format!(
         "https://github.com/{}/releases/download/v{}/{}.tar.gz",
@@ -439,7 +458,9 @@ fn download_and_install(version: &str, platform: &str) -> Result<()> {
 
     if !status.success() {
         std::fs::remove_dir_all(&tmpdir).ok();
-        return Err(wagner::WagnerError::Update("Failed to download release".into()));
+        return Err(wagner::WagnerError::Update(
+            "Failed to download release".into(),
+        ));
     }
 
     println!("Extracting...");
@@ -452,7 +473,9 @@ fn download_and_install(version: &str, platform: &str) -> Result<()> {
 
     if !status.success() {
         std::fs::remove_dir_all(&tmpdir).ok();
-        return Err(wagner::WagnerError::Update("Failed to extract release".into()));
+        return Err(wagner::WagnerError::Update(
+            "Failed to extract release".into(),
+        ));
     }
 
     let new_binary = tmpdir.join(BINARY_NAME);

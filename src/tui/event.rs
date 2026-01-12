@@ -547,9 +547,15 @@ mod tests {
         assert_eq!(get_action(KeyCode::Char('n'), &kb), Some(Action::NewTask));
         assert_eq!(get_action(KeyCode::Char('p'), &kb), Some(Action::AddPane));
         assert_eq!(get_action(KeyCode::Char('d'), &kb), Some(Action::Delete));
-        assert_eq!(get_action(KeyCode::Char('s'), &kb), Some(Action::SendMessage));
+        assert_eq!(
+            get_action(KeyCode::Char('s'), &kb),
+            Some(Action::SendMessage)
+        );
         assert_eq!(get_action(KeyCode::Tab, &kb), Some(Action::ToggleSidebar));
-        assert_eq!(get_action(KeyCode::Char('o'), &kb), Some(Action::SwitchSection));
+        assert_eq!(
+            get_action(KeyCode::Char('o'), &kb),
+            Some(Action::SwitchSection)
+        );
         assert_eq!(get_action(KeyCode::Char('S'), &kb), Some(Action::Settings));
         assert_eq!(get_action(KeyCode::Char('c'), &kb), Some(Action::OpenDiff));
     }
