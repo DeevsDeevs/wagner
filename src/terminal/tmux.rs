@@ -4,12 +4,12 @@ use crate::config::TerminalConfig;
 use crate::error::{Result, WagnerError};
 use std::path::Path;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing::{debug, warn};
 
 pub struct Tmux {
-    control_mode: Mutex<Option<TmuxControlMode>>,
+    control_mode: Mutex<Option<Arc<TmuxControlMode>>>,
     config: TerminalConfig,
 }
 
@@ -26,36 +26,104 @@ impl Tmux {
     }
 
     fn run(&self, args: &[&str]) -> Result<String> {
-        if self.config.use_control_mode {
+        let start = Instant::now();
+        let cmd_str = args.join(" ");
+
+        let result = if self.config.use_control_mode {
             if let Some(result) = self.try_control_mode(args) {
+                let elapsed = start.elapsed();
+                if elapsed.as_millis() > 50 {
+                    warn!(cmd = %cmd_str, elapsed_ms = %elapsed.as_millis(), "slow control_mode");
+                } else {
+                    debug!(cmd = %cmd_str, elapsed_ms = %elapsed.as_millis(), "control_mode");
+                }
                 return result;
             }
+            self.run_spawn(args)
+        } else {
+            self.run_spawn(args)
+        };
+
+        let elapsed = start.elapsed();
+        if elapsed.as_millis() > 50 {
+            warn!(cmd = %cmd_str, elapsed_ms = %elapsed.as_millis(), "slow spawn");
+        } else {
+            debug!(cmd = %cmd_str, elapsed_ms = %elapsed.as_millis(), "spawn");
         }
-        self.run_spawn(args)
+        result
     }
 
     fn try_control_mode(&self, args: &[&str]) -> Option<Result<String>> {
-        let mut cm_guard = self.control_mode.lock().ok()?;
-
-        if cm_guard.is_none() {
-            match TmuxControlMode::connect_with_timeout(self.config.control_mode_timeout_ms) {
-                Ok(cm) => *cm_guard = Some(cm),
-                Err(_) => return None,
+        let cm = {
+            let lock_start = Instant::now();
+            let mut cm_guard = self.control_mode.lock().ok()?;
+            let lock_elapsed = lock_start.elapsed();
+            if lock_elapsed.as_millis() > 10 {
+                warn!(elapsed_ms = %lock_elapsed.as_millis(), "slow mutex lock");
             }
+
+            if cm_guard.is_none() {
+                let connect_start = Instant::now();
+                match TmuxControlMode::connect_with_timeout(self.config.control_mode_timeout_ms) {
+                    Ok(cm) => {
+                        let elapsed = connect_start.elapsed();
+                        if elapsed.as_millis() > 100 {
+                            warn!(elapsed_ms = %elapsed.as_millis(), "slow control_mode connect");
+                        }
+                        *cm_guard = Some(Arc::new(cm));
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "control_mode connect failed");
+                        return None;
+                    }
+                }
+            }
+
+            let cm = cm_guard.as_ref()?;
+            if !cm.is_alive() {
+                warn!("control_mode not alive, clearing");
+                *cm_guard = None;
+                return None;
+            }
+
+            Arc::clone(cm)
+        };
+
+        let command = args
+            .iter()
+            .map(|arg| {
+                let needs_quoting = arg.contains(char::is_whitespace)
+                    || arg.contains('"')
+                    || arg.contains('#')
+                    || arg.contains('{')
+                    || arg.contains('}')
+                    || arg.contains('$')
+                    || arg.contains(';')
+                    || arg.contains('\'')
+                    || arg.contains('`')
+                    || arg.contains('\\');
+                if needs_quoting {
+                    format!("\"{}\"", arg.replace('\\', "\\\\").replace('"', "\\\""))
+                } else {
+                    (*arg).to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let exec_start = Instant::now();
+        let result = cm.execute(&command);
+        let exec_elapsed = exec_start.elapsed();
+        if exec_elapsed.as_millis() > 50 {
+            warn!(cmd = %command, elapsed_ms = %exec_elapsed.as_millis(), "slow execute");
         }
 
-        let cm = cm_guard.as_ref()?;
-        if !cm.is_alive() {
-            *cm_guard = None;
-            return None;
-        }
-
-        let command = args.join(" ");
-        match cm.execute(&command) {
+        match result {
             Ok(output) => Some(Ok(output)),
             Err(e) => {
                 if !cm.is_alive() {
-                    *cm_guard = None;
+                    if let Ok(mut guard) = self.control_mode.lock() {
+                        *guard = None;
+                    }
                     None
                 } else {
                     Some(Err(e))
@@ -85,8 +153,15 @@ impl Default for Tmux {
     }
 }
 
+impl Tmux {
+    fn ensure_server_running(&self) {
+        let _ = Command::new("tmux").arg("start-server").output();
+    }
+}
+
 impl Terminal for Tmux {
     fn create_session(&self, name: &str, cwd: &Path) -> Result<SessionHandle> {
+        self.ensure_server_running();
         let session_name = session_name_for_task(name);
         let cwd_str = cwd.to_string_lossy();
 
@@ -96,6 +171,7 @@ impl Terminal for Tmux {
     }
 
     fn create_pane(&self, session: &SessionHandle, cwd: &Path) -> Result<PaneHandle> {
+        self.ensure_server_running();
         let cwd_str = cwd.to_string_lossy();
 
         let pane_id = self.run(&[

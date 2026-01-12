@@ -20,6 +20,7 @@ pub struct ChainsState {
     pub selected_link_idx: Option<usize>,
     pub link_content: String,
     pub link_scroll: usize,
+    pub filter: String,
 }
 
 impl ChainsState {
@@ -28,12 +29,33 @@ impl ChainsState {
     }
 
     pub fn total_chain_count(&self) -> usize {
-        self.data.as_ref().map(|d| d.total_chains()).unwrap_or(0)
+        self.data
+            .as_ref()
+            .map(|d| d.filtered_chain_count(&self.filter))
+            .unwrap_or(0)
     }
 
     pub fn get_chain_at_index(&self, idx: usize) -> Option<&Chain> {
         let data = self.data.as_ref()?;
-        data.get_chain_at_display_index(idx)
+        data.get_filtered_chain_at_index(idx, &self.filter)
+    }
+
+    pub fn set_filter(&mut self, filter: String) {
+        self.filter = filter;
+        self.list_state.select(if self.total_chain_count() > 0 {
+            Some(0)
+        } else {
+            None
+        });
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.filter.clear();
+        self.list_state.select(if self.total_chain_count() > 0 {
+            Some(0)
+        } else {
+            None
+        });
     }
 
     pub fn navigate_chain_list_next(&mut self) {
@@ -96,6 +118,10 @@ impl ChainsState {
         if self.view_mode != ChainsViewMode::LinkPreview {
             return;
         }
+        self.reload_link_content();
+    }
+
+    pub fn reload_link_content(&mut self) {
         if let Some(chain_idx) = self.selected_chain_idx {
             if let Some(link_idx) = self.selected_link_idx {
                 if let Some(chain) = self.get_chain_at_index(chain_idx) {
@@ -224,12 +250,42 @@ impl ChainsState {
         std::fs::rename(&local_chain_dir, &target_chain_dir)
             .map_err(|e| format!("Could not move chain: {}", e))?;
 
-        // Invalidate cached data to force refresh
         self.data = None;
         self.selected_chain_idx = None;
         self.list_state.select(None);
 
         Ok(format!("Promoted chain '{}'", chain_name))
+    }
+
+    pub fn delete_chain(&mut self) -> Result<String, String> {
+        let idx = self.list_state.selected().ok_or("No chain selected")?;
+        let chain = self.get_chain_at_index(idx).ok_or("Chain not found")?.clone();
+
+        let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
+
+        let chain_dir = match &chain.source {
+            ChainSource::TaskLocal(p) => p.join(".claude").join("chains").join(chain_name),
+            ChainSource::Repo(p) => p.join(".wagner").join("plugins").join("chains").join(chain_name),
+        };
+
+        if !chain_dir.exists() {
+            return Err("Chain directory not found".to_string());
+        }
+
+        std::fs::remove_dir_all(&chain_dir)
+            .map_err(|e| format!("Could not delete chain: {}", e))?;
+
+        self.data = None;
+        self.selected_chain_idx = None;
+        self.list_state.select(None);
+
+        Ok(format!("Deleted chain '{}'", chain_name))
+    }
+
+    pub fn selected_chain_name(&self) -> Option<String> {
+        let idx = self.list_state.selected()?;
+        let chain = self.get_chain_at_index(idx)?;
+        Some(chain.name.split('/').last().unwrap_or(&chain.name).to_string())
     }
 }
 

@@ -1,119 +1,158 @@
 use crate::error::{Result, WagnerError};
-use std::collections::HashMap;
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use tracing::{debug, trace, warn};
 
 const CONTROL_SESSION: &str = "wagner_control";
 
 pub struct TmuxControlMode {
-    stdin: Mutex<ChildStdin>,
-    pending: Arc<Mutex<HashMap<u64, Sender<Result<String>>>>>,
-    next_cmd_num: AtomicU64,
+    writer: Mutex<Box<dyn Write + Send>>,
+    pending: Arc<Mutex<Option<Sender<Result<String>>>>>,
     alive: Arc<AtomicBool>,
     timeout_ms: u64,
     _reader_handle: JoinHandle<()>,
-    _child: Mutex<Child>,
 }
 
 impl TmuxControlMode {
     pub fn connect_with_timeout(timeout_ms: u64) -> Result<Self> {
-        let mut child = Command::new("tmux")
-            .args(["-CC", "new-session", "-A", "-s", CONTROL_SESSION])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+        let pty_system = native_pty_system();
+
+        let pair = pty_system
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| WagnerError::Terminal(format!("Failed to open pty: {}", e)))?;
+
+        let mut cmd = CommandBuilder::new("tmux");
+        cmd.args(["-CC", "new-session", "-A", "-s", CONTROL_SESSION]);
+
+        let _child = pair
+            .slave
+            .spawn_command(cmd)
             .map_err(|e| WagnerError::Terminal(format!("Failed to spawn tmux -CC: {}", e)))?;
 
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| WagnerError::Terminal("Failed to get stdin".into()))?;
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| WagnerError::Terminal(format!("Failed to get reader: {}", e)))?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| WagnerError::Terminal("Failed to get stdout".into()))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| WagnerError::Terminal(format!("Failed to get writer: {}", e)))?;
 
-        let pending: Arc<Mutex<HashMap<u64, Sender<Result<String>>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<Option<Sender<Result<String>>>>> = Arc::new(Mutex::new(None));
         let alive = Arc::new(AtomicBool::new(true));
 
         let reader_pending = Arc::clone(&pending);
         let reader_alive = Arc::clone(&alive);
 
+        let ready = Arc::new(AtomicBool::new(false));
+        let reader_ready = Arc::clone(&ready);
+
         let reader_handle = thread::spawn(move || {
-            Self::reader_loop(stdout, reader_pending, reader_alive);
+            Self::reader_loop(reader, reader_pending, reader_alive, reader_ready);
         });
 
+        let start = std::time::Instant::now();
+        while !ready.load(Ordering::SeqCst) {
+            if start.elapsed().as_millis() > 2000 {
+                warn!("control_mode startup timeout");
+                return Err(WagnerError::Terminal("Control mode startup timeout".into()));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
         Ok(Self {
-            stdin: Mutex::new(stdin),
+            writer: Mutex::new(writer),
             pending,
-            next_cmd_num: AtomicU64::new(1),
             alive,
             timeout_ms,
             _reader_handle: reader_handle,
-            _child: Mutex::new(child),
         })
     }
 
     fn reader_loop(
-        stdout: ChildStdout,
-        pending: Arc<Mutex<HashMap<u64, Sender<Result<String>>>>>,
+        reader: Box<dyn std::io::Read + Send>,
+        pending: Arc<Mutex<Option<Sender<Result<String>>>>>,
         alive: Arc<AtomicBool>,
+        ready: Arc<AtomicBool>,
     ) {
-        let reader = BufReader::new(stdout);
-        let mut current_cmd: Option<u64> = None;
+        let reader = BufReader::new(reader);
+        let mut in_response = false;
         let mut current_output = String::new();
+        let mut line_count = 0;
+        let mut initialized = false;
 
         for line in reader.lines() {
             let line = match line {
                 Ok(l) => l,
-                Err(_) => {
+                Err(e) => {
+                    warn!(error = %e, lines_read = line_count, "reader_loop read error");
                     alive.store(false, Ordering::SeqCst);
                     break;
                 }
             };
+            line_count += 1;
+            trace!(line_num = line_count, line = %line, "reader got line");
 
             if line.starts_with("%begin ") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    if let Ok(cmd_num) = parts[2].parse::<u64>() {
-                        current_cmd = Some(cmd_num);
-                        current_output.clear();
-                    }
-                }
+                debug!("begin block");
+                in_response = true;
+                current_output.clear();
             } else if line.starts_with("%end ") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 {
-                    if let Ok(cmd_num) = parts[2].parse::<u64>() {
-                        if current_cmd == Some(cmd_num) {
-                            let output = current_output.trim().to_string();
-                            if let Some(sender) = pending.lock().unwrap().remove(&cmd_num) {
-                                let _ = sender.send(Ok(output));
-                            }
-                            current_cmd = None;
-                            current_output.clear();
-                        }
+                debug!(output_len = current_output.len(), initialized, "end block");
+                if !initialized {
+                    // First %end is from tmux session startup, signal ready
+                    initialized = true;
+                    ready.store(true, Ordering::SeqCst);
+                    in_response = false;
+                    current_output.clear();
+                } else if in_response {
+                    let output = current_output.trim().to_string();
+                    if let Some(sender) = pending.lock().unwrap().take() {
+                        let _ = sender.send(Ok(output));
                     }
-                }
-            } else if line.starts_with("%error ") {
-                if let Some(cmd_num) = current_cmd {
-                    let error_msg = line.strip_prefix("%error ").unwrap_or(&line).to_string();
-                    if let Some(sender) = pending.lock().unwrap().remove(&cmd_num) {
-                        let _ = sender.send(Err(WagnerError::Terminal(error_msg)));
-                    }
-                    current_cmd = None;
+                    in_response = false;
                     current_output.clear();
                 }
-            } else if line.starts_with("%output ") || line.starts_with("%") {
-                // Ignore notifications for now (%output, %session-changed, etc.)
-            } else if current_cmd.is_some() {
+            } else if line.starts_with("%error ") {
+                debug!(output_len = current_output.len(), initialized, "error block");
+                if !initialized {
+                    // First response was an error during startup
+                    initialized = true;
+                    ready.store(true, Ordering::SeqCst);
+                    in_response = false;
+                    current_output.clear();
+                } else if in_response {
+                    let error_msg = current_output.trim().to_string();
+                    let error_msg = if error_msg.is_empty() {
+                        "tmux command failed".to_string()
+                    } else {
+                        error_msg
+                    };
+                    warn!(error = %error_msg, "command error");
+                    if let Some(sender) = pending.lock().unwrap().take() {
+                        let _ = sender.send(Err(WagnerError::Terminal(error_msg)));
+                    }
+                    in_response = false;
+                    current_output.clear();
+                }
+            } else if line.starts_with("%") && line.chars().nth(1).is_some_and(|c| c.is_ascii_lowercase()) {
+                // Ignore tmux notifications (%output, %session-changed, etc.)
+                // But NOT pane IDs like %80 which start with %<digit>
+                if line.starts_with("%exit") {
+                    warn!(line = %line, "tmux sent %exit notification - server may be shutting down");
+                }
+            } else if in_response {
                 if !current_output.is_empty() {
                     current_output.push('\n');
                 }
@@ -121,10 +160,12 @@ impl TmuxControlMode {
             }
         }
 
+        warn!(lines_read = line_count, "reader_loop exited");
         alive.store(false, Ordering::SeqCst);
-        let mut pending = pending.lock().unwrap();
-        for (_, sender) in pending.drain() {
-            let _ = sender.send(Err(WagnerError::Terminal("Control mode connection lost".into())));
+        if let Some(sender) = pending.lock().unwrap().take() {
+            let _ = sender.send(Err(WagnerError::Terminal(
+                "Control mode connection lost".into(),
+            )));
         }
     }
 
@@ -133,29 +174,28 @@ impl TmuxControlMode {
             return Err(WagnerError::Terminal("Control mode not connected".into()));
         }
 
-        let cmd_num = self.next_cmd_num.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
-
-        self.pending.lock().unwrap().insert(cmd_num, tx);
+        *self.pending.lock().unwrap() = Some(tx);
+        debug!(command, "sending command to control mode");
 
         {
-            let mut stdin = self.stdin.lock().unwrap();
-            if writeln!(stdin, "{}", command).is_err() {
-                self.pending.lock().unwrap().remove(&cmd_num);
+            let mut writer = self.writer.lock().unwrap();
+            if writeln!(writer, "{}", command).is_err() {
+                *self.pending.lock().unwrap() = None;
                 self.alive.store(false, Ordering::SeqCst);
                 return Err(WagnerError::Terminal("Failed to write to tmux".into()));
             }
-            if stdin.flush().is_err() {
-                self.pending.lock().unwrap().remove(&cmd_num);
+            if writer.flush().is_err() {
+                *self.pending.lock().unwrap() = None;
                 self.alive.store(false, Ordering::SeqCst);
-                return Err(WagnerError::Terminal("Failed to flush tmux stdin".into()));
+                return Err(WagnerError::Terminal("Failed to flush tmux".into()));
             }
         }
 
         match rx.recv_timeout(Duration::from_millis(self.timeout_ms)) {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                self.pending.lock().unwrap().remove(&cmd_num);
+                *self.pending.lock().unwrap() = None;
                 Err(WagnerError::Terminal("Command timed out".into()))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -172,12 +212,11 @@ impl TmuxControlMode {
 
 impl Drop for TmuxControlMode {
     fn drop(&mut self) {
-        if let Ok(mut stdin) = self.stdin.lock() {
-            let _ = writeln!(stdin);
-            let _ = stdin.flush();
-        }
-        if let Ok(mut child) = self._child.lock() {
-            let _ = child.kill();
+        // Gracefully detach before PTY cleanup to avoid SIGHUP cascading
+        if let Ok(mut writer) = self.writer.lock() {
+            let _ = writeln!(writer, "detach-client");
+            let _ = writer.flush();
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
 }

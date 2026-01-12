@@ -65,6 +65,7 @@ pub enum InputMode {
     EditSetting,
     DiffFileList,
     DiffContent,
+    ChainSearch,
 }
 
 pub struct App<T: Terminal, A: Agent> {
@@ -236,9 +237,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
             let task_inner_start = task_area.y + 1;
             let task_inner_end = task_area.y + task_area.height.saturating_sub(1);
             if row >= task_inner_start && row < task_inner_end {
-                self.sidebar_section = SidebarSection::Tasks;
                 let clicked_row = (row - task_inner_start) as usize;
-                self.select_task_by_row(clicked_row, is_double_click);
+
+                if self.current_tab == AppTab::Chains {
+                    self.handle_chain_sidebar_click(clicked_row, is_double_click);
+                } else {
+                    self.sidebar_section = SidebarSection::Tasks;
+                    self.select_task_by_row(clicked_row, is_double_click);
+                }
             }
 
             let pane_inner_start = pane_area.y + 1;
@@ -253,7 +259,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
             }
         } else {
-            self.focus = Focus::Terminal;
+            // Click in main area
+            if self.current_tab == AppTab::Chains {
+                self.handle_chain_main_click(col, row, area, sidebar_width, is_double_click);
+            } else {
+                self.focus = Focus::Terminal;
+            }
         }
     }
 
@@ -870,10 +881,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn start_delete(&mut self) {
-        if let Some(task_name) = &self.selected_task {
+        if let Some(pane_id) = &self.selected_pane {
+            self.input_mode = InputMode::Confirm;
+            self.confirm_action = Some(format!("delete_pane:{}", pane_id));
+            self.input_label = format!("Delete pane '{}'? [y/n]", pane_id);
+        } else if let Some(task_name) = &self.selected_task {
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(task_name.clone());
-            self.input_label = format!("Delete '{}'? [y/n]", task_name);
+            self.input_label = format!("Delete task '{}'? [y/n]", task_name);
         } else {
             self.set_status("No task selected");
         }
@@ -920,7 +935,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             | InputMode::Settings
             | InputMode::EditSetting
             | InputMode::DiffFileList
-            | InputMode::DiffContent => {}
+            | InputMode::DiffContent
+            | InputMode::ChainSearch => {}
         }
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
@@ -1030,23 +1046,42 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn confirm_delete(&mut self) {
-        if self.input_buffer.trim().eq_ignore_ascii_case("y") {
-            if let Some(task_name) = &self.confirm_action.clone() {
-                match self.wagner.delete_task(task_name, true) {
-                    Ok(_) => {
-                        self.set_status(&format!("Deleted task: {}", task_name));
-                        self.selected_task = None;
-                        self.selected_pane = None;
-                        self.restore_pane_scroll();
-                        let _ = self.refresh_data();
-                    }
-                    Err(e) => {
-                        self.set_status(&format!("Error: {}", e));
-                    }
+        if !self.input_buffer.trim().eq_ignore_ascii_case("y") {
+            self.set_status("Cancelled");
+            return;
+        }
+
+        let Some(action) = self.confirm_action.clone() else {
+            return;
+        };
+
+        if action.starts_with("delete_chain:") {
+            self.delete_selected_chain();
+        } else if let Some(pane_id) = action.strip_prefix("delete_pane:") {
+            let pane = crate::terminal::PaneHandle(pane_id.to_string(), String::new());
+            match self.wagner.terminal.kill_pane(&pane) {
+                Ok(_) => {
+                    self.set_status(&format!("Deleted pane: {}", pane_id));
+                    self.selected_pane = None;
+                    let _ = self.refresh_data();
+                }
+                Err(e) => {
+                    self.set_status(&format!("Error: {}", e));
                 }
             }
         } else {
-            self.set_status("Cancelled");
+            match self.wagner.delete_task(&action, true) {
+                Ok(_) => {
+                    self.set_status(&format!("Deleted task: {}", action));
+                    self.selected_task = None;
+                    self.selected_pane = None;
+                    self.restore_pane_scroll();
+                    let _ = self.refresh_data();
+                }
+                Err(e) => {
+                    self.set_status(&format!("Error: {}", e));
+                }
+            }
         }
     }
 
@@ -1578,6 +1613,119 @@ impl<T: Terminal, A: Agent> App<T, A> {
             }
             Err(msg) => {
                 self.status_message = Some((format!("Error: {}", msg), std::time::Instant::now()));
+            }
+        }
+    }
+
+    pub fn start_delete_chain(&mut self) {
+        if let Some(name) = self.plugin_states.chains.selected_chain_name() {
+            self.input_mode = InputMode::Confirm;
+            self.confirm_action = Some(format!("delete_chain:{}", name));
+            self.input_label = format!("Delete chain '{}'? [y/n]", name);
+            self.input_buffer.clear();
+        } else {
+            self.set_status("No chain selected");
+        }
+    }
+
+    pub fn delete_selected_chain(&mut self) {
+        match self.plugin_states.chains.delete_chain() {
+            Ok(msg) => {
+                self.status_message = Some((msg, std::time::Instant::now()));
+                self.refresh_chains();
+            }
+            Err(msg) => {
+                self.status_message = Some((format!("Error: {}", msg), std::time::Instant::now()));
+            }
+        }
+    }
+
+    pub fn start_chain_search(&mut self) {
+        self.input_mode = InputMode::ChainSearch;
+        self.input_label = "Filter chains:".to_string();
+        self.input_buffer = self.plugin_states.chains.filter.clone();
+        self.input_cursor = self.input_buffer.len();
+    }
+
+    pub fn submit_chain_search(&mut self) {
+        self.plugin_states.chains.set_filter(self.input_buffer.clone());
+        self.input_mode = InputMode::Normal;
+        self.input_buffer.clear();
+    }
+
+    pub fn cancel_chain_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.input_buffer.clear();
+    }
+
+    pub fn clear_chain_filter(&mut self) {
+        self.plugin_states.chains.clear_filter();
+    }
+
+    fn handle_chain_sidebar_click(&mut self, clicked_row: usize, is_double_click: bool) {
+        let Some(data) = &self.plugin_states.chains.data else {
+            return;
+        };
+
+        let grouped = data.chains_grouped_by_task();
+        let mut visual_row = 0;
+        let mut chain_idx = 0;
+
+        for (_task_name, chains) in &grouped {
+            if visual_row == clicked_row {
+                return;
+            }
+            visual_row += 1;
+
+            for _ in chains {
+                if visual_row == clicked_row {
+                    self.plugin_states.chains.list_state.select(Some(chain_idx));
+                    if is_double_click {
+                        self.chains_select();
+                    }
+                    return;
+                }
+                visual_row += 1;
+                chain_idx += 1;
+            }
+        }
+    }
+
+    fn handle_chain_main_click(&mut self, col: u16, row: u16, area: Rect, sidebar_width: u16, is_double_click: bool) {
+        let main_start = sidebar_width;
+        let main_width = area.width.saturating_sub(main_start);
+        let content_row = row.saturating_sub(2) as usize;
+
+        match self.plugin_states.chains.view_mode {
+            ChainsViewMode::ChainList => {
+                self.focus = Focus::Terminal;
+            }
+            ChainsViewMode::LinkList => {
+                self.focus = Focus::Terminal;
+                if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx {
+                    if let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx) {
+                        if content_row < chain.links.len() {
+                            self.plugin_states.chains.selected_link_idx = Some(content_row);
+                            if is_double_click {
+                                let _ = self.plugin_states.chains.select_link();
+                            }
+                        }
+                    }
+                }
+            }
+            ChainsViewMode::LinkPreview => {
+                let split_point = main_start + (main_width * 30 / 100);
+                if col < split_point {
+                    self.focus = Focus::Terminal;
+                    if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx {
+                        if let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx) {
+                            if content_row < chain.links.len() {
+                                self.plugin_states.chains.selected_link_idx = Some(content_row);
+                                self.plugin_states.chains.reload_link_content();
+                            }
+                        }
+                    }
+                }
             }
         }
     }

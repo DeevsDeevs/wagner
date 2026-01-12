@@ -222,6 +222,13 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let task = self.store.load_task(task_name)?;
         let session = SessionHandle(session_name_for_task(task_name));
 
+        let created_session = if !self.terminal.session_exists(task_name)? {
+            self.terminal.create_session(task_name, &task.path)?;
+            true
+        } else {
+            false
+        };
+
         let pane_dir = match repo_name {
             Some(name) => {
                 let repo =
@@ -239,7 +246,15 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             }
         };
 
-        let pane = self.terminal.create_pane(&session, &pane_dir)?;
+        let pane = if created_session {
+            let panes = self.terminal.list_panes(&session)?;
+            panes.into_iter().next().ok_or_else(|| {
+                WagnerError::Terminal("Session created but no panes found".into())
+            })?
+        } else {
+            self.terminal.create_pane(&session, &pane_dir)?
+        };
+
         self.terminal
             .send_keys(&pane, self.agent.launch_command())?;
         Ok(pane)

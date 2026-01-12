@@ -20,6 +20,22 @@ pub struct ChainLink {
     pub file_path: PathBuf,
     pub summary: Option<String>,
     pub next_step: Option<String>,
+    pub char_count: usize,
+}
+
+impl ChainLink {
+    pub fn estimated_tokens(&self) -> usize {
+        self.char_count / 4
+    }
+
+    pub fn token_display(&self) -> String {
+        let tokens = self.estimated_tokens();
+        if tokens >= 1000 {
+            format!("~{:.1}k", tokens as f64 / 1000.0)
+        } else {
+            format!("~{}", tokens)
+        }
+    }
 }
 
 impl Chain {
@@ -61,8 +77,6 @@ impl ChainsData {
             .chain(self.task_local.iter())
     }
 
-    /// Returns chains grouped by task name in alphabetical order.
-    /// This matches the display order in the sidebar.
     pub fn chains_in_display_order(&self) -> Vec<&Chain> {
         use std::collections::BTreeMap;
 
@@ -87,6 +101,60 @@ impl ChainsData {
 
     pub fn get_chain_at_display_index(&self, idx: usize) -> Option<&Chain> {
         self.chains_in_display_order().into_iter().nth(idx)
+    }
+
+    pub fn chains_grouped_by_task(&self) -> Vec<(String, Vec<&Chain>)> {
+        self.chains_grouped_by_task_filtered("")
+    }
+
+    pub fn chains_grouped_by_task_filtered(&self, filter: &str) -> Vec<(String, Vec<&Chain>)> {
+        use std::collections::BTreeMap;
+
+        let filter_lower = filter.to_lowercase();
+        let mut groups: BTreeMap<String, Vec<&Chain>> = BTreeMap::new();
+
+        for repo in &self.repos {
+            for chain in &repo.chains {
+                if !filter.is_empty() && !chain.name.to_lowercase().contains(&filter_lower) {
+                    continue;
+                }
+                let task_name = extract_task_name(&chain.name)
+                    .unwrap_or_else(|| repo.repo_name.clone());
+                groups.entry(task_name).or_default().push(chain);
+            }
+        }
+
+        for chain in &self.task_local {
+            if !filter.is_empty() && !chain.name.to_lowercase().contains(&filter_lower) {
+                continue;
+            }
+            let task_name = extract_task_name(&chain.name)
+                .unwrap_or_else(|| "local".to_string());
+            groups.entry(task_name).or_default().push(chain);
+        }
+
+        groups.into_iter().collect()
+    }
+
+    pub fn filtered_chain_count(&self, filter: &str) -> usize {
+        if filter.is_empty() {
+            return self.total_chains();
+        }
+        let filter_lower = filter.to_lowercase();
+        self.all_chains()
+            .filter(|c| c.name.to_lowercase().contains(&filter_lower))
+            .count()
+    }
+
+    pub fn get_filtered_chain_at_index(&self, idx: usize, filter: &str) -> Option<&Chain> {
+        if filter.is_empty() {
+            return self.get_chain_at_display_index(idx);
+        }
+        let filter_lower = filter.to_lowercase();
+        self.chains_in_display_order()
+            .into_iter()
+            .filter(|c| c.name.to_lowercase().contains(&filter_lower))
+            .nth(idx)
     }
 }
 

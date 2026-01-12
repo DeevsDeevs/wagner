@@ -5,8 +5,8 @@ use crate::monitor::{
 };
 
 const BRAILLE_SPINNERS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const STAR_SPINNERS: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '*'];
-const IDLE_GRAY: (u8, u8, u8) = (136, 136, 136);
+const STAR_SPINNERS: &[char] = &['✢', '✳', '✶', '✻', '✽'];
+const IDLE_GRAY: (u8, u8, u8) = (153, 153, 153);
 const GRAY_TOLERANCE: u8 = 20;
 
 const TOOL_PATTERNS: &[(&[&str], ClaudeActivity)] = &[
@@ -100,20 +100,11 @@ impl ClaudeCodeDetector {
             .min()
     }
 
-    fn has_active_indicator(raw_output: &str, clean_output: &str) -> bool {
-        let clean_lines: Vec<&str> = clean_output.lines().rev().take(15).collect();
-        let raw_lines: Vec<&str> = raw_output.lines().rev().take(15).collect();
-
-        for (clean_line, raw_line) in clean_lines.iter().zip(raw_lines.iter()) {
-            let Some(_) = Self::find_star_spinner(clean_line) else {
-                continue;
-            };
-
-            if let Some(pos) = Self::find_star_spinner(raw_line) {
-                if let Some(rgb) = Self::find_last_rgb_color(&raw_line[..pos]) {
-                    if !Self::is_gray_color(rgb) {
-                        return true;
-                    }
+    fn has_active_indicator(raw_output: &str, _clean_output: &str) -> bool {
+        for line in raw_output.lines().rev().take(15) {
+            if let Some(pos) = Self::find_star_spinner(line) {
+                if let Some(rgb) = Self::find_last_rgb_color(&line[..pos]) {
+                    return !Self::is_gray_color(rgb);
                 }
             }
         }
@@ -206,7 +197,7 @@ impl AgentDetector for ClaudeCodeDetector {
         &self,
         raw_output: &str,
         clean_output: &str,
-        output_changed: bool,
+        _output_changed: bool,
         _since_change: Duration,
     ) -> AgentStatus {
         if let Some(reason) = Self::detect_wait(clean_output) {
@@ -217,7 +208,7 @@ impl AgentDetector for ClaudeCodeDetector {
         let has_active_text = Self::has_active_status(clean_output);
         let has_active_indicator = Self::has_active_indicator(raw_output, clean_output);
 
-        if has_spinner || has_active_text || has_active_indicator || output_changed {
+        if has_spinner || has_active_text || has_active_indicator {
             let activity = Self::detect_tool(clean_output).unwrap_or(ClaudeActivity::Thinking);
             return AgentStatus::Active(Activity::new(ActivityKind::Claude(activity)));
         }

@@ -108,6 +108,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
                 InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
                 InputMode::DiffContent => handle_diff_content_mode(app, key.code),
+                InputMode::ChainSearch => handle_chain_search_mode(app, key.code, key.modifiers),
             }
         }
         Event::Mouse(mouse) => {
@@ -151,6 +152,9 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
                 app.workspace_list.clear();
                 app.workspace_index = 0;
                 app.input_mode = InputMode::Normal;
+            }
+            InputMode::ChainSearch => {
+                app.cancel_chain_search();
             }
         },
         MouseEventKind::Up(MouseButton::Left) => {
@@ -630,6 +634,11 @@ fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
         return;
     }
 
+    if matches_key(code, &kb.delete) {
+        app.start_delete_chain();
+        return;
+    }
+
     if matches_key(code, &kb.page_down) || code == KeyCode::PageDown {
         app.scroll_link_preview_down();
         return;
@@ -655,6 +664,28 @@ fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode)
 
     if matches_key(code, &kb.nav_right) || code == KeyCode::Right {
         app.focus = Focus::Terminal;
+        return;
+    }
+
+    if code == KeyCode::Char('/') {
+        app.start_chain_search();
+        return;
+    }
+
+    if code == KeyCode::Esc && !app.plugin_states.chains.filter.is_empty() {
+        app.clear_chain_filter();
+    }
+}
+
+fn handle_chain_search_mode<T: Terminal, A: Agent>(
+    app: &mut App<T, A>,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+) {
+    match handle_text_editing(app, code, modifiers) {
+        TextInputAction::Cancel => app.cancel_chain_search(),
+        TextInputAction::Submit => app.submit_chain_search(),
+        TextInputAction::Edit | TextInputAction::None => {}
     }
 }
 

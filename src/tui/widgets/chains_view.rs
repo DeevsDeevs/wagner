@@ -1,5 +1,5 @@
 use crate::agent::Agent;
-use crate::plugins::chains::{Chain, ChainSource, ChainsData, ChainsViewMode};
+use crate::plugins::chains::{ChainSource, ChainsViewMode};
 use crate::terminal::Terminal;
 use crate::tui::app::{App, AppTab, Focus};
 
@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
@@ -37,11 +37,19 @@ pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, a
         return;
     };
 
+    let filter = &app.plugin_states.chains.filter;
     let mut items: Vec<ListItem> = Vec::new();
     let selected_idx = app.plugin_states.chains.list_state.selected();
     let mut current_idx = 0;
 
-    let grouped = group_chains_by_task(chains_data);
+    if !filter.is_empty() {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled("Filter: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(filter.as_str(), Style::default().fg(Color::Yellow)),
+        ])));
+    }
+
+    let grouped = chains_data.chains_grouped_by_task_filtered(filter);
 
     for (task_name, chains) in &grouped {
         items.push(ListItem::new(Line::from(vec![
@@ -85,35 +93,6 @@ pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, a
     frame.render_widget(list, area);
 }
 
-fn group_chains_by_task(data: &ChainsData) -> Vec<(String, Vec<&Chain>)> {
-    use std::collections::BTreeMap;
-
-    let mut groups: BTreeMap<String, Vec<&Chain>> = BTreeMap::new();
-
-    for repo in &data.repos {
-        for chain in &repo.chains {
-            let task_name =
-                extract_task_name(&chain.name).unwrap_or_else(|| repo.repo_name.clone());
-            groups.entry(task_name).or_default().push(chain);
-        }
-    }
-
-    for chain in &data.task_local {
-        let task_name = extract_task_name(&chain.name).unwrap_or_else(|| "local".to_string());
-        groups.entry(task_name).or_default().push(chain);
-    }
-
-    groups.into_iter().collect()
-}
-
-fn extract_task_name(chain_name: &str) -> Option<String> {
-    let parts: Vec<&str> = chain_name.split('/').collect();
-    if parts.len() >= 2 {
-        Some(parts[0].to_string())
-    } else {
-        None
-    }
-}
 
 pub fn draw_main<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
     match app.plugin_states.chains.view_mode {
@@ -174,12 +153,16 @@ fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
             Span::styled(&link.timestamp, Style::default().fg(Color::DarkGray)),
             Span::raw(" "),
             Span::styled(&link.slug, style),
+            Span::styled(
+                format!(" [{}]", link.token_display()),
+                Style::default().fg(Color::Yellow),
+            ),
         ];
 
         if let Some(summary) = &link.summary {
-            let preview: String = summary.chars().take(50).collect();
+            let preview: String = summary.chars().take(40).collect();
             spans.push(Span::styled(
-                format!(" - {}", preview),
+                format!(" {}", preview),
                 Style::default().fg(Color::DarkGray),
             ));
         }
@@ -215,25 +198,16 @@ fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
     let scroll_pos = cs.link_scroll;
 
     let title = link_info
-        .map(|l| {
-            if total_lines > visible_lines {
-                format!(
-                    " {} - {} [{}/{}] ",
-                    l.timestamp,
-                    l.slug,
-                    scroll_pos + 1,
-                    total_lines.saturating_sub(visible_lines) + 1
-                )
-            } else {
-                format!(" {} - {} ", l.timestamp, l.slug)
-            }
-        })
+        .map(|l| format!(" {} - {} ", l.timestamp, l.slug))
         .unwrap_or_else(|| " Chain Link ".to_string());
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     let lines: Vec<Line> = cs
         .link_content
@@ -267,10 +241,28 @@ fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, area);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
+
+    if total_lines > visible_lines {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .track_symbol(Some("│"))
+            .thumb_symbol("█");
+
+        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(visible_lines))
+            .position(scroll_pos);
+
+        let scrollbar_area = Rect {
+            x: inner.x + inner.width.saturating_sub(1),
+            y: inner.y,
+            width: 1,
+            height: inner.height,
+        };
+
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+    }
 }
 
 pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

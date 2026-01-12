@@ -22,7 +22,7 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
 
     let is_input_mode = matches!(
         app.input_mode,
-        InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm | InputMode::EditSetting
+        InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm | InputMode::EditSetting | InputMode::ChainSearch
     );
     let is_workspace_select = app.input_mode == InputMode::SelectWorkspace;
 

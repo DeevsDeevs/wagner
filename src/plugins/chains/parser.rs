@@ -1,7 +1,8 @@
 use super::data::{Chain, ChainLink, ChainSource, ChainsData, RepoChains};
 use crate::error::Result;
+use crate::{RepoSource, Task};
 use std::path::{Path, PathBuf};
-use tracing::debug;
+use tracing::{debug, warn};
 
 pub fn load_chains_from_path(path: &Path, source: ChainSource) -> Result<Vec<Chain>> {
     if !path.exists() {
@@ -92,7 +93,7 @@ fn parse_chain_link_filename(file_path: &Path) -> Option<ChainLink> {
     );
     let slug = timestamp_parts[4..].join("-");
 
-    let (summary, next_step) = parse_chain_link_content(file_path);
+    let (summary, next_step, char_count) = parse_chain_link_content(file_path);
 
     Some(ChainLink {
         timestamp,
@@ -100,19 +101,21 @@ fn parse_chain_link_filename(file_path: &Path) -> Option<ChainLink> {
         file_path: file_path.to_path_buf(),
         summary,
         next_step,
+        char_count,
     })
 }
 
-fn parse_chain_link_content(file_path: &Path) -> (Option<String>, Option<String>) {
+fn parse_chain_link_content(file_path: &Path) -> (Option<String>, Option<String>, usize) {
     let content = match std::fs::read_to_string(file_path) {
         Ok(c) => c,
-        Err(_) => return (None, None),
+        Err(_) => return (None, None, 0),
     };
 
+    let char_count = content.len();
     let summary = extract_section(&content, "Primary Request and Intent");
     let next_step = extract_section(&content, "Next Step");
 
-    (summary, next_step)
+    (summary, next_step, char_count)
 }
 
 fn extract_section(content: &str, section_name: &str) -> Option<String> {
@@ -147,6 +150,42 @@ fn extract_section(content: &str, section_name: &str) -> Option<String> {
     }
 }
 
+fn migrate_task_plugins_symlink(task_path: &Path) -> Option<()> {
+    let task_json_path = task_path.join(".wagner").join("task.json");
+    let plugins_link = task_path.join(".wagner").join("plugins");
+
+    if plugins_link.exists() {
+        return None;
+    }
+
+    let task_json = std::fs::read_to_string(&task_json_path).ok()?;
+    let task: Task = serde_json::from_str(&task_json).ok()?;
+
+    let first_repo = task.repos.first()?;
+    let repo_path = match &first_repo.source {
+        RepoSource::Local(p) => p.clone(),
+        RepoSource::Remote(_) => return None,
+    };
+
+    let repo_plugins_dir = repo_path.join(".wagner").join("plugins");
+    std::fs::create_dir_all(&repo_plugins_dir).ok()?;
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&repo_plugins_dir, &plugins_link).ok()?;
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_dir(&repo_plugins_dir, &plugins_link).ok()?;
+    }
+
+    warn!(
+        task = %task_path.display(),
+        "Migrated task to use repo-level plugins symlink"
+    );
+    Some(())
+}
+
 pub fn load_all_chains(tasks_root: &Path, task_name: Option<&str>) -> Result<ChainsData> {
     let mut data = ChainsData::default();
     let mut seen_repos: std::collections::HashMap<PathBuf, usize> =
@@ -179,6 +218,8 @@ pub fn load_all_chains(tasks_root: &Path, task_name: Option<&str>) -> Result<Cha
         if !task_json.exists() {
             continue;
         }
+
+        migrate_task_plugins_symlink(&task_path);
 
         let plugins_link = task_path.join(".wagner").join("plugins");
         if plugins_link.is_symlink() {
