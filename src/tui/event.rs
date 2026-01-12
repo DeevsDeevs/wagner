@@ -228,7 +228,7 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     if code == KeyCode::Esc {
-        let is_double = app.check_double_esc();
+        let is_double = app.double_esc.check();
         let send_to_pane = modifiers.contains(KeyModifiers::ALT) || is_double;
 
         if send_to_pane {
@@ -245,18 +245,23 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         return;
     }
 
-    if app.focus == Focus::Terminal {
-        if matches_key(code, &kb.toggle_sidebar) {
-            if modifiers.contains(KeyModifiers::ALT) {
-                if let Some(pane) = app.current_pane() {
-                    let _ = app.wagner.terminal.send_key(&pane, "Tab");
-                    let _ = app.refresh_terminal_output();
-                }
-            } else {
-                app.next_tab();
+    if matches_key(code, &kb.toggle_sidebar) {
+        let is_double = app.double_tab.check();
+        let send_to_pane = modifiers.contains(KeyModifiers::ALT) || is_double;
+
+        if send_to_pane {
+            if let Some(pane) = app.current_pane() {
+                let _ = app.wagner.terminal.send_key(&pane, "Tab");
+                let _ = app.refresh_terminal_output();
+                app.focus = Focus::Terminal;
             }
-            return;
+        } else {
+            app.next_tab();
         }
+        return;
+    }
+
+    if app.focus == Focus::Terminal {
         send_key_to_pane(app, code, modifiers);
         return;
     }

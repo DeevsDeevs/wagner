@@ -12,6 +12,28 @@ use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+#[derive(Debug, Default)]
+pub struct DoubleTap {
+    last: Option<Instant>,
+}
+
+impl DoubleTap {
+    pub fn check(&mut self) -> bool {
+        let is_double = self
+            .last
+            .map(|t| t.elapsed() < Duration::from_millis(300))
+            .unwrap_or(false);
+
+        if is_double {
+            self.last = None;
+            true
+        } else {
+            self.last = Some(Instant::now());
+            false
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppTab {
     #[default]
@@ -100,7 +122,8 @@ pub struct App<T: Terminal, A: Agent> {
     pub repo_stats: HashMap<String, RepoStats>,
 
     last_click: Option<(u16, u16, Instant)>,
-    last_esc: Option<Instant>,
+    pub double_esc: DoubleTap,
+    pub double_tab: DoubleTap,
     terminal_view_size: Option<(u16, u16)>,
     pub dragging_sidebar: bool,
 
@@ -178,7 +201,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             repo_stats: HashMap::new(),
 
             last_click: None,
-            last_esc: None,
+            double_esc: DoubleTap::default(),
+            double_tab: DoubleTap::default(),
             terminal_view_size: None,
             dragging_sidebar: false,
 
@@ -347,21 +371,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
             }
         }
         self.wagner.config.diff_base.clone()
-    }
-
-    pub fn check_double_esc(&mut self) -> bool {
-        let is_double_esc = self
-            .last_esc
-            .map(|t| t.elapsed() < Duration::from_millis(300))
-            .unwrap_or(false);
-
-        if is_double_esc {
-            self.last_esc = None;
-            true
-        } else {
-            self.last_esc = Some(Instant::now());
-            false
-        }
     }
 
     pub fn run(
@@ -816,14 +825,16 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn restore_pane_scroll(&mut self) {
+        let max = self.get_max_scroll();
         let saved = self
             .selected_pane
             .as_ref()
             .and_then(|id| self.pane_scroll_positions.get(id))
-            .copied()
-            .unwrap_or(0);
-        let max = self.get_max_scroll();
-        self.terminal_scroll = saved.min(max);
+            .copied();
+        self.terminal_scroll = match saved {
+            Some(pos) => pos.min(max),
+            None => max,
+        };
     }
 
     pub fn current_pane(&self) -> Option<PaneHandle> {
