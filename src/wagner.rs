@@ -1,4 +1,5 @@
 use crate::agent::Agent;
+use crate::attach::{get_current_branch, is_git_repo};
 use crate::config::Config;
 use crate::error::{Result, WagnerError};
 use crate::model::{RepoSource, Task, TaskRepo};
@@ -128,6 +129,137 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(task)
     }
 
+    pub fn attach_task(&self, name: &str, repo_paths: Vec<PathBuf>) -> Result<Task> {
+        if self.store.task_exists(name) {
+            return Err(WagnerError::TaskExists(name.to_string()));
+        }
+
+        let mut repos = Vec::new();
+        for path in &repo_paths {
+            let canonical = path.canonicalize().map_err(|e| {
+                WagnerError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("Cannot resolve path {}: {}", path.display(), e),
+                ))
+            })?;
+
+            if !is_git_repo(&canonical) {
+                return Err(WagnerError::Git(format!(
+                    "Not a git repository: {}",
+                    path.display()
+                )));
+            }
+
+            let repo_name = canonical
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "repo".to_string());
+
+            let branch = get_current_branch(&canonical).unwrap_or_else(|| "HEAD".to_string());
+
+            repos.push(TaskRepo {
+                name: repo_name,
+                source: RepoSource::Local(canonical.clone()),
+                worktree: canonical,
+                branch,
+            });
+        }
+
+        let task_path = if repos.len() == 1 {
+            repos[0].worktree.clone()
+        } else {
+            repos
+                .first()
+                .and_then(|r| r.worktree.parent())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| repos[0].worktree.clone())
+        };
+
+        let task = Task::new_attached(name, task_path, repos);
+        self.store.save_task(&task)?;
+        self.setup_plugin_symlinks_attached(&task)?;
+
+        let is_multi_repo = task.repos.len() > 1;
+        let session_dir = if is_multi_repo {
+            &task.path
+        } else {
+            task.repos
+                .first()
+                .map(|r| &r.worktree)
+                .unwrap_or(&task.path)
+        };
+
+        let session = self.terminal.create_session(name, session_dir)?;
+
+        if let Ok(panes) = self.terminal.list_panes(&session) {
+            if let Some(pane) = panes.first() {
+                let _ = self.terminal.send_keys(pane, self.agent.launch_command());
+            }
+        }
+
+        if is_multi_repo {
+            for repo in &task.repos {
+                let pane = self.terminal.create_pane(&session, &repo.worktree)?;
+                let _ = self.terminal.send_keys(&pane, self.agent.launch_command());
+            }
+        }
+
+        Ok(task)
+    }
+
+    pub fn detach_task(&self, name: &str) -> Result<()> {
+        let _task = self.store.load_task(name)?;
+
+        if self.terminal.session_exists(name)? {
+            self.terminal
+                .kill_session(&SessionHandle(session_name_for_task(name)))?;
+        }
+
+        self.store.delete_task(name)
+    }
+
+    fn setup_plugin_symlinks_attached(&self, task: &Task) -> Result<()> {
+        let enabled_plugins: Vec<_> = builtin_plugins()
+            .into_iter()
+            .filter(|p| p.is_enabled(&self.config))
+            .collect();
+
+        if enabled_plugins.is_empty() {
+            return Ok(());
+        }
+
+        for repo in &task.repos {
+            let repo_wagner_dir = repo.worktree.join(".wagner");
+            let repo_plugins_dir = repo_wagner_dir.join("plugins");
+            std::fs::create_dir_all(&repo_plugins_dir)?;
+
+            self.ensure_gitignore_has_wagner(&repo.worktree)?;
+
+            for plugin in &enabled_plugins {
+                let plugin_data_dir = repo_plugins_dir.join(plugin.data_dir());
+                std::fs::create_dir_all(&plugin_data_dir)?;
+                debug!(plugin = %plugin.id(), dir = %plugin_data_dir.display(), "Created plugin data dir");
+            }
+
+            let claude_dir = repo.worktree.join(".claude");
+            std::fs::create_dir_all(&claude_dir)?;
+
+            for plugin in &enabled_plugins {
+                if plugin.id() == "chains" {
+                    let chains_link = claude_dir.join("chains");
+                    if !chains_link.exists() {
+                        let target = repo_plugins_dir.join("chains");
+                        #[cfg(unix)]
+                        std::os::unix::fs::symlink(&target, &chains_link)?;
+                        debug!(link = %chains_link.display(), target = %target.display(), "Created chains symlink");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn fetch_and_update_branch(&self, repo: &PathBuf, branch: &str) {
         let _ = Command::new("git")
             .args(["-C", &repo.to_string_lossy(), "fetch", "origin", branch])
@@ -155,6 +287,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
     pub fn delete_task(&self, name: &str, force: bool) -> Result<()> {
         let task = self.store.load_task(name)?;
+
+        if task.is_attached() {
+            return Err(WagnerError::CannotDeleteAttached(name.to_string()));
+        }
 
         if self.terminal.session_exists(name)? {
             self.terminal

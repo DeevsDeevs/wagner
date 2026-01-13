@@ -1,10 +1,11 @@
 use crate::cli::{
     ChainsCommands, Cli, Commands, PluginCommands, WorkspaceCommands, print_completions,
 };
+use std::path::PathBuf;
 use tracing::{debug, info};
 use wagner::{
-    Agent, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux, Wagner,
-    default_branch_for_task, plugins,
+    Agent, AttachDetection, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux,
+    Wagner, default_branch_for_task, derive_task_name, detect_attach_mode, plugins,
 };
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -48,6 +49,8 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
+        Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
+        Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
         None => cmd_tui(wagner),
     }
 }
@@ -178,6 +181,7 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
     if tasks.is_empty() {
         println!("No tasks found");
         println!("Create one with: wagner new <name>");
+        println!("Or attach to existing repos: wagner start");
         return Ok(());
     }
 
@@ -192,8 +196,11 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
             _ => task.created_at.format("%Y-%m-%d").to_string(),
         };
 
+        let kind_indicator = if task.is_attached() { "[A] " } else { "" };
+
         println!(
-            "{:<20} {} {}  ({})  {}",
+            "{}{:<20} {} {}  ({})  {}",
+            kind_indicator,
             task.name,
             repos_count,
             repos_label,
@@ -298,6 +305,61 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
 
     debug!(task = %task_name, "Attaching to session");
     wagner.attach(&task_name, None)
+}
+
+fn cmd_start<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    paths: Vec<PathBuf>,
+    name: Option<String>,
+) -> Result<()> {
+    let detection = detect_attach_mode(&paths);
+
+    let repo_paths = match &detection {
+        AttachDetection::SingleRepo(p) => vec![p.clone()],
+        AttachDetection::MultiRepo(ps) => ps.clone(),
+        AttachDetection::NoRepos => {
+            eprintln!("Error: No git repositories found");
+            eprintln!("Run from inside a git repo, or specify paths: wagner start ~/repo1 ~/repo2");
+            std::process::exit(1);
+        }
+    };
+
+    let task_name = name.unwrap_or_else(|| derive_task_name(&detection));
+
+    debug!(task = %task_name, repos = repo_paths.len(), "Starting attached task");
+
+    let task = wagner.attach_task(&task_name, repo_paths)?;
+
+    info!(task = %task.name, "Attached task started");
+
+    println!("Started task: {}", task.name);
+    println!("  Path: {}", task.path.display());
+    for repo in &task.repos {
+        println!("  {} ({})", repo.name, repo.branch);
+    }
+    println!();
+    println!("Run: wagner attach {}", task.name);
+    println!("To stop: wagner detach {}", task.name);
+
+    Ok(())
+}
+
+fn cmd_detach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>) -> Result<()> {
+    let task_name = task
+        .or_else(|| detect_task_from_cwd(&wagner.config))
+        .unwrap_or_else(|| {
+            eprintln!("Error: Not inside a task directory");
+            eprintln!("Either cd into a task, or specify: wagner detach <task>");
+            std::process::exit(1);
+        });
+
+    debug!(task = %task_name, "Detaching task");
+
+    wagner.detach_task(&task_name)?;
+    info!(task = %task_name, "Task detached");
+    println!("Detached task: {}", task_name);
+
+    Ok(())
 }
 
 fn cmd_cd<T: Terminal, A: Agent>(

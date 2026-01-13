@@ -142,6 +142,26 @@ pub enum Commands {
         #[command(subcommand)]
         command: ChainsCommands,
     },
+
+    /// Start agent sessions on existing repos (no worktrees)
+    ///
+    /// Lightweight mode: manages tmux/agents without creating worktrees or branches.
+    /// Auto-detects repos when run from inside a git repo or directory containing repos.
+    #[command(visible_alias = "s")]
+    Start {
+        /// Repo paths (auto-detect if not specified)
+        paths: Vec<std::path::PathBuf>,
+
+        /// Task name (derived from repo/dir if not specified)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Stop tracking an attached task (leaves repos untouched)
+    Detach {
+        /// Task name (auto-detected if inside task dir)
+        task: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -313,6 +333,9 @@ _wagner() {{
         'repair:Clean up orphaned worktrees'
         'plugin:Manage plugins'
         'chains:Manage chains (requires chains plugin)'
+        'start:Start agent sessions on existing repos'
+        's:Start agent sessions on existing repos'
+        'detach:Stop tracking an attached task'
     )
 
     _arguments -C \
@@ -465,6 +488,15 @@ _wagner() {{
                             esac
                             ;;
                     esac
+                    ;;
+                start|s)
+                    _arguments \
+                        '*:repo path:_files -/' \
+                        '-n[Task name]:name:' \
+                        '--name=[Task name]:name:'
+                    ;;
+                detach)
+                    _arguments '1:task:_wagner_tasks'
                     ;;
             esac
             ;;
