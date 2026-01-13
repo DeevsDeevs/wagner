@@ -293,7 +293,7 @@ impl Terminal for Tmux {
 
     fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()> {
         self.run(&[
-            "resize-pane",
+            "resize-window",
             "-t",
             &pane.0,
             "-x",
