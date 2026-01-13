@@ -4,6 +4,7 @@ Multi-repo task manager for AI agent sessions. Orchestrates agent instances acro
 
 ## Features
 
+- **Lightweight mode** - Start sessions on existing repos without worktrees
 - **Workspace support** - Define repo groups, create tasks with `-w <workspace>`
 - **Multi-pane sessions** - Tmux pane per repo with agent launched automatically
 - **Git worktree isolation** - Each task gets isolated worktrees
@@ -36,7 +37,41 @@ wagner update --check   # Check for updates without installing
 
 ## Quick Start
 
-### Single repo
+### Lightweight mode (no worktrees)
+
+Start a session on your current repo without creating worktrees or branches:
+
+```bash
+cd ~/projects/myrepo
+wagner start
+# Uses current directory and branch as-is
+# Launches tmux session with agent
+# Task name derived from repo-branch (e.g., "myrepo-main")
+
+wagner start --name my-session  # Custom name
+```
+
+For multiple existing repos:
+
+```bash
+# Auto-detect repos in current directory
+cd ~/my-project  # Contains frontend/, backend/ subdirs
+wagner start
+# Detects all git repos, creates pane per repo
+
+# Or specify paths explicitly
+wagner start ~/frontend ~/backend --name fullstack
+```
+
+To stop tracking (leaves repos untouched):
+
+```bash
+wagner detach my-session
+```
+
+### Full mode with worktrees
+
+Create isolated worktrees with new branches:
 
 ```bash
 cd ~/projects/myrepo
@@ -89,18 +124,32 @@ wagner rm my-feature -f      # Delete task + branches
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `wagner` | | Launch TUI |
-| `wagner new <name>` | | Create task |
+| `wagner start [paths]` | `s` | Start session on existing repos (no worktrees) |
+| `wagner new <name>` | | Create task with worktrees |
 | `wagner new <name> -w <ws>` | | Create from workspace |
-| `wagner list` | `ls` | List tasks |
+| `wagner list` | `ls` | List tasks (`[A]` = attached) |
 | `wagner attach [task]` | `a` | Attach to session |
+| `wagner detach [task]` | | Stop tracking attached task |
 | `wagner add [task] [repo]` | | Add agent pane |
 | `wagner add-repo <task> <spec>` | | Add repo to task |
 | `wagner rm-repo <task> <repo>` | | Remove repo from task |
-| `wagner delete <task>` | `rm` | Delete task |
+| `wagner delete <task>` | `rm` | Delete task (managed only) |
 | `wagner cd <task> [repo]` | | Open shell in task worktree |
 | `wagner workspace` | `ws` | Manage workspaces |
 | `wagner repair` | | Clean up orphaned worktrees |
 | `wagner update` | | Update to latest version |
+
+### Task modes
+
+Wagner has two modes for managing tasks:
+
+| | Attached (`start`) | Managed (`new`) |
+|---|---|---|
+| **Use case** | Quick work on existing branch | Isolated feature work |
+| **Worktrees** | No - uses repo directly | Yes - creates git worktree |
+| **Branches** | Uses current branch | Creates new branch |
+| **Cleanup** | `detach` - just stops tracking | `delete` - removes worktrees |
+| **List indicator** | `[A]` prefix | (none) |
 
 ### Workspace commands
 
