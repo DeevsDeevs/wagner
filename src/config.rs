@@ -82,8 +82,13 @@ pub struct Keybindings {
     pub page_down: String,
     #[serde(default = "default_open_diff")]
     pub open_diff: String,
+    #[serde(default = "default_copy_mode")]
+    pub copy_mode: String,
 }
 
+fn default_copy_mode() -> String {
+    "v".to_string()
+}
 fn default_open_diff() -> String {
     "c".to_string()
 }
@@ -168,6 +173,7 @@ impl Default for Keybindings {
             page_up: default_page_up(),
             page_down: default_page_down(),
             open_diff: default_open_diff(),
+            copy_mode: default_copy_mode(),
         }
     }
 }

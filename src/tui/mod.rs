@@ -1,4 +1,5 @@
 mod app;
+mod clipboard;
 mod event;
 mod ui;
 pub mod widgets;

@@ -1871,6 +1871,7 @@ version = "0.2.0"
 dependencies = [
  "ansi-to-tui",
  "anyhow",
+ "base64",
  "chrono",
  "clap",
  "clap_complete",

@@ -107,6 +107,10 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::styled(format!("  {}", fmt_key(&keybindings.open_diff)), key_style),
             Span::raw("View git diff"),
         ]),
+        Line::from(vec![
+            Span::styled(format!("  {}", fmt_key(&keybindings.copy_mode)), key_style),
+            Span::raw("Visual select (j/k, y to yank)"),
+        ]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "  Status Icons",

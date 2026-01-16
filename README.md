@@ -218,6 +218,7 @@ wagner completions fish | source   # Fish
 | `n` | New task |
 | `d` | Delete |
 | `c` | View diff |
+| `v` | Visual select (j/k to extend, y to yank) |
 | `?` | Help |
 | `S` | Settings |
 | `q` | Quit |

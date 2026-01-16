@@ -2,7 +2,7 @@ use crate::agent::Agent;
 use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
-use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor};
+use crate::monitor::{PaneStatus, SessionAggregateStatus, StatusMonitor, strip_ansi};
 use crate::plugins::PluginStates;
 use crate::plugins::chains::ChainsViewMode;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
@@ -44,6 +44,7 @@ pub enum InputMode {
     DiffFileList,
     DiffContent,
     ChainSearch,
+    VisualSelect,
 }
 
 pub struct App<T: Terminal, A: Agent> {
@@ -69,6 +70,9 @@ pub struct App<T: Terminal, A: Agent> {
     pub terminal_output: String,
     pub terminal_scroll: u16,
     pane_scroll_positions: HashMap<String, u16>,
+    pub visual_select_start: usize,
+    pub visual_select_end: usize,
+    pub pending_select_row: Option<u16>,
 
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
@@ -142,6 +146,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             terminal_output: String::new(),
             terminal_scroll: 0,
             pane_scroll_positions: HashMap::new(),
+            visual_select_start: 0,
+            visual_select_end: 0,
+            pending_select_row: None,
 
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
@@ -944,7 +951,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
             | InputMode::EditSetting
             | InputMode::DiffFileList
             | InputMode::DiffContent
-            | InputMode::ChainSearch => {}
+            | InputMode::ChainSearch
+            | InputMode::VisualSelect => {}
         }
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
@@ -1488,7 +1496,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
             AppTab::Chains => AppTab::Tasks,
         };
         if self.current_tab == AppTab::Chains {
-            self.focus = Focus::Sidebar;
             self.plugin_states.chains.view_mode = ChainsViewMode::ChainList;
             self.refresh_chains();
         }
@@ -1586,9 +1593,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
             }
             ChainsViewMode::LinkList => {
-                if let Err(e) = cs.select_link() {
-                    self.status_message = Some((format!("Error: {}", e), std::time::Instant::now()));
-                }
+                cs.select_link().ok();
             }
             ChainsViewMode::LinkPreview => {}
         }
@@ -1735,6 +1740,122 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     }
                 }
             }
+        }
+    }
+
+    pub fn start_visual_select(&mut self) {
+        let line_count = self.terminal_output.lines().count();
+        if line_count == 0 {
+            self.set_status("Nothing to select");
+            return;
+        }
+        let current_line = self.terminal_scroll as usize;
+        self.visual_select_start = current_line;
+        self.visual_select_end = current_line;
+        self.input_mode = InputMode::VisualSelect;
+        let kb = &self.wagner.config.keybindings;
+        self.set_status(&format!(
+            "VISUAL: {}/{} extend, y yank, Esc cancel",
+            kb.nav_down, kb.nav_up
+        ));
+    }
+
+    pub fn visual_select_down(&mut self) {
+        let line_count = self.terminal_output.lines().count();
+        if self.visual_select_end < line_count.saturating_sub(1) {
+            self.visual_select_end += 1;
+        }
+    }
+
+    pub fn visual_select_up(&mut self) {
+        if self.visual_select_end > 0 {
+            self.visual_select_end -= 1;
+        }
+    }
+
+    pub fn visual_yank(&mut self) {
+        let lines: Vec<&str> = self.terminal_output.lines().collect();
+        let start = self.visual_select_start.min(self.visual_select_end);
+        let end = self.visual_select_start.max(self.visual_select_end);
+
+        if start >= lines.len() {
+            self.cancel_visual_select();
+            return;
+        }
+
+        let end = end.min(lines.len().saturating_sub(1));
+        let selected: Vec<&str> = lines[start..=end].to_vec();
+        let content = strip_ansi(&selected.join("\n"));
+
+        match super::clipboard::copy_to_clipboard(&content) {
+            Ok(()) => {
+                let count = selected.len();
+                self.set_status(&format!("Yanked {} line{}", count, if count == 1 { "" } else { "s" }));
+            }
+            Err(e) => {
+                self.set_status(&format!("Yank failed: {}", e));
+            }
+        }
+        self.input_mode = InputMode::Normal;
+    }
+
+    pub fn cancel_visual_select(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.set_status("Visual select cancelled");
+    }
+
+    pub fn start_visual_select_at_row(&mut self, row: u16) -> bool {
+        // Terminal view starts after: tab bar (1) + header (1) + terminal header (1) = 3 rows
+        let terminal_start_row = 3u16;
+        if row < terminal_start_row {
+            return false;
+        }
+
+        let line_count = self.terminal_output.lines().count();
+        if line_count == 0 {
+            return false;
+        }
+
+        let content_row = row - terminal_start_row;
+        let line_index = self.terminal_scroll as usize + content_row as usize;
+        if line_index >= line_count {
+            return false;
+        }
+
+        self.visual_select_start = line_index;
+        self.visual_select_end = line_index;
+        self.input_mode = InputMode::VisualSelect;
+        let kb = &self.wagner.config.keybindings;
+        self.set_status(&format!(
+            "VISUAL: {}/{} extend, y yank, Esc cancel",
+            kb.nav_down, kb.nav_up
+        ));
+        true
+    }
+
+    pub fn visual_select_drag(&mut self, row: u16) {
+        // Terminal view starts after: tab bar (1) + header (1) + terminal header (1) = 3 rows
+        let terminal_start_row = 3u16;
+        if row < terminal_start_row {
+            return;
+        }
+
+        let content_row = row - terminal_start_row;
+        let line_index = self.terminal_scroll as usize + content_row as usize;
+        let line_count = self.terminal_output.lines().count();
+
+        if line_index < line_count {
+            self.visual_select_end = line_index;
+        }
+    }
+
+    pub fn get_visual_selection(&self) -> Option<(usize, usize)> {
+        if self.input_mode == InputMode::VisualSelect {
+            let start = self.visual_select_start.min(self.visual_select_end);
+            let end = self.visual_select_start.max(self.visual_select_end);
+            Some((start, end))
+        } else {
+            None
         }
     }
 }
