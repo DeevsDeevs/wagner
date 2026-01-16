@@ -824,3 +824,102 @@ fn test_create_task_rollback_first_repo_failure() {
         "Task should not be saved"
     );
 }
+
+#[test]
+fn test_attach_task_creates_and_registers() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let task = wagner
+        .attach_task("attached-test", vec![ctx.repo_path.clone()])
+        .unwrap();
+
+    assert_eq!(task.name, "attached-test");
+    assert!(task.is_attached());
+    assert_eq!(task.repos.len(), 1);
+
+    let metadata_path = ctx.repo_path.join(".wagner").join("task.json");
+    assert!(metadata_path.exists(), "Metadata should be saved in repo");
+}
+
+#[test]
+fn test_attached_task_shows_in_list() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    wagner
+        .attach_task("attached-list-test", vec![ctx.repo_path.clone()])
+        .unwrap();
+
+    let tasks = wagner.list_tasks().unwrap();
+    assert!(
+        tasks.iter().any(|t| t.name == "attached-list-test"),
+        "Attached task should appear in list"
+    );
+}
+
+#[test]
+fn test_detach_task_removes_metadata() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    wagner
+        .attach_task("detach-test", vec![ctx.repo_path.clone()])
+        .unwrap();
+
+    let metadata_path = ctx.repo_path.join(".wagner").join("task.json");
+    assert!(metadata_path.exists());
+
+    wagner.detach_task("detach-test").unwrap();
+
+    assert!(
+        !metadata_path.exists(),
+        "Metadata should be removed after detach"
+    );
+
+    let tasks = wagner.list_tasks().unwrap();
+    assert!(
+        !tasks.iter().any(|t| t.name == "detach-test"),
+        "Task should not appear in list after detach"
+    );
+}
+
+#[test]
+fn test_delete_task_fails_for_attached() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    wagner
+        .attach_task("no-delete-attached", vec![ctx.repo_path.clone()])
+        .unwrap();
+
+    let result = wagner.delete_task("no-delete-attached", false);
+    assert!(result.is_err(), "delete_task should fail for attached tasks");
+
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("detach"),
+        "Error should mention using detach"
+    );
+}
+
+#[test]
+fn test_attached_task_preserves_repo() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let readme_path = ctx.repo_path.join("README.md");
+    assert!(readme_path.exists());
+
+    wagner
+        .attach_task("preserve-repo-test", vec![ctx.repo_path.clone()])
+        .unwrap();
+
+    wagner.detach_task("preserve-repo-test").unwrap();
+
+    assert!(
+        readme_path.exists(),
+        "Repo files should be preserved after detach"
+    );
+    assert!(ctx.repo_path.exists(), "Repo directory should still exist");
+}
