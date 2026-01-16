@@ -894,7 +894,10 @@ fn test_delete_task_fails_for_attached() {
         .unwrap();
 
     let result = wagner.delete_task("no-delete-attached", false);
-    assert!(result.is_err(), "delete_task should fail for attached tasks");
+    assert!(
+        result.is_err(),
+        "delete_task should fail for attached tasks"
+    );
 
     let err_msg = format!("{}", result.unwrap_err());
     assert!(
