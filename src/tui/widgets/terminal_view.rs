@@ -87,12 +87,10 @@ fn build_text_with_selection(output: &str, selection: Option<(usize, usize)>) ->
     let select_style = Style::default().bg(Color::DarkGray).fg(Color::White);
 
     match selection {
-        None => {
-            match output.as_bytes().into_text() {
-                Ok(t) => t,
-                Err(_) => Text::from(output.to_string()),
-            }
-        }
+        None => match output.as_bytes().into_text() {
+            Ok(t) => t,
+            Err(_) => Text::from(output.to_string()),
+        },
         Some((start, end)) => {
             let lines: Vec<Line<'static>> = output
                 .lines()

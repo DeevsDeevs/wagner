@@ -384,9 +384,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let pane = if created_session {
             let panes = self.terminal.list_panes(&session)?;
-            panes.into_iter().next().ok_or_else(|| {
-                WagnerError::Terminal("Session created but no panes found".into())
-            })?
+            panes
+                .into_iter()
+                .next()
+                .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
         } else {
             self.terminal.create_pane(&session, &pane_dir)?
         };

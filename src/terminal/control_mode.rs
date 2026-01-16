@@ -267,7 +267,10 @@ impl TmuxControlMode {
             return Err(WagnerError::Terminal("Failed to flush tmux".into()));
         }
 
-        match channel.response_rx.recv_timeout(Duration::from_millis(self.timeout_ms)) {
+        match channel
+            .response_rx
+            .recv_timeout(Duration::from_millis(self.timeout_ms))
+        {
             Ok(result) => result,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 Err(WagnerError::Terminal("Command timed out".into()))
@@ -359,10 +362,7 @@ mod tests {
 
     #[test]
     fn parse_line_percent_digit_sequence() {
-        assert_eq!(
-            parse_line("%123"),
-            LineAction::Content("%123".to_string())
-        );
+        assert_eq!(parse_line("%123"), LineAction::Content("%123".to_string()));
     }
 
     #[test]
@@ -610,10 +610,7 @@ mod tests {
         parser.process_line("%begin 0 0 0");
         parser.process_line("%end 0 0 0");
 
-        assert_eq!(
-            parser.process_line("stray content"),
-            ParseResult::Continue
-        );
+        assert_eq!(parser.process_line("stray content"), ParseResult::Continue);
 
         parser.process_line("%begin 1 1 0");
         parser.process_line("actual output");
@@ -631,10 +628,7 @@ mod tests {
         parser.process_line("%begin 0 0 0");
         parser.process_line("%end 0 0 0");
 
-        assert_eq!(
-            parser.process_line("%end 999 999 0"),
-            ParseResult::Continue
-        );
+        assert_eq!(parser.process_line("%end 999 999 0"), ParseResult::Continue);
     }
 
     #[test]

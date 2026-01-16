@@ -36,8 +36,7 @@ fn copy_osc52(text: &str) -> Result<(), String> {
     let encoded = STANDARD.encode(text);
     let osc52 = format!("\x1b]52;c;{}\x07", encoded);
     let mut out = stdout();
-    out.write_all(osc52.as_bytes())
-        .map_err(|e| e.to_string())?;
+    out.write_all(osc52.as_bytes()).map_err(|e| e.to_string())?;
     out.flush().map_err(|e| e.to_string())?;
     Ok(())
 }

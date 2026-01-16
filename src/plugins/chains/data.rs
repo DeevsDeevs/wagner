@@ -84,15 +84,14 @@ impl ChainsData {
 
         for repo in &self.repos {
             for chain in &repo.chains {
-                let task_name = extract_task_name(&chain.name)
-                    .unwrap_or_else(|| repo.repo_name.clone());
+                let task_name =
+                    extract_task_name(&chain.name).unwrap_or_else(|| repo.repo_name.clone());
                 groups.entry(task_name).or_default().push(chain);
             }
         }
 
         for chain in &self.task_local {
-            let task_name = extract_task_name(&chain.name)
-                .unwrap_or_else(|| "local".to_string());
+            let task_name = extract_task_name(&chain.name).unwrap_or_else(|| "local".to_string());
             groups.entry(task_name).or_default().push(chain);
         }
 
@@ -118,8 +117,8 @@ impl ChainsData {
                 if !filter.is_empty() && !chain.name.to_lowercase().contains(&filter_lower) {
                     continue;
                 }
-                let task_name = extract_task_name(&chain.name)
-                    .unwrap_or_else(|| repo.repo_name.clone());
+                let task_name =
+                    extract_task_name(&chain.name).unwrap_or_else(|| repo.repo_name.clone());
                 groups.entry(task_name).or_default().push(chain);
             }
         }
@@ -128,8 +127,7 @@ impl ChainsData {
             if !filter.is_empty() && !chain.name.to_lowercase().contains(&filter_lower) {
                 continue;
             }
-            let task_name = extract_task_name(&chain.name)
-                .unwrap_or_else(|| "local".to_string());
+            let task_name = extract_task_name(&chain.name).unwrap_or_else(|| "local".to_string());
             groups.entry(task_name).or_default().push(chain);
         }
 

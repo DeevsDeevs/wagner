@@ -324,18 +324,12 @@ mod tests {
 
     #[test]
     fn quote_arg_format_string_with_braces() {
-        assert_eq!(
-            quote_arg_for_control_mode("#{pane_id}"),
-            "\"#{pane_id}\""
-        );
+        assert_eq!(quote_arg_for_control_mode("#{pane_id}"), "\"#{pane_id}\"");
     }
 
     #[test]
     fn quote_arg_format_string_with_hash() {
-        assert_eq!(
-            quote_arg_for_control_mode("#S:#I.#P"),
-            "\"#S:#I.#P\""
-        );
+        assert_eq!(quote_arg_for_control_mode("#S:#I.#P"), "\"#S:#I.#P\"");
     }
 
     #[test]
@@ -345,10 +339,7 @@ mod tests {
 
     #[test]
     fn quote_arg_semicolon() {
-        assert_eq!(
-            quote_arg_for_control_mode("cmd1; cmd2"),
-            "\"cmd1; cmd2\""
-        );
+        assert_eq!(quote_arg_for_control_mode("cmd1; cmd2"), "\"cmd1; cmd2\"");
     }
 
     #[test]
@@ -363,10 +354,7 @@ mod tests {
 
     #[test]
     fn quote_arg_backslash_escaped() {
-        assert_eq!(
-            quote_arg_for_control_mode("path\\file"),
-            "\"path\\\\file\""
-        );
+        assert_eq!(quote_arg_for_control_mode("path\\file"), "\"path\\\\file\"");
     }
 
     #[test]
@@ -387,10 +375,7 @@ mod tests {
 
     #[test]
     fn quote_arg_tab_character() {
-        assert_eq!(
-            quote_arg_for_control_mode("col1\tcol2"),
-            "\"col1\tcol2\""
-        );
+        assert_eq!(quote_arg_for_control_mode("col1\tcol2"), "\"col1\tcol2\"");
     }
 
     #[test]
@@ -462,24 +447,14 @@ mod tests {
 
     #[test]
     fn build_command_with_format_string() {
-        let cmd = build_control_mode_command(&[
-            "list-panes",
-            "-F",
-            "#{pane_id}\t#{pane_current_path}",
-        ]);
-        assert_eq!(
-            cmd,
-            "list-panes -F \"#{pane_id}\t#{pane_current_path}\""
-        );
+        let cmd =
+            build_control_mode_command(&["list-panes", "-F", "#{pane_id}\t#{pane_current_path}"]);
+        assert_eq!(cmd, "list-panes -F \"#{pane_id}\t#{pane_current_path}\"");
     }
 
     #[test]
     fn build_command_with_path_spaces() {
-        let cmd = build_control_mode_command(&[
-            "new-window",
-            "-c",
-            "/home/user/my project",
-        ]);
+        let cmd = build_control_mode_command(&["new-window", "-c", "/home/user/my project"]);
         assert_eq!(cmd, "new-window -c \"/home/user/my project\"");
     }
 
@@ -503,15 +478,8 @@ mod tests {
 
     #[test]
     fn build_command_capture_pane() {
-        let cmd = build_control_mode_command(&[
-            "capture-pane",
-            "-t",
-            "%42",
-            "-p",
-            "-e",
-            "-S",
-            "-500",
-        ]);
+        let cmd =
+            build_control_mode_command(&["capture-pane", "-t", "%42", "-p", "-e", "-S", "-500"]);
         assert_eq!(cmd, "capture-pane -t %42 -p -e -S -500");
     }
 

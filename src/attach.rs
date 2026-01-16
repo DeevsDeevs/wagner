@@ -50,14 +50,12 @@ pub fn derive_task_name(detection: &AttachDetection) -> String {
             let branch = get_current_branch(path).unwrap_or_else(|| "HEAD".to_string());
             format!("{}-{}", repo_name, sanitize_branch_name(&branch))
         }
-        AttachDetection::MultiRepo(paths) => {
-            paths
-                .first()
-                .and_then(|p| p.parent())
-                .and_then(|p| p.file_name())
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "attached".to_string())
-        }
+        AttachDetection::MultiRepo(paths) => paths
+            .first()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "attached".to_string()),
         AttachDetection::NoRepos => "attached".to_string(),
     }
 }

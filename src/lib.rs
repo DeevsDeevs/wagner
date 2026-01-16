@@ -12,7 +12,7 @@ pub mod tui;
 pub mod wagner;
 
 pub use agent::{Agent, ClaudeCode, ClaudeCodeDetector, TestAgent};
-pub use attach::{detect_attach_mode, derive_task_name, AttachDetection};
+pub use attach::{AttachDetection, derive_task_name, detect_attach_mode};
 pub use config::Config;
 pub use error::{Result, WagnerError};
 pub use model::{RepoSource, Task, TaskKind, TaskRepo};

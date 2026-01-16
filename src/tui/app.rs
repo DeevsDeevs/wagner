@@ -493,7 +493,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
             }
 
-            if self.wagner.terminal.session_exists(&task_name).unwrap_or(false) {
+            if self
+                .wagner
+                .terminal
+                .session_exists(&task_name)
+                .unwrap_or(false)
+            {
                 self.inactive_sessions.remove(&task_name);
                 if let Ok(panes) = self
                     .wagner
@@ -1516,7 +1521,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     self.plugin_states.chains.list_state.select(Some(0));
                 } else if let Some(idx) = self.plugin_states.chains.list_state.selected() {
                     if idx >= total {
-                        self.plugin_states.chains.list_state.select(Some(total.saturating_sub(1)));
+                        self.plugin_states
+                            .chains
+                            .list_state
+                            .select(Some(total.saturating_sub(1)));
                     }
                 }
             }
@@ -1661,7 +1669,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn submit_chain_search(&mut self) {
-        self.plugin_states.chains.set_filter(self.input_buffer.clone());
+        self.plugin_states
+            .chains
+            .set_filter(self.input_buffer.clone());
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
     }
@@ -1704,7 +1714,14 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
     }
 
-    fn handle_chain_main_click(&mut self, col: u16, row: u16, area: Rect, sidebar_width: u16, is_double_click: bool) {
+    fn handle_chain_main_click(
+        &mut self,
+        col: u16,
+        row: u16,
+        area: Rect,
+        sidebar_width: u16,
+        is_double_click: bool,
+    ) {
         let main_start = sidebar_width;
         let main_width = area.width.saturating_sub(main_start);
         let content_row = row.saturating_sub(2) as usize;
@@ -1731,7 +1748,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 if col < split_point {
                     self.focus = Focus::Terminal;
                     if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx {
-                        if let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx) {
+                        if let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx)
+                        {
                             if content_row < chain.links.len() {
                                 self.plugin_states.chains.selected_link_idx = Some(content_row);
                                 self.plugin_states.chains.reload_link_content();
@@ -1790,7 +1808,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
         match super::clipboard::copy_to_clipboard(&content) {
             Ok(()) => {
                 let count = selected.len();
-                self.set_status(&format!("Yanked {} line{}", count, if count == 1 { "" } else { "s" }));
+                self.set_status(&format!(
+                    "Yanked {} line{}",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ));
             }
             Err(e) => {
                 self.set_status(&format!("Yank failed: {}", e));

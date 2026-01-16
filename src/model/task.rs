@@ -39,11 +39,7 @@ impl Task {
         }
     }
 
-    pub fn new_attached(
-        name: impl Into<String>,
-        path: PathBuf,
-        repos: Vec<TaskRepo>,
-    ) -> Self {
+    pub fn new_attached(name: impl Into<String>, path: PathBuf, repos: Vec<TaskRepo>) -> Self {
         Self {
             name: name.into(),
             path,

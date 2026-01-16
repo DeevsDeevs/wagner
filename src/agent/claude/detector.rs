@@ -94,10 +94,7 @@ impl ClaudeCodeDetector {
     }
 
     fn find_star_spinner(line: &str) -> Option<usize> {
-        STAR_SPINNERS
-            .iter()
-            .filter_map(|&c| line.find(c))
-            .min()
+        STAR_SPINNERS.iter().filter_map(|&c| line.find(c)).min()
     }
 
     fn star_indicator_state(raw_output: &str) -> Option<bool> {

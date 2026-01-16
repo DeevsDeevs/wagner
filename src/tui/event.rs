@@ -303,7 +303,9 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
             app.chains_view_mode(),
             ChainsViewMode::LinkList | ChainsViewMode::LinkPreview
         );
-        if in_chains_main_view || (app.chains_view_mode() == ChainsViewMode::ChainList && app.focus == Focus::Sidebar) {
+        if in_chains_main_view
+            || (app.chains_view_mode() == ChainsViewMode::ChainList && app.focus == Focus::Sidebar)
+        {
             handle_chains_mode(app, code);
             return;
         }

@@ -8,7 +8,10 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{
+        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
+    },
 };
 
 pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
@@ -93,17 +96,14 @@ pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, a
     frame.render_widget(list, area);
 }
 
-
 pub fn draw_main<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
     match app.plugin_states.chains.view_mode {
         ChainsViewMode::ChainList => {}
         ChainsViewMode::LinkList => draw_link_list(frame, area, app),
         ChainsViewMode::LinkPreview => {
-            let chunks = Layout::horizontal([
-                Constraint::Percentage(30),
-                Constraint::Percentage(70),
-            ])
-            .split(area);
+            let chunks =
+                Layout::horizontal([Constraint::Percentage(30), Constraint::Percentage(70)])
+                    .split(area);
             draw_link_list(frame, chunks[0], app);
             draw_link_preview(frame, chunks[1], app);
         }
@@ -251,8 +251,8 @@ fn draw_link_preview<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: 
             .track_symbol(Some("│"))
             .thumb_symbol("█");
 
-        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(visible_lines))
-            .position(scroll_pos);
+        let mut scrollbar_state =
+            ScrollbarState::new(total_lines.saturating_sub(visible_lines)).position(scroll_pos);
 
         let scrollbar_area = Rect {
             x: inner.x + inner.width.saturating_sub(1),
