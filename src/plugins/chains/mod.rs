@@ -6,8 +6,8 @@ use crate::config::Config;
 use crate::plugins::Plugin;
 
 pub use data::{Chain, ChainLink, ChainSource, ChainsData, RepoChains};
-pub use state::{ChainsState, ChainsViewMode};
 pub use parser::load_all_chains;
+pub use state::{ChainsState, ChainsViewMode};
 
 pub struct ChainsPlugin;
 

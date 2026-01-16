@@ -2,6 +2,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskKind {
+    #[default]
+    Managed,
+    Attached,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub name: String,
@@ -10,6 +18,8 @@ pub struct Task {
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub diff_base: Option<String>,
+    #[serde(default)]
+    pub kind: TaskKind,
 }
 
 impl Task {
@@ -25,7 +35,23 @@ impl Task {
             repos,
             created_at: Utc::now(),
             diff_base,
+            kind: TaskKind::Managed,
         }
+    }
+
+    pub fn new_attached(name: impl Into<String>, path: PathBuf, repos: Vec<TaskRepo>) -> Self {
+        Self {
+            name: name.into(),
+            path,
+            repos,
+            created_at: Utc::now(),
+            diff_base: None,
+            kind: TaskKind::Attached,
+        }
+    }
+
+    pub fn is_attached(&self) -> bool {
+        matches!(self.kind, TaskKind::Attached)
     }
 
     pub fn metadata_dir(&self) -> PathBuf {

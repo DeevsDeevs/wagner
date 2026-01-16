@@ -161,7 +161,9 @@ impl ChainsState {
     pub fn select_link(&mut self) -> Result<(), String> {
         let chain_idx = self.selected_chain_idx.ok_or("No chain selected")?;
         let link_idx = self.selected_link_idx.ok_or("No link selected")?;
-        let chain = self.get_chain_at_index(chain_idx).ok_or("Chain not found")?;
+        let chain = self
+            .get_chain_at_index(chain_idx)
+            .ok_or("Chain not found")?;
         let link = chain.links.get(link_idx).ok_or("Link not found")?;
 
         self.link_content = std::fs::read_to_string(&link.file_path)
@@ -196,12 +198,12 @@ impl ChainsState {
         )
     }
 
-    pub fn promote_chain(
-        &mut self,
-        tasks_root: &std::path::Path,
-    ) -> Result<String, String> {
+    pub fn promote_chain(&mut self, tasks_root: &std::path::Path) -> Result<String, String> {
         let idx = self.list_state.selected().ok_or("No chain selected")?;
-        let chain = self.get_chain_at_index(idx).ok_or("Chain not found")?.clone();
+        let chain = self
+            .get_chain_at_index(idx)
+            .ok_or("Chain not found")?
+            .clone();
 
         let source_path = match &chain.source {
             ChainSource::TaskLocal(p) => p.clone(),
@@ -217,8 +219,8 @@ impl ChainsState {
             return Err("Chain directory not found".to_string());
         }
 
-        let task_path = find_task_root(&source_path, tasks_root)
-            .ok_or("Could not find task directory")?;
+        let task_path =
+            find_task_root(&source_path, tasks_root).ok_or("Could not find task directory")?;
 
         let plugins_link = task_path.join(".wagner").join("plugins");
         if !plugins_link.exists() || !plugins_link.is_symlink() {
@@ -227,8 +229,8 @@ impl ChainsState {
             );
         }
 
-        let repo_chains_dir = std::fs::read_link(&plugins_link)
-            .map_err(|_| "Could not resolve repo directory")?;
+        let repo_chains_dir =
+            std::fs::read_link(&plugins_link).map_err(|_| "Could not resolve repo directory")?;
         let repo_chains_dir = if repo_chains_dir.is_absolute() {
             repo_chains_dir.join("chains")
         } else {
@@ -259,13 +261,20 @@ impl ChainsState {
 
     pub fn delete_chain(&mut self) -> Result<String, String> {
         let idx = self.list_state.selected().ok_or("No chain selected")?;
-        let chain = self.get_chain_at_index(idx).ok_or("Chain not found")?.clone();
+        let chain = self
+            .get_chain_at_index(idx)
+            .ok_or("Chain not found")?
+            .clone();
 
         let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
 
         let chain_dir = match &chain.source {
             ChainSource::TaskLocal(p) => p.join(".claude").join("chains").join(chain_name),
-            ChainSource::Repo(p) => p.join(".wagner").join("plugins").join("chains").join(chain_name),
+            ChainSource::Repo(p) => p
+                .join(".wagner")
+                .join("plugins")
+                .join("chains")
+                .join(chain_name),
         };
 
         if !chain_dir.exists() {
@@ -285,7 +294,14 @@ impl ChainsState {
     pub fn selected_chain_name(&self) -> Option<String> {
         let idx = self.list_state.selected()?;
         let chain = self.get_chain_at_index(idx)?;
-        Some(chain.name.split('/').last().unwrap_or(&chain.name).to_string())
+        Some(
+            chain
+                .name
+                .split('/')
+                .last()
+                .unwrap_or(&chain.name)
+                .to_string(),
+        )
     }
 }
 

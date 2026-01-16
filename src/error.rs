@@ -31,4 +31,7 @@ pub enum WagnerError {
 
     #[error("Update error: {0}")]
     Update(String),
+
+    #[error("Cannot delete attached task '{0}' - use `wagner detach` instead")]
+    CannotDeleteAttached(String),
 }

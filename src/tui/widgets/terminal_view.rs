@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
@@ -42,10 +42,8 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A
     let inner = block.inner(content_area);
     frame.render_widget(block, content_area);
 
-    let text = match app.terminal_output.as_bytes().into_text() {
-        Ok(t) => t,
-        Err(_) => app.terminal_output.clone().into(),
-    };
+    let selection = app.get_visual_selection();
+    let text = build_text_with_selection(&app.terminal_output, selection);
 
     let line_count = app.terminal_output.lines().count();
     let visible_height = inner.height as usize;
@@ -82,5 +80,34 @@ fn build_header<T: Terminal, A: Agent>(app: &App<T, A>) -> String {
         (Some(t), Some(r)) => format!("{} > {}", t, r),
         (Some(t), None) => t.clone(),
         _ => String::new(),
+    }
+}
+
+fn build_text_with_selection(output: &str, selection: Option<(usize, usize)>) -> Text<'static> {
+    let select_style = Style::default().bg(Color::DarkGray).fg(Color::White);
+
+    match selection {
+        None => match output.as_bytes().into_text() {
+            Ok(t) => t,
+            Err(_) => Text::from(output.to_string()),
+        },
+        Some((start, end)) => {
+            let lines: Vec<Line<'static>> = output
+                .lines()
+                .enumerate()
+                .map(|(i, line_str)| {
+                    let is_selected = i >= start && i <= end;
+                    if is_selected {
+                        Line::styled(line_str.to_string(), select_style)
+                    } else {
+                        match line_str.as_bytes().into_text() {
+                            Ok(t) => t.lines.into_iter().next().unwrap_or_else(|| Line::from("")),
+                            Err(_) => Line::from(line_str.to_string()),
+                        }
+                    }
+                })
+                .collect();
+            Text::from(lines)
+        }
     }
 }

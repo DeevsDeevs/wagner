@@ -13,6 +13,20 @@ use ratatui::layout::Rect;
 use std::time::Duration;
 
 fn matches_key(code: KeyCode, binding: &str) -> bool {
+    matches_key_with_modifiers(code, KeyModifiers::NONE, binding)
+}
+
+fn matches_key_with_modifiers(code: KeyCode, modifiers: KeyModifiers, binding: &str) -> bool {
+    if let Some(key) = binding.strip_prefix("C-") {
+        if !modifiers.contains(KeyModifiers::CONTROL) {
+            return false;
+        }
+        if let KeyCode::Char(c) = code {
+            return key.len() == 1 && key.chars().next() == Some(c);
+        }
+        return false;
+    }
+
     match code {
         KeyCode::Tab => binding == "Tab",
         KeyCode::Esc => binding == "Esc",
@@ -49,6 +63,7 @@ enum Action {
     Settings,
     SwitchSection,
     OpenDiff,
+    CopyMode,
 }
 
 fn handle_text_editing<T: Terminal, A: Agent>(
@@ -109,6 +124,7 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
                 InputMode::DiffFileList => handle_diff_file_list_mode(app, key.code),
                 InputMode::DiffContent => handle_diff_content_mode(app, key.code),
                 InputMode::ChainSearch => handle_chain_search_mode(app, key.code, key.modifiers),
+                InputMode::VisualSelect => handle_visual_select_mode(app, key.code),
             }
         }
         Event::Mouse(mouse) => {
@@ -135,7 +151,13 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
                 if app.is_on_sidebar_border(mouse.column) {
                     app.dragging_sidebar = true;
                 } else {
-                    app.handle_click(mouse.column, mouse.row, area);
+                    let sidebar_width = app.wagner.config.sidebar_width;
+                    let on_terminal = !app.show_sidebar || mouse.column >= sidebar_width;
+                    if on_terminal {
+                        app.pending_select_row = Some(mouse.row);
+                    } else {
+                        app.handle_click(mouse.column, mouse.row, area);
+                    }
                 }
             }
             InputMode::DiffFileList | InputMode::DiffContent => {
@@ -156,12 +178,26 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             InputMode::ChainSearch => {
                 app.cancel_chain_search();
             }
+            InputMode::VisualSelect => {
+                app.visual_select_drag(mouse.row);
+            }
         },
         MouseEventKind::Up(MouseButton::Left) => {
+            if let Some(row) = app.pending_select_row.take() {
+                if app.input_mode != InputMode::VisualSelect {
+                    app.handle_click(mouse.column, row, area);
+                }
+            }
             app.dragging_sidebar = false;
         }
         MouseEventKind::Drag(MouseButton::Left) => {
-            if app.dragging_sidebar {
+            if app.input_mode == InputMode::VisualSelect {
+                app.visual_select_drag(mouse.row);
+            } else if let Some(start_row) = app.pending_select_row.take() {
+                if app.start_visual_select_at_row(start_row) {
+                    app.visual_select_drag(mouse.row);
+                }
+            } else if app.dragging_sidebar {
                 app.handle_sidebar_drag(mouse.column, area);
             }
         }
@@ -169,22 +205,20 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             if app.input_mode == InputMode::Normal {
                 let sidebar_width = app.wagner.config.sidebar_width;
                 let on_sidebar = app.show_sidebar && mouse.column < sidebar_width;
-                if app.current_tab == AppTab::Chains {
-                    if on_sidebar {
-                        app.navigate_chain_list_prev();
-                    } else {
-                        match app.chains_view_mode() {
-                            ChainsViewMode::ChainList => app.navigate_chain_list_prev(),
-                            ChainsViewMode::LinkList => app.navigate_link_list_prev(),
-                            ChainsViewMode::LinkPreview => {
-                                let main_start = if app.show_sidebar { sidebar_width } else { 0 };
-                                let main_width = area.width.saturating_sub(main_start);
-                                let split_point = main_start + (main_width * 30 / 100);
-                                if mouse.column < split_point {
-                                    app.navigate_link_list_prev();
-                                } else {
-                                    app.scroll_link_preview_up();
-                                }
+                if app.current_tab == AppTab::Chains && on_sidebar {
+                    app.navigate_chain_list_prev();
+                } else if app.current_tab == AppTab::Chains {
+                    match app.chains_view_mode() {
+                        ChainsViewMode::ChainList => app.scroll_terminal_up(),
+                        ChainsViewMode::LinkList => app.navigate_link_list_prev(),
+                        ChainsViewMode::LinkPreview => {
+                            let main_start = if app.show_sidebar { sidebar_width } else { 0 };
+                            let main_width = area.width.saturating_sub(main_start);
+                            let split_point = main_start + (main_width * 30 / 100);
+                            if mouse.column < split_point {
+                                app.navigate_link_list_prev();
+                            } else {
+                                app.scroll_link_preview_up();
                             }
                         }
                     }
@@ -197,22 +231,20 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             if app.input_mode == InputMode::Normal {
                 let sidebar_width = app.wagner.config.sidebar_width;
                 let on_sidebar = app.show_sidebar && mouse.column < sidebar_width;
-                if app.current_tab == AppTab::Chains {
-                    if on_sidebar {
-                        app.navigate_chain_list_next();
-                    } else {
-                        match app.chains_view_mode() {
-                            ChainsViewMode::ChainList => app.navigate_chain_list_next(),
-                            ChainsViewMode::LinkList => app.navigate_link_list_next(),
-                            ChainsViewMode::LinkPreview => {
-                                let main_start = if app.show_sidebar { sidebar_width } else { 0 };
-                                let main_width = area.width.saturating_sub(main_start);
-                                let split_point = main_start + (main_width * 30 / 100);
-                                if mouse.column < split_point {
-                                    app.navigate_link_list_next();
-                                } else {
-                                    app.scroll_link_preview_down();
-                                }
+                if app.current_tab == AppTab::Chains && on_sidebar {
+                    app.navigate_chain_list_next();
+                } else if app.current_tab == AppTab::Chains {
+                    match app.chains_view_mode() {
+                        ChainsViewMode::ChainList => app.scroll_terminal_down(),
+                        ChainsViewMode::LinkList => app.navigate_link_list_next(),
+                        ChainsViewMode::LinkPreview => {
+                            let main_start = if app.show_sidebar { sidebar_width } else { 0 };
+                            let main_width = area.width.saturating_sub(main_start);
+                            let split_point = main_start + (main_width * 30 / 100);
+                            if mouse.column < split_point {
+                                app.navigate_link_list_next();
+                            } else {
+                                app.scroll_link_preview_down();
                             }
                         }
                     }
@@ -243,6 +275,7 @@ fn get_action(code: KeyCode, kb: &Keybindings) -> Option<Action> {
         (&kb.settings, Action::Settings),
         (&kb.switch_section, Action::SwitchSection),
         (&kb.open_diff, Action::OpenDiff),
+        (&kb.copy_mode, Action::CopyMode),
     ];
 
     bindings
@@ -266,11 +299,13 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     if app.current_tab == AppTab::Chains {
-        let in_main_view = matches!(
+        let in_chains_main_view = matches!(
             app.chains_view_mode(),
             ChainsViewMode::LinkList | ChainsViewMode::LinkPreview
         );
-        if in_main_view || app.focus == Focus::Sidebar {
+        if in_chains_main_view
+            || (app.chains_view_mode() == ChainsViewMode::ChainList && app.focus == Focus::Sidebar)
+        {
             handle_chains_mode(app, code);
             return;
         }
@@ -342,6 +377,7 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         Some(Action::Settings) => app.open_settings(),
         Some(Action::SwitchSection) if app.focus == Focus::Sidebar => app.toggle_sidebar_section(),
         Some(Action::OpenDiff) => app.open_diff_view(),
+        Some(Action::CopyMode) => app.start_visual_select(),
         _ => handle_navigation(app, code),
     }
 }
@@ -686,6 +722,27 @@ fn handle_chain_search_mode<T: Terminal, A: Agent>(
         TextInputAction::Cancel => app.cancel_chain_search(),
         TextInputAction::Submit => app.submit_chain_search(),
         TextInputAction::Edit | TextInputAction::None => {}
+    }
+}
+
+fn handle_visual_select_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Esc || matches_key(code, &kb.copy_mode) {
+        app.cancel_visual_select();
+    } else if code == KeyCode::Char('y') {
+        app.visual_yank();
+    } else if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        app.visual_select_down();
+    } else if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.visual_select_up();
+    } else if code == KeyCode::Char('G') || matches_key(code, &kb.scroll_bottom) {
+        let line_count = app.terminal_output.lines().count();
+        app.visual_select_end = line_count.saturating_sub(1);
+    } else if code == KeyCode::Char('g') || matches_key(code, &kb.scroll_top) {
+        app.visual_select_end = 0;
+    } else if matches_key(code, &kb.quit) {
+        app.cancel_visual_select();
     }
 }
 
