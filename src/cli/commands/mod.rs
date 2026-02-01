@@ -318,8 +318,8 @@ fn cmd_start<T: Terminal, A: Agent>(
         AttachDetection::SingleRepo(p) => vec![p.clone()],
         AttachDetection::MultiRepo(ps) => ps.clone(),
         AttachDetection::NoRepos => {
-            eprintln!("Error: No git repositories found");
-            eprintln!("Run from inside a git repo, or specify paths: wagner start ~/repo1 ~/repo2");
+            eprintln!("Error: Could not determine current directory");
+            eprintln!("Specify paths explicitly: wagner start ~/project1 ~/project2");
             std::process::exit(1);
         }
     };
