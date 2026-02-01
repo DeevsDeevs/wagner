@@ -1,5 +1,5 @@
 use crate::agent::Agent;
-use crate::attach::{get_current_branch, is_git_repo};
+use crate::attach::get_current_branch;
 use crate::config::Config;
 use crate::error::{Result, WagnerError};
 use crate::model::{RepoSource, Task, TaskRepo};
@@ -142,13 +142,6 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                     format!("Cannot resolve path {}: {}", path.display(), e),
                 ))
             })?;
-
-            if !is_git_repo(&canonical) {
-                return Err(WagnerError::Git(format!(
-                    "Not a git repository: {}",
-                    path.display()
-                )));
-            }
 
             let repo_name = canonical
                 .file_name()

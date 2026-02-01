@@ -32,7 +32,7 @@ pub fn detect_attach_mode(paths: &[PathBuf]) -> AttachDetection {
             return AttachDetection::MultiRepo(repos);
         }
 
-        AttachDetection::NoRepos
+        AttachDetection::SingleRepo(cwd)
     } else if paths.len() == 1 {
         AttachDetection::SingleRepo(paths[0].clone())
     } else {
