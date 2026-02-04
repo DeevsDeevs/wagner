@@ -1,35 +1,35 @@
 mod detector;
 
-pub use detector::ClaudeCodeDetector;
+pub use detector::CodexDetector;
 
 use super::Agent;
 use crate::monitor::AgentDetector;
 
 #[derive(Debug, Clone, Copy)]
-pub struct ClaudeCode;
+pub struct Codex;
 
-impl ClaudeCode {
+impl Codex {
     pub fn new() -> Self {
         Self
     }
 }
 
-impl Default for ClaudeCode {
+impl Default for Codex {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Agent for ClaudeCode {
+impl Agent for Codex {
     fn name(&self) -> &str {
-        "claude-code"
+        "codex"
     }
 
     fn launch_command(&self) -> &str {
-        "claude"
+        "codex"
     }
 
     fn detector(&self) -> Box<dyn AgentDetector> {
-        Box::new(ClaudeCodeDetector::default())
+        Box::new(CodexDetector::default())
     }
 }

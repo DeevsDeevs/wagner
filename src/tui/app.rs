@@ -1,4 +1,4 @@
-use crate::agent::Agent;
+use crate::agent::{Agent, ClaudeCodeDetector, CodexDetector};
 use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
@@ -116,7 +116,6 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let tasks = wagner.list_tasks().unwrap_or_default();
         let first_task = tasks.first().map(|t| t.name.clone());
         let refresh_interval_ms = wagner.config.refresh_interval_ms;
-        let detector = wagner.agent.detector();
 
         let mut task_list_state = ListState::default();
         if !tasks.is_empty() {
@@ -153,7 +152,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
             auto_refresh: true,
-            status_monitor: StatusMonitor::new(detector),
+            status_monitor: StatusMonitor::with_detectors(vec![
+                Box::new(ClaudeCodeDetector::default()),
+                Box::new(CodexDetector::default()),
+            ]),
 
             input_buffer: String::new(),
             input_cursor: 0,

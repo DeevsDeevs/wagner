@@ -17,8 +17,8 @@ pub use ansi::strip_ansi;
 pub use detector::{AgentDetector, IDLE_THRESHOLD};
 pub use detectors::TerminalDetector;
 pub use status::{
-    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, PaneStatus, STUCK_THRESHOLD,
-    SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
+    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, PaneStatus,
+    STUCK_THRESHOLD, SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
 };
 
 struct TrackedSession {
@@ -49,8 +49,12 @@ pub struct StatusMonitor {
 
 impl StatusMonitor {
     pub fn new(detector: Box<dyn AgentDetector>) -> Self {
+        Self::with_detectors(vec![detector])
+    }
+
+    pub fn with_detectors(detectors: Vec<Box<dyn AgentDetector>>) -> Self {
         Self {
-            detectors: vec![detector],
+            detectors,
             sessions: HashMap::new(),
             background_interval: Duration::from_secs(2),
             background_index: 0,

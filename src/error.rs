@@ -29,6 +29,9 @@ pub enum WagnerError {
     #[error("Invalid repo spec: {0}")]
     InvalidRepoSpec(String),
 
+    #[error("Invalid agent: {0}")]
+    InvalidAgent(String),
+
     #[error("Update error: {0}")]
     Update(String),
 

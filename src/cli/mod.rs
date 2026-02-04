@@ -10,6 +10,10 @@ use clap_complete::Shell;
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
+
+    /// Agent to launch (claude or codex)
+    #[arg(long, global = true)]
+    pub agent: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -50,7 +54,7 @@ pub enum Commands {
         force: bool,
     },
 
-    /// Add a new Claude pane to a task
+    /// Add a new agent pane to a task
     ///
     /// Auto-detects task when run from inside a task directory.
     Add {
@@ -320,7 +324,7 @@ _wagner() {{
         'ls:List all tasks'
         'delete:Delete a task'
         'rm:Delete a task'
-        'add:Add a new Claude pane to a task'
+        'add:Add a new agent pane to a task'
         'add-repo:Add a repo to a task'
         'rm-repo:Remove a repo from a task'
         'attach:Attach to a task tmux session'
