@@ -11,7 +11,9 @@ pub mod terminal;
 pub mod tui;
 pub mod wagner;
 
-pub use agent::{Agent, AgentChoice, ClaudeCode, ClaudeCodeDetector, Codex, CodexDetector, TestAgent};
+pub use agent::{
+    Agent, AgentChoice, ClaudeCode, ClaudeCodeDetector, Codex, CodexDetector, TestAgent,
+};
 pub use attach::{AttachDetection, derive_task_name, detect_attach_mode};
 pub use config::Config;
 pub use error::{Result, WagnerError};

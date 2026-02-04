@@ -4,11 +4,7 @@ use crate::monitor::{
     Activity, ActivityKind, AgentDetector, AgentStatus, AgentType, CodexActivity, WaitReason,
 };
 
-const AGENT_PATTERNS: &[&str] = &[
-    "openai codex",
-    "ask codex",
-    "you are running codex in",
-];
+const AGENT_PATTERNS: &[&str] = &["openai codex", "ask codex", "you are running codex in"];
 
 const ACTIVE_PATTERNS: &[&str] = &[
     "• working",
