@@ -25,6 +25,18 @@ fn test_codex_detect_working() {
 }
 
 #[test]
+fn test_codex_detect_working_without_interrupt_hint() {
+    let detector = CodexDetector::default();
+    let status = detector.detect_status("", "◦ Booting MCP server: alpha (12s)", true, Duration::from_secs(1));
+    match status {
+        AgentStatus::Active(activity) => {
+            assert!(matches!(activity.kind, ActivityKind::Codex(CodexActivity::Working)));
+        }
+        other => panic!("expected active status, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_codex_detect_streaming() {
     let detector = CodexDetector::default();
     let status = detector.detect_status("", "• Streaming response.", true, Duration::from_secs(1));

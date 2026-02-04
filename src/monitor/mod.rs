@@ -160,8 +160,13 @@ impl StatusMonitor {
                 )
             };
 
-            let agent_type =
-                current_agent.or_else(|| self.detect_agent(&pane_command, &clean_output));
+            let detected_agent = self.detect_agent(&pane_command, &clean_output);
+            let agent_type = match (current_agent, detected_agent) {
+                (Some(current), Some(detected)) if current != detected => Some(detected),
+                (Some(current), _) => Some(current),
+                (None, Some(detected)) => Some(detected),
+                (None, None) => None,
+            };
             let mut new_status = self.detect_status(
                 agent_type.as_ref(),
                 &output,
@@ -220,6 +225,13 @@ impl StatusMonitor {
     }
 
     fn detect_agent(&self, pane_command: &str, output: &str) -> Option<AgentType> {
+        let command = pane_command.to_ascii_lowercase();
+        if command.contains("codex") {
+            return Some(AgentType::Codex);
+        }
+        if command.contains("claude") {
+            return Some(AgentType::ClaudeCode);
+        }
         self.detectors
             .iter()
             .find(|d| d.detect_agent(pane_command, output))

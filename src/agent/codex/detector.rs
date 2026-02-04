@@ -5,53 +5,77 @@ use crate::monitor::{
 };
 
 const AGENT_PATTERNS: &[&str] = &[
-    "OpenAI Codex",
-    "Ask Codex to do anything",
-    "You are running Codex in",
+    "openai codex",
+    "ask codex",
+    "you are running codex in",
 ];
 
 const ACTIVE_PATTERNS: &[&str] = &[
-    "• Working",
-    "Working (",
-    "• Streaming response.",
-    "Streaming response.",
-    "esc to interrupt",
+    "• working",
+    "working (",
+    "working...",
+    "working…",
+    "streaming response",
 ];
 
 const WAIT_APPROVAL_PATTERNS: &[&str] = &[
-    "Press enter to confirm or esc to cancel",
-    "Press enter to confirm or esc to go back",
-    "Would you like to run the following command?",
-    "Codex wants to edit",
-    "No, and tell Codex what to do differently",
+    "press enter to confirm or esc to cancel",
+    "press enter to confirm or esc to go back",
+    "would you like to run the following command?",
+    "codex wants to edit",
+    "no, and tell codex what to do differently",
 ];
 
 const WAIT_QUESTION_PATTERNS: &[&str] = &[
-    "Press enter to continue",
-    "Press Esc to cancel",
-    "Press esc to cancel",
-    "Press space or enter to toggle; esc to close",
-    "Press space to select or enter to save",
-    "Press enter to select reasoning effort, or esc to dismiss.",
+    "press enter to continue",
+    "press esc to cancel",
+    "press space or enter to toggle; esc to close",
+    "press space to select or enter to save",
+    "press enter to select reasoning effort, or esc to dismiss.",
 ];
 
 const WAIT_INPUT_PATTERNS: &[&str] = &[
-    "Ask Codex to do anything",
-    "Explain this codebase",
-    "Summarize recent commits",
-    "Implement {feature}",
-    "Find and fix a bug in @filename",
-    "Write tests for @filename",
-    "Improve documentation in @filename",
-    "Run /review on my current changes",
-    "Use /skills to list available skills",
+    "ask codex",
+    "explain this codebase",
+    "summarize recent commits",
+    "implement {feature}",
+    "find and fix a bug in @filename",
+    "write tests for @filename",
+    "improve documentation in @filename",
+    "run /review on my current changes",
+    "use /skills to list available skills",
 ];
 
 pub struct CodexDetector;
 
 impl CodexDetector {
+    fn has_status_timer_line(output: &str) -> bool {
+        for line in output.lines() {
+            let has_spinner = line.contains('•') || line.contains('◦');
+            if !has_spinner {
+                continue;
+            }
+            let Some(start) = line.find('(') else {
+                continue;
+            };
+            let Some(end) = line.rfind(')') else {
+                continue;
+            };
+            if end <= start {
+                continue;
+            }
+            let inside = &line[start + 1..end];
+            let has_digit = inside.chars().any(|c| c.is_ascii_digit());
+            if has_digit && inside.contains('s') {
+                return true;
+            }
+        }
+        false
+    }
+
     fn detect_wait(output: &str) -> Option<WaitReason> {
         let tail: String = output.lines().rev().take(15).collect::<Vec<_>>().join("\n");
+        let tail = tail.to_ascii_lowercase();
         if WAIT_APPROVAL_PATTERNS.iter().any(|p| tail.contains(p)) {
             return Some(WaitReason::Approval);
         }
@@ -65,11 +89,14 @@ impl CodexDetector {
     }
 
     fn detect_active(output: &str) -> Option<CodexActivity> {
-        let tail: String = output.lines().rev().take(20).collect::<Vec<_>>().join("\n");
-        if tail.contains("Streaming response.") {
+        let normalized = output.to_ascii_lowercase();
+        if normalized.contains("streaming response") {
             return Some(CodexActivity::Streaming);
         }
-        if ACTIVE_PATTERNS.iter().any(|p| tail.contains(p)) {
+        if Self::has_status_timer_line(output) {
+            return Some(CodexActivity::Working);
+        }
+        if ACTIVE_PATTERNS.iter().any(|p| normalized.contains(p)) {
             return Some(CodexActivity::Working);
         }
         None
@@ -88,10 +115,11 @@ impl AgentDetector for CodexDetector {
     }
 
     fn detect_agent(&self, pane_command: &str, output: &str) -> bool {
-        if pane_command.contains("codex") {
+        if pane_command.to_ascii_lowercase().contains("codex") {
             return true;
         }
-        AGENT_PATTERNS.iter().any(|p| output.contains(p))
+        let normalized = output.to_ascii_lowercase();
+        AGENT_PATTERNS.iter().any(|p| normalized.contains(p))
     }
 
     fn detect_status(
