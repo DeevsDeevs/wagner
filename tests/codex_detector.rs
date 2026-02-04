@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use wagner::monitor::status::{ActivityKind, AgentStatus, CodexActivity, WaitReason};
-use wagner::monitor::AgentDetector;
 use wagner::CodexDetector;
+use wagner::monitor::AgentDetector;
+use wagner::monitor::status::{ActivityKind, AgentStatus, CodexActivity, WaitReason};
 
 #[test]
 fn test_codex_detect_agent() {
@@ -15,10 +15,38 @@ fn test_codex_detect_agent() {
 #[test]
 fn test_codex_detect_working() {
     let detector = CodexDetector::default();
-    let status = detector.detect_status("", "• Working (0s • esc to interrupt)", true, Duration::from_secs(1));
+    let status = detector.detect_status(
+        "",
+        "• Working (0s • esc to interrupt)",
+        true,
+        Duration::from_secs(1),
+    );
     match status {
         AgentStatus::Active(activity) => {
-            assert!(matches!(activity.kind, ActivityKind::Codex(CodexActivity::Working)));
+            assert!(matches!(
+                activity.kind,
+                ActivityKind::Codex(CodexActivity::Working)
+            ));
+        }
+        other => panic!("expected active status, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_codex_detect_working_without_interrupt_hint() {
+    let detector = CodexDetector::default();
+    let status = detector.detect_status(
+        "",
+        "◦ Booting MCP server: alpha (12s)",
+        true,
+        Duration::from_secs(1),
+    );
+    match status {
+        AgentStatus::Active(activity) => {
+            assert!(matches!(
+                activity.kind,
+                ActivityKind::Codex(CodexActivity::Working)
+            ));
         }
         other => panic!("expected active status, got {other:?}"),
     }
@@ -30,7 +58,10 @@ fn test_codex_detect_streaming() {
     let status = detector.detect_status("", "• Streaming response.", true, Duration::from_secs(1));
     match status {
         AgentStatus::Active(activity) => {
-            assert!(matches!(activity.kind, ActivityKind::Codex(CodexActivity::Streaming)));
+            assert!(matches!(
+                activity.kind,
+                ActivityKind::Codex(CodexActivity::Streaming)
+            ));
         }
         other => panic!("expected active status, got {other:?}"),
     }
