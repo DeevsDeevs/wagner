@@ -6,12 +6,14 @@ use crate::terminal::PaneHandle;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentType {
     ClaudeCode,
+    Codex,
 }
 
 impl fmt::Display for AgentType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ClaudeCode => write!(f, "claude"),
+            Self::Codex => write!(f, "codex"),
         }
     }
 }
@@ -177,6 +179,7 @@ impl Activity {
 pub enum ActivityKind {
     Generic(GenericActivity),
     Claude(ClaudeActivity),
+    Codex(CodexActivity),
 }
 
 impl ActivityKind {
@@ -184,6 +187,7 @@ impl ActivityKind {
         match self {
             Self::Generic(a) => a.label(),
             Self::Claude(a) => a.label(),
+            Self::Codex(a) => a.label(),
         }
     }
 
@@ -191,6 +195,7 @@ impl ActivityKind {
         match self {
             Self::Generic(a) => a.icon(),
             Self::Claude(a) => a.icon(),
+            Self::Codex(a) => a.icon(),
         }
     }
 }
@@ -256,6 +261,28 @@ impl ClaudeActivity {
             Self::WebSearch => '◉',
             Self::WebFetch => '◈',
             Self::TodoUpdate => '☐',
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodexActivity {
+    Working,
+    Streaming,
+}
+
+impl CodexActivity {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Working => "Working",
+            Self::Streaming => "Streaming",
+        }
+    }
+
+    pub fn icon(&self) -> char {
+        match self {
+            Self::Working => '●',
+            Self::Streaming => '◎',
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::cli::{
 use std::path::PathBuf;
 use tracing::{debug, info};
 use wagner::{
-    Agent, AttachDetection, ClaudeCode, Config, RepoSource, RepoSpec, Result, Terminal, Tmux,
+    Agent, AgentChoice, AttachDetection, Config, RepoSource, RepoSpec, Result, Terminal, Tmux,
     Wagner, default_branch_for_task, derive_task_name, detect_attach_mode, plugins,
 };
 
@@ -18,7 +18,8 @@ pub fn run(cli: Cli) -> Result<()> {
     debug!("Loaded config from {:?}", Config::config_path());
 
     let terminal = Tmux::with_config(config.terminal.clone());
-    let agent = ClaudeCode::new();
+    let agent_key = cli.agent.as_deref().unwrap_or(&config.default_agent);
+    let agent = AgentChoice::from_key(agent_key)?;
     let wagner = Wagner::new(terminal, agent, config);
 
     match cli.command {

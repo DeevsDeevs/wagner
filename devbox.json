@@ -5,11 +5,12 @@
     "cmake@4.1.2",
     "pre-commit@4.3.0",
     "rustup@latest",
-    "git@latest",
-    "gcc@latest"
+    "git@latest"
   ],
   "shell": {
     "init_hook": [
+      "export CARGO_HOME=\"$PWD/.cargo\"",
+      "mkdir -p \"$CARGO_HOME\"",
       "export RUSTUP_HOME=\"$PWD/.rustup\"",
       "mkdir -p \"$RUSTUP_HOME\"",
       "rustup default stable 2>/dev/null || true"
@@ -17,4 +18,3 @@
     "scripts": {}
   }
 }
-

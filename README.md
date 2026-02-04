@@ -185,8 +185,14 @@ wagner ws rm <name>                          # Delete workspace
 |---------|---------|-------------|
 | `tasks_root` | `~/tasks` | Where task directories are created |
 | `repos_root` | `~/repos` | Where remote repos are cloned (bare) |
-| `default_agent` | `claude` | Agent to launch in panes |
+| `default_agent` | `claude` | Agent to launch in panes (`claude` or `codex`) |
 | `diff_base` | `main` | Default branch for diffs |
+
+You can override the agent per run:
+
+```bash
+wagner --agent codex start
+```
 
 ### Repair & Cleanup
 
