@@ -1,6 +1,8 @@
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::Agent;
+use crate::model::Engine;
 use crate::monitor::{AgentDetector, AgentStatus, AgentType};
 
 pub struct TestAgent {
@@ -30,8 +32,20 @@ impl Agent for TestAgent {
         "test-agent"
     }
 
-    fn launch_command(&self) -> &str {
-        &self.command
+    fn engine(&self) -> Engine {
+        Engine::ClaudeCode
+    }
+
+    fn launch_command(&self, _session_id: &str) -> String {
+        self.command.clone()
+    }
+
+    fn predict_jsonl_path(&self, _session_id: &str, _cwd: &Path) -> Option<PathBuf> {
+        None
+    }
+
+    fn resume_command(&self, _session_id: &str) -> String {
+        self.command.clone()
     }
 
     fn detector(&self) -> Box<dyn AgentDetector> {

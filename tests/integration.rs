@@ -181,10 +181,18 @@ fn test_create_multi_repo_task() {
 
     let terminal = &wagner.terminal;
     let sent_keys = terminal.get_sent_keys();
-    assert!(
-        sent_keys.len() >= 3,
-        "Should have sent keys to central pane + 2 repo panes"
+    assert_eq!(
+        sent_keys.len(),
+        2,
+        "Should have pre-written agent command to 2 repo panes"
     );
+
+    assert_eq!(task.panes.len(), 2, "Should have 2 tracked panes");
+    assert_eq!(task.panes[0].repo_name, "repo1");
+    assert_eq!(task.panes[1].repo_name, "repo2");
+    assert!(!task.panes[0].session_id.is_empty());
+    assert!(!task.panes[1].session_id.is_empty());
+    assert_ne!(task.panes[0].session_id, task.panes[1].session_id);
 }
 
 #[test]

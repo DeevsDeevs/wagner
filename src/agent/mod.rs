@@ -7,11 +7,16 @@ pub use codex::{Codex, CodexDetector};
 pub use test::TestAgent;
 
 use crate::error::{Result, WagnerError};
+use crate::model::Engine;
 use crate::monitor::AgentDetector;
+use std::path::{Path, PathBuf};
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
-    fn launch_command(&self) -> &str;
+    fn engine(&self) -> Engine;
+    fn launch_command(&self, session_id: &str) -> String;
+    fn predict_jsonl_path(&self, session_id: &str, cwd: &Path) -> Option<PathBuf>;
+    fn resume_command(&self, session_id: &str) -> String;
     fn detector(&self) -> Box<dyn AgentDetector>;
 }
 
@@ -39,10 +44,31 @@ impl Agent for AgentChoice {
         }
     }
 
-    fn launch_command(&self) -> &str {
+    fn engine(&self) -> Engine {
         match self {
-            Self::Claude(agent) => agent.launch_command(),
-            Self::Codex(agent) => agent.launch_command(),
+            Self::Claude(agent) => agent.engine(),
+            Self::Codex(agent) => agent.engine(),
+        }
+    }
+
+    fn launch_command(&self, session_id: &str) -> String {
+        match self {
+            Self::Claude(agent) => agent.launch_command(session_id),
+            Self::Codex(agent) => agent.launch_command(session_id),
+        }
+    }
+
+    fn predict_jsonl_path(&self, session_id: &str, cwd: &Path) -> Option<PathBuf> {
+        match self {
+            Self::Claude(agent) => agent.predict_jsonl_path(session_id, cwd),
+            Self::Codex(agent) => agent.predict_jsonl_path(session_id, cwd),
+        }
+    }
+
+    fn resume_command(&self, session_id: &str) -> String {
+        match self {
+            Self::Claude(agent) => agent.resume_command(session_id),
+            Self::Codex(agent) => agent.resume_command(session_id),
         }
     }
 

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -8,6 +8,29 @@ pub enum TaskKind {
     #[default]
     Managed,
     Attached,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Engine {
+    ClaudeCode,
+    Codex,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackedPane {
+    pub repo_name: String,
+    pub engine: Engine,
+    pub session_id: String,
+    pub pane_id: String,
+    pub jsonl_path: PathBuf,
+    pub launched_at: DateTime<Utc>,
+}
+
+impl TrackedPane {
+    pub fn is_discovery_pending(&self) -> bool {
+        self.jsonl_path == Path::new("pending-discovery")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +43,8 @@ pub struct Task {
     pub diff_base: Option<String>,
     #[serde(default)]
     pub kind: TaskKind,
+    #[serde(default)]
+    pub panes: Vec<TrackedPane>,
 }
 
 impl Task {
@@ -36,6 +61,7 @@ impl Task {
             created_at: Utc::now(),
             diff_base,
             kind: TaskKind::Managed,
+            panes: Vec::new(),
         }
     }
 
@@ -47,6 +73,7 @@ impl Task {
             created_at: Utc::now(),
             diff_base: None,
             kind: TaskKind::Attached,
+            panes: Vec::new(),
         }
     }
 

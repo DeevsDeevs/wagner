@@ -3,6 +3,58 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorConfig {
+    #[serde(default = "default_active_poll_ms")]
+    pub active_poll_ms: u64,
+    #[serde(default = "default_monitor_background_poll_ms")]
+    pub background_poll_ms: u64,
+    #[serde(default = "default_idle_threshold_ms")]
+    pub idle_threshold_ms: u64,
+    #[serde(default = "default_approval_timeout_ms")]
+    pub approval_timeout_ms: u64,
+    #[serde(default = "default_session_end_threshold_ms")]
+    pub session_end_threshold_ms: u64,
+    #[serde(default = "default_discovery_fast_poll_ms")]
+    pub discovery_fast_poll_ms: u64,
+    #[serde(default = "default_discovery_fast_timeout_ms")]
+    pub discovery_fast_timeout_ms: u64,
+    #[serde(default = "default_discovery_slow_poll_ms")]
+    pub discovery_slow_poll_ms: u64,
+    #[serde(default = "default_max_lines_per_poll")]
+    pub max_lines_per_poll: usize,
+    #[serde(default = "default_daemon_seed_lines")]
+    pub daemon_seed_lines: usize,
+}
+
+fn default_active_poll_ms() -> u64 { 100 }
+fn default_monitor_background_poll_ms() -> u64 { 2000 }
+fn default_idle_threshold_ms() -> u64 { 2000 }
+fn default_approval_timeout_ms() -> u64 { 1000 }
+fn default_session_end_threshold_ms() -> u64 { 5000 }
+fn default_discovery_fast_poll_ms() -> u64 { 500 }
+fn default_discovery_fast_timeout_ms() -> u64 { 30000 }
+fn default_discovery_slow_poll_ms() -> u64 { 5000 }
+fn default_max_lines_per_poll() -> usize { 1000 }
+fn default_daemon_seed_lines() -> usize { 50 }
+
+impl Default for MonitorConfig {
+    fn default() -> Self {
+        Self {
+            active_poll_ms: default_active_poll_ms(),
+            background_poll_ms: default_monitor_background_poll_ms(),
+            idle_threshold_ms: default_idle_threshold_ms(),
+            approval_timeout_ms: default_approval_timeout_ms(),
+            session_end_threshold_ms: default_session_end_threshold_ms(),
+            discovery_fast_poll_ms: default_discovery_fast_poll_ms(),
+            discovery_fast_timeout_ms: default_discovery_fast_timeout_ms(),
+            discovery_slow_poll_ms: default_discovery_slow_poll_ms(),
+            max_lines_per_poll: default_max_lines_per_poll(),
+            daemon_seed_lines: default_daemon_seed_lines(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PluginConfig {
     #[serde(default)]
@@ -227,6 +279,8 @@ pub struct Config {
     pub plugins: PluginsConfig,
     #[serde(default)]
     pub terminal: TerminalConfig,
+    #[serde(default)]
+    pub monitor: MonitorConfig,
 }
 
 fn default_diff_base() -> String {
@@ -268,6 +322,7 @@ impl Default for Config {
             workspaces: HashMap::new(),
             plugins: PluginsConfig::default(),
             terminal: TerminalConfig::default(),
+            monitor: MonitorConfig::default(),
         }
     }
 }

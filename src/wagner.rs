@@ -2,13 +2,15 @@ use crate::agent::Agent;
 use crate::attach::get_current_branch;
 use crate::config::Config;
 use crate::error::{Result, WagnerError};
-use crate::model::{RepoSource, Task, TaskRepo};
+use crate::model::{RepoSource, Task, TaskRepo, TrackedPane};
 use crate::plugins::builtin_plugins;
 use crate::store::Store;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
+use chrono::Utc;
 use std::path::PathBuf;
 use std::process::Command;
 use tracing::debug;
+use uuid::Uuid;
 
 pub struct Wagner<T: Terminal, A: Agent> {
     pub terminal: T,
@@ -88,7 +90,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             return Err(e);
         }
 
-        let task = Task::new(
+        let mut task = Task::new(
             name,
             task_path.clone(),
             repos,
@@ -103,29 +105,32 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let is_multi_repo = task.repos.len() > 1;
         let session_dir = if is_multi_repo {
-            &task.path
+            task.path.clone()
         } else {
             task.repos
                 .first()
-                .map(|r| &r.worktree)
-                .unwrap_or(&task.path)
+                .map(|r| r.worktree.clone())
+                .unwrap_or_else(|| task.path.clone())
         };
 
-        let session = self.terminal.create_session(name, session_dir)?;
+        let session = self.terminal.create_session(name, &session_dir)?;
 
         if let Ok(panes) = self.terminal.list_panes(&session) {
             if let Some(pane) = panes.first() {
-                let _ = self.terminal.send_keys(pane, self.agent.launch_command());
+                let first_repo = task.repos[0].clone();
+                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo);
             }
         }
 
         if is_multi_repo {
-            for repo in &task.repos {
+            for i in 1..task.repos.len() {
+                let repo = task.repos[i].clone();
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.terminal.send_keys(&pane, self.agent.launch_command());
+                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo);
             }
         }
 
+        self.store.save_task(&task)?;
         Ok(task)
     }
 
@@ -168,35 +173,38 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 .unwrap_or_else(|| repos[0].worktree.clone())
         };
 
-        let task = Task::new_attached(name, task_path, repos);
+        let mut task = Task::new_attached(name, task_path, repos);
         self.store.save_task(&task)?;
         self.setup_plugin_symlinks_attached(&task)?;
 
         let is_multi_repo = task.repos.len() > 1;
         let session_dir = if is_multi_repo {
-            &task.path
+            task.path.clone()
         } else {
             task.repos
                 .first()
-                .map(|r| &r.worktree)
-                .unwrap_or(&task.path)
+                .map(|r| r.worktree.clone())
+                .unwrap_or_else(|| task.path.clone())
         };
 
-        let session = self.terminal.create_session(name, session_dir)?;
+        let session = self.terminal.create_session(name, &session_dir)?;
 
         if let Ok(panes) = self.terminal.list_panes(&session) {
             if let Some(pane) = panes.first() {
-                let _ = self.terminal.send_keys(pane, self.agent.launch_command());
+                let first_repo = task.repos[0].clone();
+                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo);
             }
         }
 
         if is_multi_repo {
-            for repo in &task.repos {
+            for i in 1..task.repos.len() {
+                let repo = task.repos[i].clone();
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.terminal.send_keys(&pane, self.agent.launch_command());
+                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo);
             }
         }
 
+        self.store.save_task(&task)?;
         Ok(task)
     }
 
@@ -348,7 +356,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     }
 
     pub fn add_pane(&self, task_name: &str, repo_name: Option<&str>) -> Result<PaneHandle> {
-        let task = self.store.load_task(task_name)?;
+        let mut task = self.store.load_task(task_name)?;
         let session = SessionHandle(session_name_for_task(task_name));
 
         let created_session = if !self.terminal.session_exists(task_name)? {
@@ -358,19 +366,26 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             false
         };
 
-        let pane_dir = match repo_name {
+        let repo = match repo_name {
             Some(name) => {
-                let repo =
-                    task.repos.iter().find(|r| r.name == name).ok_or_else(|| {
+                task.repos
+                    .iter()
+                    .find(|r| r.name == name)
+                    .ok_or_else(|| {
                         WagnerError::RepoNotFound(name.to_string(), PathBuf::new())
-                    })?;
-                repo.worktree.clone()
+                    })?
+                    .clone()
             }
             None => {
                 if task.repos.len() == 1 {
-                    task.repos[0].worktree.clone()
+                    task.repos[0].clone()
                 } else {
-                    task.path.clone()
+                    TaskRepo {
+                        name: task_name.to_string(),
+                        source: RepoSource::Local(task.path.clone()),
+                        worktree: task.path.clone(),
+                        branch: String::new(),
+                    }
                 }
             }
         };
@@ -382,12 +397,47 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 .next()
                 .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
         } else {
-            self.terminal.create_pane(&session, &pane_dir)?
+            self.terminal.create_pane(&session, &repo.worktree)?
         };
 
-        self.terminal
-            .send_keys(&pane, self.agent.launch_command())?;
+        self.prepare_agent_in_pane(&mut task, &pane, &repo)?;
+        self.store.save_task(&task)?;
         Ok(pane)
+    }
+
+    fn prepare_agent_in_pane(
+        &self,
+        task: &mut Task,
+        pane: &PaneHandle,
+        repo: &TaskRepo,
+    ) -> Result<TrackedPane> {
+        let session_id = Uuid::new_v4().to_string();
+        let engine = self.agent.engine();
+        let cwd = &repo.worktree;
+
+        let cmd = self.agent.launch_command(&session_id);
+        self.terminal.send_literal(pane, &cmd)?;
+
+        let jsonl_path = self
+            .agent
+            .predict_jsonl_path(&session_id, cwd)
+            .unwrap_or_else(|| PathBuf::from("pending-discovery"));
+
+        let tracked = TrackedPane {
+            repo_name: repo.name.clone(),
+            engine,
+            session_id,
+            pane_id: pane.0.clone(),
+            jsonl_path,
+            launched_at: Utc::now(),
+        };
+
+        task.panes.push(tracked.clone());
+        Ok(tracked)
+    }
+
+    pub fn launch_agent_in_pane(&self, pane: &PaneHandle) -> Result<()> {
+        self.terminal.send_key(pane, "Enter")
     }
 
     pub fn attach(&self, task_name: &str, pane_id: Option<&str>) -> Result<()> {
