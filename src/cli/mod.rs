@@ -178,6 +178,8 @@ pub enum Commands {
 pub enum DaemonCommands {
     /// Start the daemon (foreground)
     Start,
+    /// Stop a running daemon
+    Stop,
     /// Check if daemon is running
     Status,
 }
@@ -521,6 +523,7 @@ _wagner() {{
                     local -a daemon_commands
                     daemon_commands=(
                         'start:Start the daemon (foreground)'
+                        'stop:Stop a running daemon'
                         'status:Check if daemon is running'
                     )
                     _describe 'daemon command' daemon_commands

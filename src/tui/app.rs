@@ -2,7 +2,8 @@ use crate::agent::Agent;
 use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
-use crate::monitor::{PaneStatus, SessionAggregateStatus, SessionWatcher, StatusMonitor, strip_ansi};
+use crate::core::status_engine::StatusEngine;
+use crate::monitor::{PaneStatus, SessionAggregateStatus, strip_ansi};
 use crate::plugins::PluginStates;
 use crate::plugins::chains::ChainsViewMode;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
@@ -77,7 +78,7 @@ pub struct App<T: Terminal, A: Agent> {
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
     pub auto_refresh: bool,
-    session_watcher: SessionWatcher,
+    status_engine: StatusEngine,
 
     pub input_buffer: String,
     pub input_cursor: usize,
@@ -153,10 +154,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_millis(refresh_interval_ms),
             auto_refresh: true,
-            session_watcher: SessionWatcher::new(
-                StatusMonitor::with_detectors(vec![]),
-                &monitor_config,
-            ),
+            status_engine: StatusEngine::new(&monitor_config),
 
             input_buffer: String::new(),
             input_cursor: 0,
@@ -430,7 +428,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         for task in &self.tasks {
             if !task.panes.is_empty() {
                 let session_name = session_name_for_task(&task.name);
-                self.session_watcher.track_task(task, &session_name);
+                self.status_engine.track_task(task, &session_name);
             }
         }
         self.refresh_panes();
@@ -458,7 +456,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     self.pane_list_state.select(idx);
                 }
 
-                let updates = self.session_watcher.poll_active(
+                let updates = self.status_engine.poll_active(
                     &self.wagner.terminal,
                     &session_name,
                     &self.panes,
@@ -471,7 +469,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 for pane in &self.panes {
                     if !self.pane_statuses.contains_key(&pane.0) {
                         if let Some(status) =
-                            self.session_watcher.get_pane_status(&session_name, &pane.0)
+                            self.status_engine.get_pane_status(&session_name, &pane.0)
                         {
                             self.pane_statuses.insert(pane.0.clone(), status.clone());
                         }
@@ -522,7 +520,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         }
 
         if !sessions_to_poll.is_empty() {
-            self.session_watcher.poll_background(
+            self.status_engine.poll_background(
                 &self.wagner.terminal,
                 &sessions_to_poll,
                 Some(active_session),
@@ -532,7 +530,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn get_task_status(&self, task_name: &str) -> SessionAggregateStatus {
         let session_name = session_name_for_task(task_name);
-        self.session_watcher.get_session_status(&session_name)
+        self.status_engine.get_session_status(&session_name)
     }
 
     pub fn refresh_terminal_output(&mut self) -> Result<()> {

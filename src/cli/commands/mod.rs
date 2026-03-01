@@ -966,32 +966,48 @@ fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
     match command {
         DaemonCommands::Start => {
             if config.daemon.telegram.is_none() {
-                eprintln!("Error: Telegram not configured");
-                eprintln!(
-                    "Add daemon.telegram config to: {}",
-                    Config::config_path().display()
-                );
-                eprintln!();
-                eprintln!("Example:");
-                eprintln!(r#"  "daemon": {{"#);
-                eprintln!(r#"    "telegram": {{"#);
-                eprintln!(r#"      "bot_token": "123456:ABC-DEF...","#);
-                eprintln!(r#"      "chat_id": 123456789"#);
-                eprintln!(r#"    }}"#);
-                eprintln!(r#"  }}"#);
-                std::process::exit(1);
+                info!("No Telegram configured, running with log transport");
             }
-
             info!("Starting daemon");
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(wagner::transport::daemon::run_daemon(config))
         }
+        DaemonCommands::Stop => {
+            let pid_path = wagner::transport::daemon::pid_path();
+            if !pid_path.exists() {
+                println!("Daemon not running (no PID file)");
+                return Ok(());
+            }
+            let pid_contents = std::fs::read_to_string(&pid_path)
+                .map_err(|e| wagner::WagnerError::Transport(format!("read PID file: {e}")))?;
+            let pid_str = pid_contents.trim();
+
+            let alive = std::process::Command::new("kill")
+                .args(["-0", pid_str])
+                .status()
+                .is_ok_and(|s| s.success());
+            if !alive {
+                println!("Daemon not running (stale PID file, removing)");
+                let _ = std::fs::remove_file(&pid_path);
+                return Ok(());
+            }
+
+            let sent = std::process::Command::new("kill")
+                .args(["-TERM", pid_str])
+                .status()
+                .is_ok_and(|s| s.success());
+            if sent {
+                println!("Sent SIGTERM to daemon (PID {})", pid_str);
+            } else {
+                println!("Failed to send SIGTERM to daemon (PID {})", pid_str);
+            }
+            Ok(())
+        }
         DaemonCommands::Status => {
-            let pid_path = Config::config_dir().join("daemon.pid");
+            let pid_path = wagner::transport::daemon::pid_path();
             if pid_path.exists() {
                 if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
                     let pid_str = pid_str.trim();
-                    // Check if process is running
                     let alive = std::process::Command::new("kill")
                         .args(["-0", pid_str])
                         .status()

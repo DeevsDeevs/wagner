@@ -3,8 +3,42 @@ pub mod states;
 
 pub use states::PluginStates;
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use crate::config::Config;
 use crate::error::Result;
+
+#[derive(Debug, Clone)]
+pub struct PluginItem {
+    pub id: String,
+    pub name: String,
+    pub summary: String,
+    pub metadata: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PluginItemDetail {
+    pub item: PluginItem,
+    pub content: String,
+}
+
+pub trait PluginProvider: Send + Sync {
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    fn is_enabled(&self, config: &Config) -> bool;
+    fn list_items(
+        &self,
+        tasks_root: &Path,
+        task_name: Option<&str>,
+    ) -> Result<Vec<PluginItem>>;
+    fn get_item(
+        &self,
+        tasks_root: &Path,
+        task_name: Option<&str>,
+        item_id: &str,
+    ) -> Result<Option<PluginItemDetail>>;
+}
 
 pub trait PluginData: Send + Sync {}
 

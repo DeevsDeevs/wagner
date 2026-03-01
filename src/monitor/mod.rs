@@ -71,18 +71,18 @@ impl StatusMonitor {
         self
     }
 
-    pub fn poll_active<T: Terminal>(
+    pub fn poll_active(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         session_name: &str,
         panes: &[PaneHandle],
     ) -> Vec<StatusUpdate> {
         self.poll_session(terminal, session_name, panes)
     }
 
-    pub fn poll_background<T: Terminal>(
+    pub fn poll_background(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         sessions: &[(String, Vec<PaneHandle>)],
         active_session: Option<&str>,
     ) {
@@ -113,9 +113,9 @@ impl StatusMonitor {
         self.background_index = (self.background_index + 1) % background.len();
     }
 
-    fn poll_session<T: Terminal>(
+    fn poll_session(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         session_name: &str,
         panes: &[PaneHandle],
     ) -> Vec<StatusUpdate> {

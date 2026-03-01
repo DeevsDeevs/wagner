@@ -165,9 +165,9 @@ impl SessionWatcher {
         }
     }
 
-    pub fn poll_active<T: Terminal>(
+    pub fn poll_active(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         session_name: &str,
         panes: &[PaneHandle],
     ) -> Vec<StatusUpdate> {
@@ -209,9 +209,9 @@ impl SessionWatcher {
         updates
     }
 
-    pub fn poll_background<T: Terminal>(
+    pub fn poll_background(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         sessions: &[(String, Vec<PaneHandle>)],
         active_session: Option<&str>,
     ) {

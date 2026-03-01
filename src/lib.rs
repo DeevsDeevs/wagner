@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod attach;
 pub mod config;
+pub mod core;
 pub mod error;
 pub mod git;
 pub mod model;
