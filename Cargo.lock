@@ -3026,6 +3026,7 @@ dependencies = [
  "clap_complete",
  "crossterm",
  "directories",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

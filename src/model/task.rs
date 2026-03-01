@@ -37,6 +37,8 @@ impl Engine {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedPane {
+    #[serde(default)]
+    pub name: String,
     pub repo_name: String,
     pub engine: Engine,
     pub session_id: String,
@@ -99,6 +101,52 @@ impl Task {
         matches!(self.kind, TaskKind::Attached)
     }
 
+    pub fn next_pane_name(&self, base: &str) -> String {
+        if !self.panes.iter().any(|p| p.name == base) {
+            return base.to_string();
+        }
+        let mut n = 2;
+        loop {
+            let candidate = format!("{base}-{n}");
+            if !self.panes.iter().any(|p| p.name == candidate) {
+                return candidate;
+            }
+            n += 1;
+        }
+    }
+
+    pub fn find_pane_by_name(&self, name: &str) -> Option<&TrackedPane> {
+        self.panes.iter().find(|p| p.name == name)
+    }
+
+    pub fn fixup_pane_names(&mut self) {
+        let needs_fixup: Vec<usize> = self
+            .panes
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.name.is_empty())
+            .map(|(i, _)| i)
+            .collect();
+
+        for idx in needs_fixup {
+            let base = self.panes[idx].repo_name.clone();
+            let name = self.next_pane_name(&base);
+            self.panes[idx].name = name;
+        }
+    }
+
+    pub fn rename_pane(&mut self, old: &str, new: &str) -> bool {
+        if self.panes.iter().any(|p| p.name == new) {
+            return false;
+        }
+        if let Some(pane) = self.panes.iter_mut().find(|p| p.name == old) {
+            pane.name = new.to_string();
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn metadata_dir(&self) -> PathBuf {
         self.path.join(".wagner")
     }
@@ -140,5 +188,133 @@ impl std::fmt::Display for RepoSource {
             Self::Local(path) => write!(f, "{}", path.display()),
             Self::Remote(url) => write!(f, "{}", url),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_pane(name: &str, repo: &str) -> TrackedPane {
+        TrackedPane {
+            name: name.into(),
+            repo_name: repo.into(),
+            engine: Engine::ClaudeCode,
+            session_id: "s1".into(),
+            pane_id: "%1".into(),
+            jsonl_path: PathBuf::from("pending-discovery"),
+            launched_at: Utc::now(),
+        }
+    }
+
+    fn make_task() -> Task {
+        Task::new("test", PathBuf::from("/tmp/test"), vec![], None)
+    }
+
+    #[test]
+    fn next_pane_name_no_conflict() {
+        let task = make_task();
+        assert_eq!(task.next_pane_name("wagner"), "wagner");
+    }
+
+    #[test]
+    fn next_pane_name_with_conflict() {
+        let mut task = make_task();
+        task.panes.push(make_pane("wagner", "wagner"));
+        assert_eq!(task.next_pane_name("wagner"), "wagner-2");
+
+        task.panes.push(make_pane("wagner-2", "wagner"));
+        assert_eq!(task.next_pane_name("wagner"), "wagner-3");
+    }
+
+    #[test]
+    fn find_pane_by_name_found() {
+        let mut task = make_task();
+        task.panes.push(make_pane("api", "api"));
+        assert!(task.find_pane_by_name("api").is_some());
+    }
+
+    #[test]
+    fn find_pane_by_name_not_found() {
+        let task = make_task();
+        assert!(task.find_pane_by_name("api").is_none());
+    }
+
+    #[test]
+    fn fixup_pane_names_fills_empty() {
+        let mut task = make_task();
+        task.panes.push(make_pane("", "api"));
+        task.panes.push(make_pane("", "web"));
+        task.fixup_pane_names();
+        assert_eq!(task.panes[0].name, "api");
+        assert_eq!(task.panes[1].name, "web");
+    }
+
+    #[test]
+    fn fixup_pane_names_handles_duplicates() {
+        let mut task = make_task();
+        task.panes.push(make_pane("", "api"));
+        task.panes.push(make_pane("", "api"));
+        task.fixup_pane_names();
+        assert_eq!(task.panes[0].name, "api");
+        assert_eq!(task.panes[1].name, "api-2");
+    }
+
+    #[test]
+    fn fixup_pane_names_skips_already_named() {
+        let mut task = make_task();
+        task.panes.push(make_pane("custom", "api"));
+        task.panes.push(make_pane("", "web"));
+        task.fixup_pane_names();
+        assert_eq!(task.panes[0].name, "custom");
+        assert_eq!(task.panes[1].name, "web");
+    }
+
+    #[test]
+    fn rename_pane_success() {
+        let mut task = make_task();
+        task.panes.push(make_pane("api", "api"));
+        assert!(task.rename_pane("api", "backend"));
+        assert_eq!(task.panes[0].name, "backend");
+    }
+
+    #[test]
+    fn rename_pane_target_exists() {
+        let mut task = make_task();
+        task.panes.push(make_pane("api", "api"));
+        task.panes.push(make_pane("web", "web"));
+        assert!(!task.rename_pane("api", "web"));
+        assert_eq!(task.panes[0].name, "api");
+    }
+
+    #[test]
+    fn rename_pane_source_not_found() {
+        let mut task = make_task();
+        task.panes.push(make_pane("api", "api"));
+        assert!(!task.rename_pane("missing", "new-name"));
+    }
+
+    #[test]
+    fn tracked_pane_serde_roundtrip() {
+        let pane = make_pane("api", "api");
+        let json = serde_json::to_string(&pane).unwrap();
+        let deserialized: TrackedPane = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "api");
+        assert_eq!(deserialized.repo_name, "api");
+    }
+
+    #[test]
+    fn tracked_pane_backward_compat_no_name() {
+        let json = r#"{
+            "repo_name": "api",
+            "engine": "claude_code",
+            "session_id": "s1",
+            "pane_id": "%1",
+            "jsonl_path": "pending-discovery",
+            "launched_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let pane: TrackedPane = serde_json::from_str(json).unwrap();
+        assert_eq!(pane.name, "");
+        assert_eq!(pane.repo_name, "api");
     }
 }

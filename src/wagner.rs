@@ -118,7 +118,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if let Ok(panes) = self.terminal.list_panes(&session) {
             if let Some(pane) = panes.first() {
                 let first_repo = task.repos[0].clone();
-                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo);
+                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
             }
         }
 
@@ -126,7 +126,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             for i in 1..task.repos.len() {
                 let repo = task.repos[i].clone();
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo);
+                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo, None);
             }
         }
 
@@ -192,7 +192,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if let Ok(panes) = self.terminal.list_panes(&session) {
             if let Some(pane) = panes.first() {
                 let first_repo = task.repos[0].clone();
-                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo);
+                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
             }
         }
 
@@ -200,7 +200,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             for i in 1..task.repos.len() {
                 let repo = task.repos[i].clone();
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo);
+                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo, None);
             }
         }
 
@@ -355,7 +355,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         }
     }
 
-    pub fn add_pane(&self, task_name: &str, repo_name: Option<&str>) -> Result<PaneHandle> {
+    pub fn add_pane(&self, task_name: &str, repo_name: Option<&str>, pane_name: Option<&str>) -> Result<PaneHandle> {
         let mut task = self.store.load_task(task_name)?;
         let session = SessionHandle(session_name_for_task(task_name));
 
@@ -400,7 +400,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             self.terminal.create_pane(&session, &repo.worktree)?
         };
 
-        self.prepare_agent_in_pane(&mut task, &pane, &repo)?;
+        self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
         self.store.save_task(&task)?;
         Ok(pane)
     }
@@ -410,10 +410,16 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         task: &mut Task,
         pane: &PaneHandle,
         repo: &TaskRepo,
+        name_override: Option<&str>,
     ) -> Result<TrackedPane> {
         let session_id = Uuid::new_v4().to_string();
         let engine = self.agent.engine();
         let cwd = &repo.worktree;
+
+        let pane_name = match name_override {
+            Some(n) => n.to_string(),
+            None => task.next_pane_name(&repo.name),
+        };
 
         let cmd = self.agent.launch_command(&session_id);
         self.terminal.send_literal(pane, &cmd)?;
@@ -424,6 +430,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             .unwrap_or_else(|| PathBuf::from("pending-discovery"));
 
         let tracked = TrackedPane {
+            name: pane_name,
             repo_name: repo.name.clone(),
             engine,
             session_id,

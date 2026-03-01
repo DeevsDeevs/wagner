@@ -152,6 +152,13 @@ impl StatusEngine {
 
         self.last_statuses.insert(pane_id.clone(), current.clone());
 
+        let pane_name = task
+            .panes
+            .iter()
+            .find(|tp| tp.pane_id == *pane_id)
+            .map(|tp| tp.name.clone())
+            .unwrap_or_else(|| pane_title.clone());
+
         if is_waiting && !was_waiting {
             let output_tail = self
                 .watcher
@@ -166,23 +173,23 @@ impl StatusEngine {
             };
             Some(CoreEvent::NeedsAttention {
                 task_name: task.name.clone(),
+                pane_name,
                 pane_id: pane_id.clone(),
-                pane_title: pane_title.clone(),
                 reason,
                 output_tail,
             })
         } else if is_idle && was_active {
             Some(CoreEvent::AgentIdle {
                 task_name: task.name.clone(),
+                pane_name,
                 pane_id: pane_id.clone(),
-                pane_title: pane_title.clone(),
                 output_tail: String::new(),
             })
         } else if is_active && !was_active {
             Some(CoreEvent::AgentWorking {
                 task_name: task.name.clone(),
+                pane_name,
                 pane_id: pane_id.clone(),
-                pane_title: pane_title.clone(),
                 activity: current.label(),
             })
         } else {

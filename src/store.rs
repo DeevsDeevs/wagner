@@ -69,7 +69,9 @@ impl Store {
 
         if metadata_path.exists() {
             let content = std::fs::read_to_string(&metadata_path)?;
-            return Ok(serde_json::from_str(&content)?);
+            let mut task: Task = serde_json::from_str(&content)?;
+            task.fixup_pane_names();
+            return Ok(task);
         }
 
         let registry = self.load_attached_registry();
@@ -77,7 +79,9 @@ impl Store {
             let metadata_path = attached_path.join(".wagner").join("task.json");
             if metadata_path.exists() {
                 let content = std::fs::read_to_string(&metadata_path)?;
-                return Ok(serde_json::from_str(&content)?);
+                let mut task: Task = serde_json::from_str(&content)?;
+                task.fixup_pane_names();
+                return Ok(task);
             }
         }
 
@@ -97,7 +101,8 @@ impl Store {
                     let metadata_path = path.join(".wagner").join("task.json");
                     if metadata_path.exists() {
                         if let Ok(content) = std::fs::read_to_string(&metadata_path) {
-                            if let Ok(task) = serde_json::from_str::<Task>(&content) {
+                            if let Ok(mut task) = serde_json::from_str::<Task>(&content) {
+                                task.fixup_pane_names();
                                 tasks.push(task);
                             }
                         }
@@ -111,7 +116,8 @@ impl Store {
             let metadata_path = attached_path.join(".wagner").join("task.json");
             if metadata_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&metadata_path) {
-                    if let Ok(task) = serde_json::from_str::<Task>(&content) {
+                    if let Ok(mut task) = serde_json::from_str::<Task>(&content) {
+                        task.fixup_pane_names();
                         if !tasks.iter().any(|t| t.name == task.name) {
                             tasks.push(task);
                         }

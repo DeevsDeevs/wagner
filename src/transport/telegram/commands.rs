@@ -5,10 +5,13 @@ pub enum ParsedCommand {
     Core(CoreCommand),
     Focus {
         task_name: String,
-        pane_id: Option<String>,
+        pane_name: Option<String>,
         sticky: bool,
     },
     Unfocus,
+    UsageError {
+        usage: &'static str,
+    },
     Unknown {
         text: String,
     },
@@ -41,54 +44,54 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
             if rest.is_empty() {
                 return Some(ParsedCommand::Core(CoreCommand::Approve {
                     task_name: String::new(),
-                    pane_id: None,
+                    pane_name: None,
                 }));
             }
-            let (task_name, pane_id) = split_task_pane(rest);
+            let (task_name, pane_name) = split_task_pane(rest);
             Some(ParsedCommand::Core(CoreCommand::Approve {
                 task_name,
-                pane_id,
+                pane_name,
             }))
         }
 
         "/reject" | "/n" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::Unknown {
-                    text: text.to_string(),
+                return Some(ParsedCommand::UsageError {
+                    usage: "/reject <task> [pane]",
                 });
             }
-            let (task_name, pane_id) = split_task_pane(rest);
+            let (task_name, pane_name) = split_task_pane(rest);
             Some(ParsedCommand::Core(CoreCommand::Reject {
                 task_name,
-                pane_id,
+                pane_name,
             }))
         }
 
         "/send" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::Unknown {
-                    text: text.to_string(),
+                return Some(ParsedCommand::UsageError {
+                    usage: "/send <task> <message>",
                 });
             }
             let mut parts = rest.splitn(2, |c: char| c.is_whitespace());
             let task_name = parts.next()?.to_string();
             let message = parts.next().unwrap_or("").trim().to_string();
             if message.is_empty() {
-                return Some(ParsedCommand::Unknown {
-                    text: text.to_string(),
+                return Some(ParsedCommand::UsageError {
+                    usage: "/send <task> <message>",
                 });
             }
             Some(ParsedCommand::Core(CoreCommand::SendMessage {
                 task_name,
-                pane_id: None,
+                pane_name: None,
                 message,
             }))
         }
 
         "/output" | "/o" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::Unknown {
-                    text: text.to_string(),
+                return Some(ParsedCommand::UsageError {
+                    usage: "/output <task> [lines]",
                 });
             }
             let mut parts = rest.split_whitespace();
@@ -96,36 +99,36 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
             let lines = parts.next().and_then(|s| s.parse().ok());
             Some(ParsedCommand::Core(CoreCommand::CaptureOutput {
                 task_name,
-                pane_id: None,
+                pane_name: None,
                 lines,
             }))
         }
 
         "/resume" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::Unknown {
-                    text: text.to_string(),
+                return Some(ParsedCommand::UsageError {
+                    usage: "/resume <task> [pane]",
                 });
             }
-            let (task_name, pane_id) = split_task_pane(rest);
+            let (task_name, pane_name) = split_task_pane(rest);
             Some(ParsedCommand::Core(CoreCommand::Resume {
                 task_name,
-                pane_id,
+                pane_name,
             }))
         }
 
         "/focus" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::Unknown {
-                    text: text.to_string(),
+                return Some(ParsedCommand::UsageError {
+                    usage: "/focus <task> [pane] [--sticky]",
                 });
             }
             let sticky = rest.contains("--sticky");
             let clean = rest.replace("--sticky", "");
-            let (task_name, pane_id) = split_task_pane(clean.trim());
+            let (task_name, pane_name) = split_task_pane(clean.trim());
             Some(ParsedCommand::Focus {
                 task_name,
-                pane_id,
+                pane_name,
                 sticky,
             })
         }
@@ -145,8 +148,8 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
 fn split_task_pane(s: &str) -> (String, Option<String>) {
     let mut parts = s.split_whitespace();
     let task_name = parts.next().unwrap_or("").to_string();
-    let pane_id = parts.next().map(String::from);
-    (task_name, pane_id)
+    let pane_name = parts.next().map(String::from);
+    (task_name, pane_name)
 }
 
 #[cfg(test)]
@@ -180,17 +183,23 @@ mod tests {
     #[test]
     fn parse_approve() {
         match parse_command("/approve my-task") {
-            Some(ParsedCommand::Core(CoreCommand::Approve { task_name, pane_id })) => {
+            Some(ParsedCommand::Core(CoreCommand::Approve {
+                task_name,
+                pane_name,
+            })) => {
                 assert_eq!(task_name, "my-task");
-                assert_eq!(pane_id, None);
+                assert_eq!(pane_name, None);
             }
             other => panic!("unexpected: {other:?}"),
         }
 
         match parse_command("/y my-task %5") {
-            Some(ParsedCommand::Core(CoreCommand::Approve { task_name, pane_id })) => {
+            Some(ParsedCommand::Core(CoreCommand::Approve {
+                task_name,
+                pane_name,
+            })) => {
                 assert_eq!(task_name, "my-task");
-                assert_eq!(pane_id, Some("%5".into()));
+                assert_eq!(pane_name, Some("%5".into()));
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -199,9 +208,12 @@ mod tests {
     #[test]
     fn parse_reject() {
         match parse_command("/reject my-task") {
-            Some(ParsedCommand::Core(CoreCommand::Reject { task_name, pane_id })) => {
+            Some(ParsedCommand::Core(CoreCommand::Reject {
+                task_name,
+                pane_name,
+            })) => {
                 assert_eq!(task_name, "my-task");
-                assert_eq!(pane_id, None);
+                assert_eq!(pane_name, None);
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -299,7 +311,7 @@ mod tests {
     #[test]
     fn parse_send_no_message() {
         match parse_command("/send my-task") {
-            Some(ParsedCommand::Unknown { .. }) => {}
+            Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -307,7 +319,7 @@ mod tests {
     #[test]
     fn parse_output_no_task() {
         match parse_command("/output") {
-            Some(ParsedCommand::Unknown { .. }) => {}
+            Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -315,17 +327,23 @@ mod tests {
     #[test]
     fn parse_resume() {
         match parse_command("/resume my-task") {
-            Some(ParsedCommand::Core(CoreCommand::Resume { task_name, pane_id })) => {
+            Some(ParsedCommand::Core(CoreCommand::Resume {
+                task_name,
+                pane_name,
+            })) => {
                 assert_eq!(task_name, "my-task");
-                assert_eq!(pane_id, None);
+                assert_eq!(pane_name, None);
             }
             other => panic!("unexpected: {other:?}"),
         }
 
         match parse_command("/resume my-task %5") {
-            Some(ParsedCommand::Core(CoreCommand::Resume { task_name, pane_id })) => {
+            Some(ParsedCommand::Core(CoreCommand::Resume {
+                task_name,
+                pane_name,
+            })) => {
                 assert_eq!(task_name, "my-task");
-                assert_eq!(pane_id, Some("%5".into()));
+                assert_eq!(pane_name, Some("%5".into()));
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -334,7 +352,7 @@ mod tests {
     #[test]
     fn parse_resume_no_task() {
         match parse_command("/resume") {
-            Some(ParsedCommand::Unknown { .. }) => {}
+            Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -342,7 +360,7 @@ mod tests {
     #[test]
     fn parse_reject_no_task() {
         match parse_command("/reject") {
-            Some(ParsedCommand::Unknown { .. }) => {}
+            Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }
     }

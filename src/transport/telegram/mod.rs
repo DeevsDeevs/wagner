@@ -10,7 +10,7 @@ use teloxide::types::{
     AllowedUpdate, BotCommand, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, MessageId,
     ParseMode, ReplyParameters, UpdateKind,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::config::TelegramConfig;
 use crate::core::WagnerCore;
@@ -44,7 +44,7 @@ struct MessageRef {
 
 struct FocusTarget {
     task_name: String,
-    pane_id: Option<String>,
+    pane_name: Option<String>,
     sticky: bool,
 }
 
@@ -149,15 +149,15 @@ impl TelegramAdapter {
         self.task_registry.get(&id).map(|s| s.as_str())
     }
 
-    fn matches_focus(&self, task_name: &str, pane_id: &str) -> bool {
+    fn matches_focus(&self, task_name: &str, pane_name: &str) -> bool {
         match &self.focus {
             None => true,
             Some(f) => {
                 if f.task_name != task_name {
                     return false;
                 }
-                match &f.pane_id {
-                    Some(pid) => pid == pane_id,
+                match &f.pane_name {
+                    Some(name) => name == pane_name,
                     None => true,
                 }
             }
@@ -305,12 +305,12 @@ impl TelegramAdapter {
         match event {
             CoreEvent::NeedsAttention {
                 task_name,
+                pane_name,
                 pane_id,
-                pane_title,
                 reason,
                 output_tail,
             } => {
-                if !self.matches_focus(task_name, pane_id) {
+                if !self.matches_focus(task_name, pane_name) {
                     self.suppressed_count += 1;
                     return Ok(());
                 }
@@ -324,8 +324,8 @@ impl TelegramAdapter {
 
                 let enriched = CoreEvent::NeedsAttention {
                     task_name: task_name.clone(),
+                    pane_name: pane_name.clone(),
                     pane_id: pane_id.clone(),
-                    pane_title: pane_title.clone(),
                     reason: *reason,
                     output_tail,
                 };
@@ -348,11 +348,11 @@ impl TelegramAdapter {
 
             CoreEvent::AgentIdle {
                 task_name,
+                pane_name,
                 pane_id,
-                pane_title,
                 ..
             } => {
-                if !self.matches_focus(task_name, pane_id) {
+                if !self.matches_focus(task_name, pane_name) {
                     self.suppressed_count += 1;
                     return Ok(());
                 }
@@ -366,8 +366,8 @@ impl TelegramAdapter {
                     );
                     let enriched = CoreEvent::AgentIdle {
                         task_name: task_name.clone(),
+                        pane_name: pane_name.clone(),
                         pane_id: pane_id.clone(),
-                        pane_title: pane_title.clone(),
                         output_tail,
                     };
                     self.send_event_text(&enriched, &[]).await?;
@@ -550,6 +550,7 @@ impl TelegramAdapter {
                     .list_panes(&SessionHandle(session_name.clone()))
                     .unwrap_or_default();
 
+                let task = tasks.iter().find(|t| t.name == *task_name);
                 let mut buttons = vec![];
                 for p in &session_panes {
                     let eid = self.register_entity(task_name, &p.0);
@@ -558,15 +559,19 @@ impl TelegramAdapter {
                         .get_pane_status(&session_name, &p.0)
                         .cloned()
                         .unwrap_or(PaneStatus::Unknown);
+                    let display_name = task
+                        .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == p.0))
+                        .map(|tp| tp.name.as_str())
+                        .unwrap_or(&p.1);
                     let mut row = vec![];
                     if status.is_waiting() {
                         row.push(ActionButton {
-                            label: format!("Approve {}", p.1),
+                            label: format!("Approve {display_name}"),
                             callback_data: format!("a:{eid}"),
                         });
                     }
                     row.push(ActionButton {
-                        label: format!("Output {}", p.1),
+                        label: format!("Output {display_name}"),
                         callback_data: format!("o:{eid}"),
                     });
                     if !row.is_empty() {
@@ -682,16 +687,16 @@ impl TelegramAdapter {
     fn handle_focus(
         &mut self,
         task_name: &str,
-        pane_id: Option<&str>,
+        pane_name: Option<&str>,
         sticky: bool,
     ) -> (CoreResponse, Vec<Vec<ActionButton>>) {
         self.focus = Some(FocusTarget {
             task_name: task_name.to_string(),
-            pane_id: pane_id.map(String::from),
+            pane_name: pane_name.map(String::from),
             sticky,
         });
         self.suppressed_count = 0;
-        let target = match pane_id {
+        let target = match pane_name {
             Some(p) => format!("{task_name}/{p}"),
             None => task_name.to_string(),
         };
@@ -841,7 +846,7 @@ impl TelegramAdapter {
                         (
                             CoreResponse::Output {
                                 task_name: task,
-                                pane_id: pane,
+                                pane_name: pane,
                                 content,
                             },
                             vec![],
@@ -869,10 +874,15 @@ impl TelegramAdapter {
                     }
                 };
                 match self.resolve_entity(id) {
-                    Some((task, pane)) => {
+                    Some((task, pane_id)) => {
                         let task = task.to_string();
-                        let pane = pane.to_string();
-                        self.handle_focus(&task, Some(&pane), false)
+                        let pane_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane_id.to_string());
+                        self.handle_focus(&task, Some(&pane_name), false)
                     }
                     None => (
                         CoreResponse::Error {
@@ -1026,7 +1036,13 @@ impl TelegramAdapter {
                     .cloned()
                     .unwrap_or(PaneStatus::Unknown);
                 if status.is_waiting() {
-                    waiting_panes.push((task.name.clone(), pane.0.clone(), pane.1.clone()));
+                    let name = task
+                        .panes
+                        .iter()
+                        .find(|tp| tp.pane_id == pane.0)
+                        .map(|tp| tp.name.clone())
+                        .unwrap_or_else(|| pane.1.clone());
+                    waiting_panes.push((task.name.clone(), pane.0.clone(), name));
                 }
             }
         }
@@ -1060,10 +1076,10 @@ impl TelegramAdapter {
             _ => {
                 let buttons: Vec<Vec<ActionButton>> = waiting_panes
                     .iter()
-                    .map(|(task, pane_id, pane_title)| {
+                    .map(|(task, pane_id, pane_name)| {
                         let eid = self.register_entity(task, pane_id);
                         vec![ActionButton {
-                            label: format!("Approve {task}/{pane_title}"),
+                            label: format!("Approve {task}/{pane_name}"),
                             callback_data: format!("a:{eid}"),
                         }]
                     })
@@ -1130,10 +1146,16 @@ impl Adapter for TelegramAdapter {
                 }
                 TelegramInput::Command(ParsedCommand::Focus {
                     task_name,
-                    pane_id,
+                    pane_name,
                     sticky,
-                }) => self.handle_focus(&task_name, pane_id.as_deref(), sticky),
+                }) => self.handle_focus(&task_name, pane_name.as_deref(), sticky),
                 TelegramInput::Command(ParsedCommand::Unfocus) => self.handle_unfocus(),
+                TelegramInput::Command(ParsedCommand::UsageError { usage }) => (
+                    CoreResponse::Error {
+                        message: format!("Usage: {usage}"),
+                    },
+                    vec![],
+                ),
                 TelegramInput::Command(ParsedCommand::Unknown { text }) => (
                     CoreResponse::Error {
                         message: format!("Unknown command: {text}. /help for available commands."),

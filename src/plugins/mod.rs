@@ -6,10 +6,12 @@ pub use states::PluginStates;
 use std::collections::HashMap;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use crate::config::Config;
 use crate::error::Result;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginItem {
     pub id: String,
     pub name: String,
@@ -17,7 +19,7 @@ pub struct PluginItem {
     pub metadata: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginItemDetail {
     pub item: PluginItem,
     pub content: String,

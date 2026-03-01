@@ -360,7 +360,7 @@ fn test_add_pane_defaults() {
         .create_task("single-pane-task", &[spec], None)
         .unwrap();
 
-    wagner.add_pane("single-pane-task", None).unwrap();
+    wagner.add_pane("single-pane-task", None, None).unwrap();
 
     let specs = vec![
         RepoSpec {
@@ -376,8 +376,8 @@ fn test_add_pane_defaults() {
     ];
     wagner.create_task("multi-pane-task", &specs, None).unwrap();
 
-    wagner.add_pane("multi-pane-task", None).unwrap();
-    wagner.add_pane("multi-pane-task", Some("repo1")).unwrap();
+    wagner.add_pane("multi-pane-task", None, None).unwrap();
+    wagner.add_pane("multi-pane-task", Some("repo1"), None).unwrap();
 }
 
 #[test]

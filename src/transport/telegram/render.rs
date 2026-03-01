@@ -5,13 +5,13 @@ pub fn render_event(event: &CoreEvent) -> String {
     match event {
         CoreEvent::NeedsAttention {
             task_name,
+            pane_name,
             pane_id: _,
-            pane_title,
             reason,
             output_tail,
         } => {
             let task = escape(task_name);
-            let title = escape(pane_title);
+            let title = escape(pane_name);
             let reason_label = escape(reason.label());
             let tail = if output_tail.is_empty() {
                 String::new()
@@ -33,12 +33,12 @@ pub fn render_event(event: &CoreEvent) -> String {
 
         CoreEvent::AgentIdle {
             task_name,
+            pane_name,
             pane_id: _,
-            pane_title,
             output_tail,
         } => {
             let task = escape(task_name);
-            let title = escape(pane_title);
+            let title = escape(pane_name);
             let tail = if output_tail.is_empty() {
                 String::new()
             } else {
@@ -49,12 +49,12 @@ pub fn render_event(event: &CoreEvent) -> String {
 
         CoreEvent::AgentWorking {
             task_name,
+            pane_name,
             pane_id: _,
-            pane_title,
             activity,
         } => {
             let task = escape(task_name);
-            let title = escape(pane_title);
+            let title = escape(pane_name);
             let act = escape(activity);
             format!("\u{1F7E2} *{task}* \\| {title} — {act}")
         }
@@ -149,7 +149,7 @@ pub fn render_response(response: &CoreResponse) -> String {
 
         CoreResponse::Output {
             task_name,
-            pane_id: _,
+            pane_name: _,
             content,
         } => {
             let task = escape(task_name);
@@ -326,8 +326,8 @@ mod tests {
     fn render_needs_attention_approval() {
         let text = render_event(&CoreEvent::NeedsAttention {
             task_name: "my-task".into(),
+            pane_name: "repo1".into(),
             pane_id: "%5".into(),
-            pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Approval,
             output_tail: "last line".into(),
         });
@@ -343,8 +343,8 @@ mod tests {
     fn render_needs_attention_question() {
         let text = render_event(&CoreEvent::NeedsAttention {
             task_name: "my-task".into(),
+            pane_name: "repo1".into(),
             pane_id: "%5".into(),
-            pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Question,
             output_tail: "Which database?".into(),
         });
@@ -357,8 +357,8 @@ mod tests {
     fn render_needs_attention_input() {
         let text = render_event(&CoreEvent::NeedsAttention {
             task_name: "my-task".into(),
+            pane_name: "repo1".into(),
             pane_id: "%5".into(),
-            pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Input,
             output_tail: String::new(),
         });
@@ -370,8 +370,8 @@ mod tests {
     fn render_needs_attention_permission() {
         let text = render_event(&CoreEvent::NeedsAttention {
             task_name: "my-task".into(),
+            pane_name: "repo1".into(),
             pane_id: "%5".into(),
-            pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Permission,
             output_tail: String::new(),
         });

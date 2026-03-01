@@ -322,6 +322,7 @@ mod tests {
             diff_base: None,
             kind: TaskKind::Managed,
             panes: vec![ModelTrackedPane {
+                name: "repo1".into(),
                 repo_name: "repo1".into(),
                 engine: Engine::ClaudeCode,
                 session_id: "abc-123".into(),
@@ -828,6 +829,7 @@ mod tests {
             kind: TaskKind::Managed,
             panes: vec![
                 ModelTrackedPane {
+                    name: "api".into(),
                     repo_name: "api".into(),
                     engine: Engine::ClaudeCode,
                     session_id: "s1".into(),
@@ -836,6 +838,7 @@ mod tests {
                     launched_at: Utc::now(),
                 },
                 ModelTrackedPane {
+                    name: "web".into(),
                     repo_name: "web".into(),
                     engine: Engine::ClaudeCode,
                     session_id: "s2".into(),

@@ -63,6 +63,10 @@ pub enum Commands {
 
         /// Repo name within task
         repo: Option<String>,
+
+        /// Custom pane name (defaults to repo name)
+        #[arg(long)]
+        name: Option<String>,
     },
 
     /// Add a repo to an existing task
@@ -165,6 +169,73 @@ pub enum Commands {
     Detach {
         /// Task name (auto-detected if inside task dir)
         task: Option<String>,
+    },
+
+    /// Rename a pane within a task
+    RenamePane {
+        /// Task name
+        task: String,
+
+        /// Current pane name
+        old_name: String,
+
+        /// New pane name
+        new_name: String,
+    },
+
+    /// Show task/pane status via daemon
+    Status {
+        /// Task name (shows all tasks if omitted)
+        task: Option<String>,
+    },
+
+    /// Send message to a pane
+    Send {
+        /// Task name
+        task: String,
+        /// Message to send
+        #[arg(trailing_var_arg = true, required = true)]
+        message: Vec<String>,
+        /// Target specific pane by name
+        #[arg(short, long)]
+        pane: Option<String>,
+    },
+
+    /// Approve tool use
+    #[command(visible_alias = "y")]
+    Approve {
+        /// Task name (smart-pick if omitted)
+        task: Option<String>,
+        /// Pane name
+        pane: Option<String>,
+    },
+
+    /// Reject tool use
+    #[command(visible_alias = "n")]
+    Reject {
+        /// Task name
+        task: String,
+        /// Pane name
+        pane: Option<String>,
+    },
+
+    /// Capture pane output
+    Output {
+        /// Task name
+        task: String,
+        /// Pane name
+        pane: Option<String>,
+        /// Number of lines
+        #[arg(short, long)]
+        lines: Option<usize>,
+    },
+
+    /// Resume a dead agent
+    Resume {
+        /// Task name
+        task: String,
+        /// Pane name
+        pane: Option<String>,
     },
 
     /// Run the daemon for remote monitoring
@@ -356,6 +427,14 @@ _wagner() {{
         'start:Start agent sessions on existing repos'
         's:Start agent sessions on existing repos'
         'detach:Stop tracking an attached task'
+        'status:Show task/pane status via daemon'
+        'send:Send message to a pane'
+        'approve:Approve tool use'
+        'y:Approve tool use'
+        'reject:Reject tool use'
+        'n:Reject tool use'
+        'output:Capture pane output'
+        'resume:Resume a dead agent'
         'daemon:Run the daemon for remote monitoring'
     )
 
@@ -518,6 +597,32 @@ _wagner() {{
                     ;;
                 detach)
                     _arguments '1:task:_wagner_tasks'
+                    ;;
+                status)
+                    _arguments '1:task:_wagner_tasks'
+                    ;;
+                send)
+                    _arguments \
+                        '1:task:_wagner_tasks' \
+                        '-p[Pane name]:pane:' \
+                        '--pane=[Pane name]:pane:' \
+                        '*:message:'
+                    ;;
+                approve|y)
+                    _arguments '1:task:_wagner_tasks' '2:pane:'
+                    ;;
+                reject|n)
+                    _arguments '1:task:_wagner_tasks' '2:pane:'
+                    ;;
+                output)
+                    _arguments \
+                        '1:task:_wagner_tasks' \
+                        '2:pane:' \
+                        '-l[Number of lines]:lines:' \
+                        '--lines=[Number of lines]:lines:'
+                    ;;
+                resume)
+                    _arguments '1:task:_wagner_tasks' '2:pane:'
                     ;;
                 daemon)
                     local -a daemon_commands

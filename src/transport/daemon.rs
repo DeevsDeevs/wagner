@@ -1,15 +1,19 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
 
 use crate::config::Config;
 use crate::core::WagnerCore;
 use crate::store::Store;
 use crate::terminal::{Tmux, session_name_for_task};
+use crate::transport::{CoreCommand, CoreResponse};
 
 use super::adapter::{Adapter, DaemonAdapter, LogAdapter};
+use super::ipc;
 use super::{CoreEvent, TaskSummary};
 
 struct DaemonState {
@@ -35,7 +39,35 @@ fn remove_pid_file() {
     let _ = std::fs::remove_file(pid_path());
 }
 
+fn cleanup_stale_socket(sock_path: &Path) {
+    if !sock_path.exists() {
+        return;
+    }
+    let pid_file = pid_path();
+    if pid_file.exists() {
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+            let alive = std::process::Command::new("kill")
+                .args(["-0", pid_str.trim()])
+                .status()
+                .is_ok_and(|s| s.success());
+            if alive {
+                return;
+            }
+        }
+    }
+    let _ = std::fs::remove_file(sock_path);
+    let _ = std::fs::remove_file(&pid_file);
+}
+
 pub async fn run_daemon(config: Config) -> crate::Result<()> {
+    let sock_path = ipc::socket_path();
+    cleanup_stale_socket(&sock_path);
+    let listener = UnixListener::bind(&sock_path).map_err(|e| {
+        crate::error::WagnerError::Transport(format!(
+            "Cannot bind daemon socket (another daemon running?): {e}"
+        ))
+    })?;
+
     write_pid_file()?;
 
     let mut sigterm = signal(SignalKind::terminate())
@@ -98,6 +130,13 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
 
     info!(task_count = tasks.len(), "daemon started");
 
+    let (ipc_tx, mut ipc_rx) =
+        mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
+
+    tokio::spawn(async move {
+        ipc::run_ipc_server(listener, ipc_tx).await;
+    });
+
     let poll_interval = Duration::from_millis(config.daemon.poll_interval_ms);
 
     loop {
@@ -114,6 +153,17 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
                 if let Err(e) = daemon_tick(&mut state, &mut adapter).await {
                     error!(%e, "daemon tick error");
                 }
+
+                while let Ok((cmd, resp_tx)) = ipc_rx.try_recv() {
+                    let tasks = state.store.list_tasks().unwrap_or_default();
+                    let response = state.core.execute(
+                        &state.terminal,
+                        &state.store,
+                        &cmd,
+                        &tasks,
+                    );
+                    let _ = resp_tx.send(response);
+                }
             }
         }
     }
@@ -125,6 +175,7 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
         .await;
 
     remove_pid_file();
+    let _ = std::fs::remove_file(&sock_path);
     info!("daemon stopped");
     Ok(())
 }
@@ -135,15 +186,12 @@ async fn daemon_tick(
 ) -> crate::Result<()> {
     let tasks = state.store.list_tasks()?;
 
-    // Poll all sessions and get debounced transition events
     let events = state.core.tick(&state.terminal, &tasks);
 
-    // Send events to adapter
     adapter
         .handle_events(&events, &state.core, &state.terminal, &state.store, &tasks)
         .await?;
 
-    // Poll and handle commands from adapter
     adapter
         .poll_and_handle(&state.core, &state.terminal, &state.store, &tasks)
         .await?;

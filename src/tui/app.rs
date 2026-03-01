@@ -923,7 +923,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn add_pane(&mut self) {
         if let Some(task_name) = &self.selected_task.clone() {
-            match self.wagner.add_pane(task_name, None) {
+            match self.wagner.add_pane(task_name, None, None) {
                 Ok(pane) => {
                     self.set_status(&format!("Added pane: {}", pane.0));
                     let _ = self.refresh_data();

@@ -18,9 +18,14 @@ pub fn run(cli: Cli) -> Result<()> {
     let config = Config::load()?;
     debug!("Loaded config from {:?}", Config::config_path());
 
-    // Daemon doesn't need Wagner, handle it early to avoid moving config
+    // Daemon and IPC commands don't need Wagner, handle early
     if let Some(Commands::Daemon { command }) = cli.command {
         return cmd_daemon(command, config);
+    }
+    if let Some(ref cmd) = cli.command {
+        if let Some(result) = try_ipc_command(cmd) {
+            return result;
+        }
     }
 
     let terminal = Tmux::with_config(config.terminal.clone());
@@ -43,7 +48,14 @@ pub fn run(cli: Cli) -> Result<()> {
         ),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
-        Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
+        Some(Commands::Add { task, repo, name }) => {
+            cmd_add(&wagner, task, repo.as_deref(), name.as_deref())
+        }
+        Some(Commands::RenamePane {
+            task,
+            old_name,
+            new_name,
+        }) => cmd_rename_pane(&wagner, &task, &old_name, &new_name),
         Some(Commands::AddRepo { task, repo }) => cmd_add_repo(&wagner, &task, &repo),
         Some(Commands::RmRepo { task, repo }) => cmd_rm_repo(&wagner, &task, &repo),
         Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
@@ -59,6 +71,12 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
         Some(Commands::Daemon { .. }) => unreachable!(),
+        Some(Commands::Status { .. })
+        | Some(Commands::Send { .. })
+        | Some(Commands::Approve { .. })
+        | Some(Commands::Reject { .. })
+        | Some(Commands::Output { .. })
+        | Some(Commands::Resume { .. }) => unreachable!(),
         None => cmd_tui(wagner),
     }
 }
@@ -252,6 +270,7 @@ fn cmd_add<T: Terminal, A: Agent>(
     wagner: &Wagner<T, A>,
     task: Option<String>,
     repo: Option<&str>,
+    name: Option<&str>,
 ) -> Result<()> {
     let task_name = task
         .or_else(|| detect_task_from_cwd(&wagner.config))
@@ -261,13 +280,32 @@ fn cmd_add<T: Terminal, A: Agent>(
             std::process::exit(1);
         });
 
-    debug!(task = %task_name, repo = ?repo, "Adding pane");
+    debug!(task = %task_name, repo = ?repo, name = ?name, "Adding pane");
 
-    let pane = wagner.add_pane(&task_name, repo)?;
+    let pane = wagner.add_pane(&task_name, repo, name)?;
     info!(task = %task_name, pane = %pane.0, "Pane created");
     println!("Created pane: {}", pane.0);
 
     Ok(())
+}
+
+fn cmd_rename_pane<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    task_name: &str,
+    old_name: &str,
+    new_name: &str,
+) -> Result<()> {
+    let mut task = wagner.store.load_task(task_name)?;
+    if task.rename_pane(old_name, new_name) {
+        wagner.store.save_task(&task)?;
+        println!("Renamed pane '{}' to '{}' in task '{}'", old_name, new_name, task_name);
+        Ok(())
+    } else {
+        Err(wagner::WagnerError::Terminal(format!(
+            "Cannot rename: pane '{}' not found or '{}' already exists",
+            old_name, new_name
+        )))
+    }
 }
 
 fn cmd_add_repo<T: Terminal, A: Agent>(
@@ -960,6 +998,156 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
     }
 
     Ok(())
+}
+
+fn try_ipc_command(cmd: &Commands) -> Option<Result<()>> {
+    use wagner::transport::{CoreCommand, CoreResponse, ipc};
+
+    match cmd {
+        Commands::Status { task } => Some(cmd_ipc_status(task.clone())),
+        Commands::Send {
+            task,
+            message,
+            pane,
+        } => Some(cmd_ipc_send(task.clone(), pane.clone(), message.clone())),
+        Commands::Approve { task, pane } => Some(cmd_ipc_approve(task.clone(), pane.clone())),
+        Commands::Reject { task, pane } => Some(cmd_ipc_reject(task.clone(), pane.clone())),
+        Commands::Output { task, pane, lines } => {
+            Some(cmd_ipc_output(task.clone(), pane.clone(), *lines))
+        }
+        Commands::Resume { task, pane } => Some(cmd_ipc_resume(task.clone(), pane.clone())),
+        _ => None,
+    }
+}
+
+fn cmd_ipc_status(task: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = match task {
+        Some(name) => CoreCommand::TaskStatus { task_name: name },
+        None => CoreCommand::FullStatus,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_send(task: String, pane: Option<String>, message_parts: Vec<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::SendMessage {
+        task_name: task,
+        pane_name: pane,
+        message: message_parts.join(" "),
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_approve(task: Option<String>, pane: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::Approve {
+        task_name: task.unwrap_or_default(),
+        pane_name: pane,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_reject(task: String, pane: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::Reject {
+        task_name: task,
+        pane_name: pane,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_output(task: String, pane: Option<String>, lines: Option<usize>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::CaptureOutput {
+        task_name: task,
+        pane_name: pane,
+        lines,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_resume(task: String, pane: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::Resume {
+        task_name: task,
+        pane_name: pane,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn print_response(response: &wagner::transport::CoreResponse) {
+    use wagner::transport::CoreResponse;
+
+    match response {
+        CoreResponse::TaskList { tasks } => {
+            if tasks.is_empty() {
+                println!("No tasks");
+                return;
+            }
+            for (summary, status) in tasks {
+                println!(
+                    "{} {:<20} {} repos, {} panes  [{}]",
+                    status.icon(),
+                    summary.name,
+                    summary.repo_count,
+                    summary.pane_count,
+                    status.label(),
+                );
+            }
+        }
+        CoreResponse::Status { task_name, panes } => {
+            println!("{}", task_name);
+            if panes.is_empty() {
+                println!("  (no panes)");
+                return;
+            }
+            for (name, status) in panes {
+                println!("  {} {} [{}]", status.icon(), name, status.label());
+            }
+        }
+        CoreResponse::FullStatus { tasks } => {
+            if tasks.is_empty() {
+                println!("No tasks");
+                return;
+            }
+            for (summary, agg_status, panes) in tasks {
+                println!(
+                    "{} {}  [{}]",
+                    agg_status.icon(),
+                    summary.name,
+                    agg_status.label(),
+                );
+                for (name, status) in panes {
+                    println!("    {} {} [{}]", status.icon(), name, status.label());
+                }
+            }
+        }
+        CoreResponse::Output {
+            task_name,
+            pane_name,
+            content,
+        } => {
+            println!("--- {} / {} ---", task_name, pane_name);
+            println!("{}", content);
+        }
+        CoreResponse::Confirmation { message } => println!("{}", message),
+        CoreResponse::Error { message } => eprintln!("Error: {}", message),
+        CoreResponse::HelpText => println!("Wagner CLI - use --help for available commands"),
+        _ => {}
+    }
 }
 
 fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {

@@ -39,6 +39,7 @@ pub fn execute(
         }
 
         CoreCommand::TaskStatus { task_name } => {
+            let task = tasks.iter().find(|t| t.name == *task_name);
             let session_name = session_name_for_task(task_name);
             let session_panes = terminal
                 .list_panes(&SessionHandle(session_name.clone()))
@@ -51,7 +52,11 @@ pub fn execute(
                         .get_pane_status(&session_name, &p.0)
                         .cloned()
                         .unwrap_or(PaneStatus::Unknown);
-                    (p.1.clone(), status)
+                    let name = task
+                        .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == p.0))
+                        .map(|tp| tp.name.clone())
+                        .unwrap_or_else(|| p.1.clone());
+                    (name, status)
                 })
                 .collect();
 
@@ -78,7 +83,13 @@ pub fn execute(
                                 .get_pane_status(&session_name, &p.0)
                                 .cloned()
                                 .unwrap_or(PaneStatus::Unknown);
-                            (p.1.clone(), s)
+                            let name = t
+                                .panes
+                                .iter()
+                                .find(|tp| tp.pane_id == p.0)
+                                .map(|tp| tp.name.clone())
+                                .unwrap_or_else(|| p.1.clone());
+                            (name, s)
                         })
                         .collect();
 
@@ -99,11 +110,11 @@ pub fn execute(
 
         CoreCommand::SendMessage {
             task_name,
-            pane_id,
+            pane_name,
             message,
         } => {
             let session_name = session_name_for_task(task_name);
-            match resolve_pane(terminal, engine, &session_name, pane_id.as_deref(), None) {
+            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
                 Some(pane) => {
                     if let Err(e) = terminal.send_literal(&pane, message) {
                         return CoreResponse::Error {
@@ -127,14 +138,14 @@ pub fn execute(
 
         CoreCommand::Approve {
             task_name,
-            pane_id,
+            pane_name,
         } => {
             if task_name.is_empty() {
                 return smart_approve(terminal, engine, tasks);
             }
 
             let session_name = session_name_for_task(task_name);
-            match resolve_pane(terminal, engine, &session_name, pane_id.as_deref(), Some(true)) {
+            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), Some(true)) {
                 Some(pane) => {
                     if let Err(e) = terminal.send_key(&pane, "y") {
                         return CoreResponse::Error {
@@ -158,10 +169,10 @@ pub fn execute(
 
         CoreCommand::Reject {
             task_name,
-            pane_id,
+            pane_name,
         } => {
             let session_name = session_name_for_task(task_name);
-            match resolve_pane(terminal, engine, &session_name, pane_id.as_deref(), Some(true)) {
+            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), Some(true)) {
                 Some(pane) => {
                     if let Err(e) = terminal.send_key(&pane, "n") {
                         return CoreResponse::Error {
@@ -185,7 +196,7 @@ pub fn execute(
 
         CoreCommand::Resume {
             task_name,
-            pane_id,
+            pane_name,
         } => {
             let task = match tasks.iter().find(|t| t.name == *task_name) {
                 Some(t) => t,
@@ -197,7 +208,7 @@ pub fn execute(
             };
 
             let session_name = session_name_for_task(task_name);
-            let target_pane = match resolve_pane(terminal, engine, &session_name, pane_id.as_deref(), None) {
+            let target_pane = match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
                 Some(p) => p,
                 None => {
                     return CoreResponse::Error {
@@ -243,17 +254,25 @@ pub fn execute(
 
         CoreCommand::CaptureOutput {
             task_name,
-            pane_id,
+            pane_name,
             lines,
         } => {
             let session_name = session_name_for_task(task_name);
             let capture_lines = lines.unwrap_or(config.daemon.default_output_lines);
-            match resolve_pane(terminal, engine, &session_name, pane_id.as_deref(), None) {
+            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
                 Some(pane) => {
                     let content = capture_tail(terminal, &pane, capture_lines);
+                    let resolved_name = pane_name.clone().unwrap_or_else(|| {
+                        tasks
+                            .iter()
+                            .find(|t| t.name == *task_name)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane.0))
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane.1.clone())
+                    });
                     CoreResponse::Output {
                         task_name: task_name.clone(),
-                        pane_id: pane.0.clone(),
+                        pane_name: resolved_name,
                         content,
                     }
                 }
@@ -369,14 +388,23 @@ fn resolve_pane(
     terminal: &dyn Terminal,
     engine: &StatusEngine,
     session_name: &str,
-    pane_id: Option<&str>,
+    tasks: &[Task],
+    task_name: &str,
+    pane_name: Option<&str>,
     want_waiting: Option<bool>,
 ) -> Option<PaneHandle> {
-    if let Some(id) = pane_id {
-        let panes = terminal
-            .list_panes(&SessionHandle(session_name.to_string()))
-            .unwrap_or_default();
-        return panes.into_iter().find(|p| p.0 == id);
+    let task = tasks.iter().find(|t| t.name == task_name);
+
+    if let Some(name) = pane_name {
+        if let Some(task) = task {
+            if let Some(tracked) = task.find_pane_by_name(name) {
+                let panes = terminal
+                    .list_panes(&SessionHandle(session_name.to_string()))
+                    .unwrap_or_default();
+                return panes.into_iter().find(|p| p.0 == tracked.pane_id);
+            }
+        }
+        return None;
     }
 
     let panes = terminal
