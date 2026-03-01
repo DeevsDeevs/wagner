@@ -390,9 +390,7 @@ impl TelegramAdapter {
                 self.send_event_text(event, &buttons).await?;
             }
 
-            CoreEvent::AgentResumed { .. }
-            | CoreEvent::DaemonStarted { .. }
-            | CoreEvent::DaemonStopping => {
+            CoreEvent::DaemonStarted { .. } | CoreEvent::DaemonStopping => {
                 self.send_event_text(event, &[]).await?;
             }
         }

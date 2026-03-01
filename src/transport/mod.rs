@@ -30,11 +30,6 @@ pub enum CoreEvent {
         task_name: String,
         status: SessionAggregateStatus,
     },
-    AgentResumed {
-        task_name: String,
-        pane_id: String,
-        pane_title: String,
-    },
     DaemonStarted {
         tasks: Vec<TaskSummary>,
     },

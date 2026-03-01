@@ -293,10 +293,6 @@ pub struct DaemonConfig {
     pub notify_idle: bool,
     #[serde(default = "default_output_lines")]
     pub default_output_lines: usize,
-    #[serde(default = "default_health_check_interval_ms")]
-    pub health_check_interval_ms: u64,
-    #[serde(default = "default_max_resume_attempts")]
-    pub max_resume_attempts: u32,
     #[serde(default)]
     pub telegram: Option<TelegramConfig>,
 }
@@ -305,22 +301,12 @@ fn default_daemon_poll_ms() -> u64 {
     100
 }
 
-fn default_health_check_interval_ms() -> u64 {
-    5000
-}
-
-fn default_max_resume_attempts() -> u32 {
-    3
-}
-
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
             poll_interval_ms: default_daemon_poll_ms(),
             notify_idle: false,
             default_output_lines: default_output_lines(),
-            health_check_interval_ms: default_health_check_interval_ms(),
-            max_resume_attempts: default_max_resume_attempts(),
             telegram: None,
         }
     }

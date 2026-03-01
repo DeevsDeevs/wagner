@@ -85,16 +85,6 @@ pub fn render_event(event: &CoreEvent) -> String {
             lines.join("\n")
         }
 
-        CoreEvent::AgentResumed {
-            task_name,
-            pane_id: _,
-            pane_title,
-        } => {
-            let task = escape(task_name);
-            let title = escape(pane_title);
-            format!("\u{1F504} *{task}* \\| {title} — Auto\\-resumed dead agent")
-        }
-
         CoreEvent::DaemonStopping => String::from("*Wagner Daemon Stopping*"),
     }
 }

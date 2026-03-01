@@ -1,13 +1,13 @@
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::signal::unix::{SignalKind, signal};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::config::Config;
 use crate::core::WagnerCore;
 use crate::store::Store;
-use crate::terminal::{PaneHandle, Terminal, Tmux, session_name_for_task};
+use crate::terminal::{Tmux, session_name_for_task};
 
 use super::adapter::{Adapter, DaemonAdapter, LogAdapter};
 use super::{CoreEvent, TaskSummary};
@@ -16,7 +16,6 @@ struct DaemonState {
     core: WagnerCore,
     terminal: Tmux,
     store: Store,
-    last_health_check: Instant,
 }
 
 pub fn pid_path() -> PathBuf {
@@ -69,7 +68,6 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
         core,
         terminal,
         store,
-        last_health_check: Instant::now(),
     };
 
     let tasks = state.store.list_tasks()?;
@@ -138,16 +136,7 @@ async fn daemon_tick(
     let tasks = state.store.list_tasks()?;
 
     // Poll all sessions and get debounced transition events
-    let mut events = state.core.tick(&state.terminal, &tasks);
-
-    // Dead-agent health check (throttled)
-    let health_interval =
-        Duration::from_millis(state.core.config.daemon.health_check_interval_ms);
-    if state.last_health_check.elapsed() >= health_interval {
-        state.last_health_check = Instant::now();
-        let resume_events = check_dead_agents(&state.terminal, &tasks);
-        events.extend(resume_events);
-    }
+    let events = state.core.tick(&state.terminal, &tasks);
 
     // Send events to adapter
     adapter
@@ -160,52 +149,4 @@ async fn daemon_tick(
         .await?;
 
     Ok(())
-}
-
-fn check_dead_agents(
-    terminal: &Tmux,
-    tasks: &[crate::model::Task],
-) -> Vec<CoreEvent> {
-    let mut events = Vec::new();
-
-    for task in tasks {
-        for tracked in &task.panes {
-            let pane_cmd = terminal
-                .get_pane_command(&PaneHandle(tracked.pane_id.clone(), String::new()))
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if pane_cmd.contains(tracked.engine.process_name()) {
-                continue;
-            }
-
-            let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            let pane = PaneHandle(tracked.pane_id.clone(), String::new());
-            if let Err(e) = terminal.send_literal(&pane, &resume_cmd) {
-                warn!(%e, task = %task.name, pane = %tracked.pane_id, "failed to send resume command");
-                continue;
-            }
-            if let Err(e) = terminal.send_key(&pane, "Enter") {
-                warn!(%e, task = %task.name, pane = %tracked.pane_id, "failed to execute resume");
-                continue;
-            }
-            info!(task = %task.name, pane = %tracked.pane_id, "auto-resumed dead agent");
-
-            let session_name = session_name_for_task(&task.name);
-            let pane_title = terminal
-                .list_panes(&crate::terminal::SessionHandle(session_name))
-                .unwrap_or_default()
-                .iter()
-                .find(|p| p.0 == tracked.pane_id)
-                .map(|p| p.1.clone())
-                .unwrap_or_default();
-
-            events.push(CoreEvent::AgentResumed {
-                task_name: task.name.clone(),
-                pane_id: tracked.pane_id.clone(),
-                pane_title,
-            });
-        }
-    }
-
-    events
 }
