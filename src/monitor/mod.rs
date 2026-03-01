@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 
 const STATUS_HYSTERESIS: Duration = Duration::from_millis(500);
 
-use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 use crate::terminal::{PaneHandle, Terminal};
@@ -127,7 +126,7 @@ impl StatusMonitor {
             .or_insert_with(TrackedSession::new);
 
         let captures: Vec<_> = panes
-            .par_iter()
+            .iter()
             .filter_map(|pane| {
                 let output = terminal.capture(pane, 100).ok()?;
                 let command = terminal.get_pane_command(pane).unwrap_or_default();

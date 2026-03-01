@@ -19,6 +19,22 @@ pub enum Engine {
     Codex,
 }
 
+impl Engine {
+    pub fn resume_command(&self, session_id: &str) -> String {
+        match self {
+            Engine::ClaudeCode => format!("claude --resume {session_id}"),
+            Engine::Codex => "codex".to_string(),
+        }
+    }
+
+    pub fn process_name(&self) -> &'static str {
+        match self {
+            Engine::ClaudeCode => "claude",
+            Engine::Codex => "codex",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedPane {
     pub repo_name: String,

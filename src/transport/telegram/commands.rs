@@ -12,13 +12,24 @@ pub fn parse_command(text: &str) -> Option<RemoteCommand> {
     let rest = parts.next().unwrap_or("").trim();
 
     match cmd {
-        "/status" | "/s" => Some(RemoteCommand::FullStatus),
+        "/status" | "/s" => {
+            if rest.is_empty() {
+                Some(RemoteCommand::FullStatus)
+            } else {
+                Some(RemoteCommand::TaskStatus {
+                    task_name: rest.split_whitespace().next().unwrap().to_string(),
+                })
+            }
+        }
 
         "/tasks" | "/list" => Some(RemoteCommand::ListTasks),
 
         "/approve" | "/y" => {
             if rest.is_empty() {
-                return None;
+                return Some(RemoteCommand::Approve {
+                    task_name: String::new(),
+                    pane_id: None,
+                });
             }
             let (task_name, pane_id) = split_task_pane(rest);
             Some(RemoteCommand::Approve { task_name, pane_id })
@@ -26,7 +37,9 @@ pub fn parse_command(text: &str) -> Option<RemoteCommand> {
 
         "/reject" | "/n" => {
             if rest.is_empty() {
-                return None;
+                return Some(RemoteCommand::Unknown {
+                    text: text.to_string(),
+                });
             }
             let (task_name, pane_id) = split_task_pane(rest);
             Some(RemoteCommand::Reject { task_name, pane_id })
@@ -34,13 +47,17 @@ pub fn parse_command(text: &str) -> Option<RemoteCommand> {
 
         "/send" => {
             if rest.is_empty() {
-                return None;
+                return Some(RemoteCommand::Unknown {
+                    text: text.to_string(),
+                });
             }
             let mut parts = rest.splitn(2, |c: char| c.is_whitespace());
             let task_name = parts.next()?.to_string();
             let message = parts.next().unwrap_or("").trim().to_string();
             if message.is_empty() {
-                return None;
+                return Some(RemoteCommand::Unknown {
+                    text: text.to_string(),
+                });
             }
             Some(RemoteCommand::SendMessage {
                 task_name,
@@ -51,7 +68,9 @@ pub fn parse_command(text: &str) -> Option<RemoteCommand> {
 
         "/output" | "/o" => {
             if rest.is_empty() {
-                return None;
+                return Some(RemoteCommand::Unknown {
+                    text: text.to_string(),
+                });
             }
             let mut parts = rest.split_whitespace();
             let task_name = parts.next()?.to_string();
@@ -63,7 +82,39 @@ pub fn parse_command(text: &str) -> Option<RemoteCommand> {
             })
         }
 
+        "/resume" => {
+            if rest.is_empty() {
+                return Some(RemoteCommand::Unknown {
+                    text: text.to_string(),
+                });
+            }
+            let (task_name, pane_id) = split_task_pane(rest);
+            Some(RemoteCommand::Resume { task_name, pane_id })
+        }
+
+        "/focus" => {
+            if rest.is_empty() {
+                return Some(RemoteCommand::Unknown {
+                    text: text.to_string(),
+                });
+            }
+            let sticky = rest.contains("--sticky");
+            let clean = rest.replace("--sticky", "");
+            let (task_name, pane_id) = split_task_pane(clean.trim());
+            Some(RemoteCommand::Focus {
+                task_name,
+                pane_id,
+                sticky,
+            })
+        }
+
+        "/unfocus" => Some(RemoteCommand::Unfocus),
+
         "/help" | "/start" => Some(RemoteCommand::Help),
+
+        other if other.starts_with('/') => Some(RemoteCommand::Unknown {
+            text: text.to_string(),
+        }),
 
         _ => None,
     }
@@ -134,11 +185,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_send_no_message() {
-        assert!(parse_command("/send my-task").is_none());
-    }
-
-    #[test]
     fn parse_output() {
         match parse_command("/output my-task") {
             Some(RemoteCommand::CaptureOutput { task_name, lines, .. }) => {
@@ -171,13 +217,85 @@ mod tests {
 
     #[test]
     fn parse_unknown() {
-        assert!(parse_command("/unknown").is_none());
+        match parse_command("/unknown") {
+            Some(RemoteCommand::Unknown { text }) => assert_eq!(text, "/unknown"),
+            other => panic!("unexpected: {other:?}"),
+        }
         assert!(parse_command("hello").is_none());
     }
 
     #[test]
     fn parse_approve_no_task() {
-        assert!(parse_command("/approve").is_none());
-        assert!(parse_command("/approve  ").is_none());
+        match parse_command("/approve") {
+            Some(RemoteCommand::Approve { task_name, .. }) => assert!(task_name.is_empty()),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_status_with_task() {
+        match parse_command("/status my-task") {
+            Some(RemoteCommand::TaskStatus { task_name }) => {
+                assert_eq!(task_name, "my-task");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        match parse_command("/s agents") {
+            Some(RemoteCommand::TaskStatus { task_name }) => {
+                assert_eq!(task_name, "agents");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_send_no_message() {
+        match parse_command("/send my-task") {
+            Some(RemoteCommand::Unknown { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_output_no_task() {
+        match parse_command("/output") {
+            Some(RemoteCommand::Unknown { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_resume() {
+        match parse_command("/resume my-task") {
+            Some(RemoteCommand::Resume { task_name, pane_id }) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_id, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        match parse_command("/resume my-task %5") {
+            Some(RemoteCommand::Resume { task_name, pane_id }) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_id, Some("%5".into()));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_resume_no_task() {
+        match parse_command("/resume") {
+            Some(RemoteCommand::Unknown { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_reject_no_task() {
+        match parse_command("/reject") {
+            Some(RemoteCommand::Unknown { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
     }
 }

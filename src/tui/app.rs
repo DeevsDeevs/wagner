@@ -1,4 +1,4 @@
-use crate::agent::{Agent, ClaudeCodeDetector, CodexDetector};
+use crate::agent::Agent;
 use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
@@ -154,10 +154,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             refresh_interval: Duration::from_millis(refresh_interval_ms),
             auto_refresh: true,
             session_watcher: SessionWatcher::new(
-                StatusMonitor::with_detectors(vec![
-                    Box::new(ClaudeCodeDetector::default()),
-                    Box::new(CodexDetector::default()),
-                ]),
+                StatusMonitor::with_detectors(vec![]),
                 &monitor_config,
             ),
 

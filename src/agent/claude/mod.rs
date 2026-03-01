@@ -1,10 +1,5 @@
-mod detector;
-
-pub use detector::ClaudeCodeDetector;
-
 use super::Agent;
 use crate::model::Engine;
-use crate::monitor::AgentDetector;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy)]
@@ -55,10 +50,6 @@ impl Agent for ClaudeCode {
 
     fn resume_command(&self, session_id: &str) -> String {
         format!("claude --resume {session_id}")
-    }
-
-    fn detector(&self) -> Box<dyn AgentDetector> {
-        Box::new(ClaudeCodeDetector::default())
     }
 }
 

@@ -440,6 +440,38 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.terminal.send_key(pane, "Enter")
     }
 
+    pub fn resume_dead_agents(&self, task_name: &str) -> Result<usize> {
+        let task = self.store.load_task(task_name)?;
+        let session = SessionHandle(session_name_for_task(task_name));
+        let panes = self.terminal.list_panes(&session).unwrap_or_default();
+        let mut resumed = 0;
+
+        for tracked in &task.panes {
+            let Some(pane) = panes.iter().find(|p| p.0 == tracked.pane_id) else {
+                continue;
+            };
+
+            let pane_cmd = self
+                .terminal
+                .get_pane_command(pane)
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+
+            // Agent is already running
+            if pane_cmd.contains(tracked.engine.process_name()) {
+                continue;
+            }
+
+            // Pane exists but agent is dead — resume it
+            let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
+            self.terminal.send_literal(pane, &resume_cmd)?;
+            self.terminal.send_key(pane, "Enter")?;
+            resumed += 1;
+        }
+
+        Ok(resumed)
+    }
+
     pub fn attach(&self, task_name: &str, pane_id: Option<&str>) -> Result<()> {
         let session = SessionHandle(session_name_for_task(task_name));
         if let Some(id) = pane_id {

@@ -312,6 +312,11 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
         });
 
     debug!(task = %task_name, "Attaching to session");
+    match wagner.resume_dead_agents(&task_name) {
+        Ok(n) if n > 0 => info!(count = n, "Resumed dead agents"),
+        Err(e) => debug!(%e, "Resume check skipped"),
+        _ => {}
+    }
     wagner.attach(&task_name, None)
 }
 

@@ -1,7 +1,15 @@
 use crate::monitor::status::{PaneStatus, SessionAggregateStatus, WaitReason};
-use crate::transport::{CommandResponse, TransportEvent};
+use crate::transport::{ActionButton, CommandResponse, RenderedMessage, TransportEvent};
 
-pub fn render_event(event: &TransportEvent) -> String {
+pub fn render_event(event: &TransportEvent) -> RenderedMessage {
+    let (text, actions) = render_event_inner(event);
+    RenderedMessage {
+        text,
+        buttons: actions,
+    }
+}
+
+fn render_event_inner(event: &TransportEvent) -> (String, Vec<Vec<ActionButton>>) {
     match event {
         TransportEvent::NeedsAttention {
             task_name,
@@ -9,6 +17,7 @@ pub fn render_event(event: &TransportEvent) -> String {
             pane_title,
             reason,
             output_tail,
+            actions,
         } => {
             let task = escape(task_name);
             let title = escape(pane_title);
@@ -16,7 +25,7 @@ pub fn render_event(event: &TransportEvent) -> String {
             let tail = if output_tail.is_empty() {
                 String::new()
             } else {
-                format!("\n\n```\n{}\n```", escape(output_tail))
+                format!("\n\n```\n{}\n```", escape_code(output_tail))
             };
             let hint = match reason {
                 WaitReason::Question | WaitReason::Input => {
@@ -26,8 +35,11 @@ pub fn render_event(event: &TransportEvent) -> String {
                     format!("/approve {task}  /reject {task}")
                 }
             };
-            format!(
-                "\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}{tail}\n\n{hint}"
+            (
+                format!(
+                    "\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}{tail}\n\n{hint}"
+                ),
+                actions.clone(),
             )
         }
 
@@ -42,9 +54,9 @@ pub fn render_event(event: &TransportEvent) -> String {
             let tail = if output_tail.is_empty() {
                 String::new()
             } else {
-                format!("\n\n```\n{}\n```", escape(output_tail))
+                format!("\n\n```\n{}\n```", escape_code(output_tail))
             };
-            format!("\u{26AA} *{task}* \\| {title} — Idle{tail}")
+            (format!("\u{26AA} *{task}* \\| {title} — Idle{tail}"), vec![])
         }
 
         TransportEvent::AgentWorking {
@@ -56,17 +68,18 @@ pub fn render_event(event: &TransportEvent) -> String {
             let task = escape(task_name);
             let title = escape(pane_title);
             let act = escape(activity);
-            format!("\u{1F7E2} *{task}* \\| {title} — {act}")
+            (format!("\u{1F7E2} *{task}* \\| {title} — {act}"), vec![])
         }
 
         TransportEvent::SessionStatusChanged {
             task_name,
             status,
+            actions,
         } => {
             let icon = status_icon(status);
             let task = escape(task_name);
             let label = escape(status.label());
-            format!("{icon} *{task}* — {label}")
+            (format!("{icon} *{task}* — {label}"), actions.clone())
         }
 
         TransportEvent::DaemonStarted { tasks } => {
@@ -82,18 +95,26 @@ pub fn render_event(event: &TransportEvent) -> String {
                     ));
                 }
             }
-            lines.join("\n")
+            (lines.join("\n"), vec![])
         }
 
-        TransportEvent::DaemonStopping => String::from("*Wagner Daemon Stopping*"),
+        TransportEvent::DaemonStopping => (String::from("*Wagner Daemon Stopping*"), vec![]),
     }
 }
 
-pub fn render_response(response: &CommandResponse) -> String {
+pub fn render_response(response: &CommandResponse) -> RenderedMessage {
+    let (text, actions) = render_response_inner(response);
+    RenderedMessage {
+        text,
+        buttons: actions,
+    }
+}
+
+fn render_response_inner(response: &CommandResponse) -> (String, Vec<Vec<ActionButton>>) {
     match response {
         CommandResponse::TaskList { tasks } => {
             if tasks.is_empty() {
-                return String::from("No tasks found\\.");
+                return (String::from("No tasks found\\."), vec![]);
             }
             let mut lines = vec![String::from("*Tasks*\n")];
             for (summary, status) in tasks {
@@ -105,10 +126,10 @@ pub fn render_response(response: &CommandResponse) -> String {
                     summary.repo_count
                 ));
             }
-            lines.join("\n")
+            (lines.join("\n"), vec![])
         }
 
-        CommandResponse::Status { task_name, panes } => {
+        CommandResponse::Status { task_name, panes, actions } => {
             let task = escape(task_name);
             let mut lines = vec![format!("*{task}*\n")];
             if panes.is_empty() {
@@ -121,12 +142,12 @@ pub fn render_response(response: &CommandResponse) -> String {
                     lines.push(format!("  {icon} {title} — {label}"));
                 }
             }
-            lines.join("\n")
+            (lines.join("\n"), actions.clone())
         }
 
-        CommandResponse::FullStatus { tasks } => {
+        CommandResponse::FullStatus { tasks, actions } => {
             if tasks.is_empty() {
-                return String::from("No tasks found\\.");
+                return (String::from("No tasks found\\."), vec![]);
             }
             let mut lines = vec![String::from("*Wagner Status*\n")];
             for (summary, status, panes) in tasks {
@@ -144,7 +165,7 @@ pub fn render_response(response: &CommandResponse) -> String {
                     lines.push(format!("  {picon} {title} — {plabel}"));
                 }
             }
-            lines.join("\n")
+            (lines.join("\n"), actions.clone())
         }
 
         CommandResponse::Output {
@@ -153,28 +174,39 @@ pub fn render_response(response: &CommandResponse) -> String {
             content,
         } => {
             let task = escape(task_name);
-            if content.is_empty() {
+            let text = if content.is_empty() {
                 format!("*{task}* — no output")
             } else {
-                format!("*{task}*\n\n```\n{}\n```", escape(content))
-            }
+                format!("*{task}*\n\n```\n{}\n```", escape_code(content))
+            };
+            (text, vec![])
         }
 
-        CommandResponse::Confirmation { message } => escape(message),
+        CommandResponse::Confirmation { message, actions } => {
+            (escape(message), actions.clone())
+        }
 
         CommandResponse::Error { message } => {
-            format!("\u{274C} {}", escape(message))
+            (format!("\u{274C} {}", escape(message)), vec![])
         }
 
-        CommandResponse::HelpText => String::from(
-            "*Wagner Remote Commands*\n\n\
-             /status, /s — Full status overview\n\
-             /tasks — List all tasks\n\
-             /approve <task>, /y <task> — Approve waiting pane\n\
-             /reject <task>, /n <task> — Reject waiting pane\n\
-             /send <task> <msg> — Send message to pane\n\
-             /output <task> \\[N\\] — Capture pane output\n\
-             /help — Show this message",
+        CommandResponse::HelpText => (
+            String::from(
+                "*Wagner Remote Commands*\n\n\
+                 /status, /s — Full status overview\n\
+                 /status <task> — Task pane details\n\
+                 /tasks — List all tasks\n\
+                 /approve, /y — Approve waiting pane\n\
+                 /reject <task>, /n <task> — Reject waiting pane\n\
+                 /send <task> <msg> — Send message to pane\n\
+                 /output <task> \\[N\\] — Capture pane output\n\
+                 /resume <task> — Resume dead agent session\n\
+                 /focus <task> \\[pane\\] — Focus on task/pane\n\
+                 /unfocus — Exit focus mode\n\
+                 /help — Show this message\n\n\
+                 _Reply to a notification to send input directly\\._",
+            ),
+            vec![],
         ),
     }
 }
@@ -207,6 +239,17 @@ const ESCAPE_CHARS: &[char] = &[
     '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!',
 ];
 
+fn escape_code(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + s.len() / 8);
+    for c in s.chars() {
+        if c == '`' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +263,16 @@ mod tests {
     }
 
     #[test]
+    fn escape_code_only_backtick_and_backslash() {
+        assert_eq!(escape_code("hello_world"), "hello_world");
+        assert_eq!(escape_code("test.rs"), "test.rs");
+        assert_eq!(escape_code("a*b"), "a*b");
+        assert_eq!(escape_code("error[E0308]"), "error[E0308]");
+        assert_eq!(escape_code("path\\to\\file"), "path\\\\to\\\\file");
+        assert_eq!(escape_code("use `foo`"), "use \\`foo\\`");
+    }
+
+    #[test]
     fn escape_plain_text() {
         assert_eq!(escape("hello"), "hello");
         assert_eq!(escape("abc123"), "abc123");
@@ -227,14 +280,14 @@ mod tests {
 
     #[test]
     fn render_help() {
-        let text = render_response(&CommandResponse::HelpText);
+        let text = render_response(&CommandResponse::HelpText).text;
         assert!(text.contains("Wagner Remote Commands"));
         assert!(text.contains("/status"));
     }
 
     #[test]
     fn render_empty_tasks() {
-        let text = render_response(&CommandResponse::TaskList { tasks: vec![] });
+        let text = render_response(&CommandResponse::TaskList { tasks: vec![] }).text;
         assert!(text.contains("No tasks"));
     }
 
@@ -242,7 +295,8 @@ mod tests {
     fn render_confirmation() {
         let text = render_response(&CommandResponse::Confirmation {
             message: "Approved my-task".into(),
-        });
+            actions: vec![],
+        }).text;
         assert!(text.contains("Approved my\\-task"));
     }
 
@@ -250,7 +304,7 @@ mod tests {
     fn render_error() {
         let text = render_response(&CommandResponse::Error {
             message: "not found".into(),
-        });
+        }).text;
         assert!(text.contains("not found"));
     }
 
@@ -262,7 +316,7 @@ mod tests {
                 repo_count: 2,
                 pane_count: 3,
             }],
-        });
+        }).text;
         assert!(text.contains("Wagner Daemon Started"));
         assert!(text.contains("my\\-task"));
         assert!(text.contains("2 repos"));
@@ -276,7 +330,8 @@ mod tests {
             pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Approval,
             output_tail: "last line".into(),
-        });
+            actions: vec![],
+        }).text;
         assert!(text.contains("my\\-task"));
         assert!(text.contains("Approval"));
         assert!(text.contains("/approve"));
@@ -293,7 +348,8 @@ mod tests {
             pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Question,
             output_tail: "Which database?".into(),
-        });
+            actions: vec![],
+        }).text;
         assert!(text.contains("Question"));
         assert!(text.contains("Reply to this message"));
         assert!(!text.contains("/approve"));
@@ -307,7 +363,8 @@ mod tests {
             pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Input,
             output_tail: String::new(),
-        });
+            actions: vec![],
+        }).text;
         assert!(text.contains("Reply to this message"));
         assert!(!text.contains("/approve"));
     }
@@ -320,7 +377,8 @@ mod tests {
             pane_title: "repo1".into(),
             reason: crate::monitor::status::WaitReason::Permission,
             output_tail: String::new(),
-        });
+            actions: vec![],
+        }).text;
         assert!(text.contains("/approve"));
         assert!(text.contains("/reject"));
         assert!(!text.contains("Reply to this message"));

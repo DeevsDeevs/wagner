@@ -2,13 +2,12 @@ mod claude;
 mod codex;
 mod test;
 
-pub use claude::{ClaudeCode, ClaudeCodeDetector};
-pub use codex::{Codex, CodexDetector};
+pub use claude::ClaudeCode;
+pub use codex::Codex;
 pub use test::TestAgent;
 
 use crate::error::{Result, WagnerError};
 use crate::model::Engine;
-use crate::monitor::AgentDetector;
 use std::path::{Path, PathBuf};
 
 pub trait Agent: Send + Sync {
@@ -17,7 +16,6 @@ pub trait Agent: Send + Sync {
     fn launch_command(&self, session_id: &str) -> String;
     fn predict_jsonl_path(&self, session_id: &str, cwd: &Path) -> Option<PathBuf>;
     fn resume_command(&self, session_id: &str) -> String;
-    fn detector(&self) -> Box<dyn AgentDetector>;
 }
 
 #[derive(Debug, Clone)]
@@ -69,13 +67,6 @@ impl Agent for AgentChoice {
         match self {
             Self::Claude(agent) => agent.resume_command(session_id),
             Self::Codex(agent) => agent.resume_command(session_id),
-        }
-    }
-
-    fn detector(&self) -> Box<dyn AgentDetector> {
-        match self {
-            Self::Claude(agent) => agent.detector(),
-            Self::Codex(agent) => agent.detector(),
         }
     }
 }

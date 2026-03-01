@@ -24,6 +24,17 @@ pub trait Transport: Send + Sync + 'static {
 }
 
 #[derive(Debug, Clone)]
+pub struct ActionButton {
+    pub label: String,
+    pub callback_data: String,
+}
+
+pub struct RenderedMessage {
+    pub text: String,
+    pub buttons: Vec<Vec<ActionButton>>,
+}
+
+#[derive(Debug, Clone)]
 pub enum TransportEvent {
     NeedsAttention {
         task_name: String,
@@ -31,6 +42,7 @@ pub enum TransportEvent {
         pane_title: String,
         reason: WaitReason,
         output_tail: String,
+        actions: Vec<Vec<ActionButton>>,
     },
     AgentIdle {
         task_name: String,
@@ -47,6 +59,7 @@ pub enum TransportEvent {
     SessionStatusChanged {
         task_name: String,
         status: SessionAggregateStatus,
+        actions: Vec<Vec<ActionButton>>,
     },
     DaemonStarted {
         tasks: Vec<TaskSummary>,
@@ -88,7 +101,24 @@ pub enum RemoteCommand {
         reply_to_message_id: i32,
         text: String,
     },
+    Callback {
+        data: String,
+        source_message_id: i32,
+    },
+    Resume {
+        task_name: String,
+        pane_id: Option<String>,
+    },
+    Focus {
+        task_name: String,
+        pane_id: Option<String>,
+        sticky: bool,
+    },
+    Unfocus,
     Help,
+    Unknown {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -99,9 +129,11 @@ pub enum CommandResponse {
     Status {
         task_name: String,
         panes: Vec<(String, PaneStatus)>,
+        actions: Vec<Vec<ActionButton>>,
     },
     FullStatus {
         tasks: Vec<(TaskSummary, SessionAggregateStatus, Vec<(String, PaneStatus)>)>,
+        actions: Vec<Vec<ActionButton>>,
     },
     Output {
         task_name: String,
@@ -110,6 +142,7 @@ pub enum CommandResponse {
     },
     Confirmation {
         message: String,
+        actions: Vec<Vec<ActionButton>>,
     },
     Error {
         message: String,
@@ -121,4 +154,5 @@ pub enum CommandResponse {
 pub struct MessageRef {
     pub chat_id: i64,
     pub message_id: i32,
+    pub edit_in_place: bool,
 }

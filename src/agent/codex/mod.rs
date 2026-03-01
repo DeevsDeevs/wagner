@@ -1,10 +1,5 @@
-mod detector;
-
-pub use detector::CodexDetector;
-
 use super::Agent;
 use crate::model::Engine;
-use crate::monitor::AgentDetector;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy)]
@@ -41,9 +36,5 @@ impl Agent for Codex {
 
     fn resume_command(&self, _session_id: &str) -> String {
         "codex".to_string()
-    }
-
-    fn detector(&self) -> Box<dyn AgentDetector> {
-        Box::new(CodexDetector::default())
     }
 }
