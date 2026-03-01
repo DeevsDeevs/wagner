@@ -40,4 +40,7 @@ pub enum WagnerError {
 
     #[error("Session discovery error: {0}")]
     SessionDiscovery(String),
+
+    #[error("Transport error: {0}")]
+    Transport(String),
 }

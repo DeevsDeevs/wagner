@@ -1,5 +1,6 @@
 use crate::cli::{
-    ChainsCommands, Cli, Commands, PluginCommands, WorkspaceCommands, print_completions,
+    ChainsCommands, Cli, Commands, DaemonCommands, PluginCommands, WorkspaceCommands,
+    print_completions,
 };
 use std::path::PathBuf;
 use tracing::{debug, info};
@@ -16,6 +17,11 @@ pub fn run(cli: Cli) -> Result<()> {
 
     let config = Config::load()?;
     debug!("Loaded config from {:?}", Config::config_path());
+
+    // Daemon doesn't need Wagner, handle it early to avoid moving config
+    if let Some(Commands::Daemon { command }) = cli.command {
+        return cmd_daemon(command, config);
+    }
 
     let terminal = Tmux::with_config(config.terminal.clone());
     let agent_key = cli.agent.as_deref().unwrap_or(&config.default_agent);
@@ -52,6 +58,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
+        Some(Commands::Daemon { .. }) => unreachable!(),
         None => cmd_tui(wagner),
     }
 }
@@ -948,6 +955,56 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
     }
 
     Ok(())
+}
+
+fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
+    match command {
+        DaemonCommands::Start => {
+            if config.daemon.telegram.is_none() {
+                eprintln!("Error: Telegram not configured");
+                eprintln!(
+                    "Add daemon.telegram config to: {}",
+                    Config::config_path().display()
+                );
+                eprintln!();
+                eprintln!("Example:");
+                eprintln!(r#"  "daemon": {{"#);
+                eprintln!(r#"    "telegram": {{"#);
+                eprintln!(r#"      "bot_token": "123456:ABC-DEF...","#);
+                eprintln!(r#"      "chat_id": 123456789"#);
+                eprintln!(r#"    }}"#);
+                eprintln!(r#"  }}"#);
+                std::process::exit(1);
+            }
+
+            info!("Starting daemon");
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(wagner::transport::daemon::run_daemon(config))
+        }
+        DaemonCommands::Status => {
+            let pid_path = Config::config_dir().join("daemon.pid");
+            if pid_path.exists() {
+                if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+                    let pid_str = pid_str.trim();
+                    // Check if process is running
+                    let alive = std::process::Command::new("kill")
+                        .args(["-0", pid_str])
+                        .status()
+                        .is_ok_and(|s| s.success());
+                    if alive {
+                        println!("Daemon running (PID {})", pid_str);
+                    } else {
+                        println!("Daemon not running (stale PID file)");
+                    }
+                } else {
+                    println!("Daemon not running");
+                }
+            } else {
+                println!("Daemon not running");
+            }
+            Ok(())
+        }
+    }
 }
 
 fn cmd_plugin(command: PluginCommands) -> Result<()> {

@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+pub const PENDING_DISCOVERY: &str = "pending-discovery";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskKind {
@@ -29,7 +31,7 @@ pub struct TrackedPane {
 
 impl TrackedPane {
     pub fn is_discovery_pending(&self) -> bool {
-        self.jsonl_path == Path::new("pending-discovery")
+        self.jsonl_path == Path::new(PENDING_DISCOVERY)
     }
 }
 

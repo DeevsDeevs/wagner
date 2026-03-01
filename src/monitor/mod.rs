@@ -1,7 +1,12 @@
 mod ansi;
+pub mod claude_events;
+pub mod codex_events;
 mod detector;
+pub mod deriver;
 mod detectors;
+pub mod events;
 pub mod status;
+pub mod watcher;
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -20,6 +25,7 @@ pub use status::{
     Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, PaneStatus,
     STUCK_THRESHOLD, SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
 };
+pub use watcher::SessionWatcher;
 
 struct TrackedSession {
     panes: HashMap<String, TrackedPane>,

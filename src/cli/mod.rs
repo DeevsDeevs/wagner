@@ -166,6 +166,20 @@ pub enum Commands {
         /// Task name (auto-detected if inside task dir)
         task: Option<String>,
     },
+
+    /// Run the daemon for remote monitoring
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCommands {
+    /// Start the daemon (foreground)
+    Start,
+    /// Check if daemon is running
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -340,6 +354,7 @@ _wagner() {{
         'start:Start agent sessions on existing repos'
         's:Start agent sessions on existing repos'
         'detach:Stop tracking an attached task'
+        'daemon:Run the daemon for remote monitoring'
     )
 
     _arguments -C \
@@ -501,6 +516,14 @@ _wagner() {{
                     ;;
                 detach)
                     _arguments '1:task:_wagner_tasks'
+                    ;;
+                daemon)
+                    local -a daemon_commands
+                    daemon_commands=(
+                        'start:Start the daemon (foreground)'
+                        'status:Check if daemon is running'
+                    )
+                    _describe 'daemon command' daemon_commands
                     ;;
             esac
             ;;

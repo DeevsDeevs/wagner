@@ -281,6 +281,55 @@ pub struct Config {
     pub terminal: TerminalConfig,
     #[serde(default)]
     pub monitor: MonitorConfig,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    #[serde(default = "default_daemon_poll_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default)]
+    pub telegram: Option<TelegramConfig>,
+}
+
+fn default_daemon_poll_ms() -> u64 {
+    100
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: default_daemon_poll_ms(),
+            telegram: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramConfig {
+    pub bot_token: String,
+    pub chat_id: i64,
+    #[serde(default = "default_true")]
+    pub notify_waiting: bool,
+    #[serde(default)]
+    pub notify_idle: bool,
+    #[serde(default = "default_rate_limit_ms")]
+    pub rate_limit_ms: u64,
+    #[serde(default = "default_output_lines")]
+    pub default_output_lines: usize,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_rate_limit_ms() -> u64 {
+    50
+}
+
+fn default_output_lines() -> usize {
+    30
 }
 
 fn default_diff_base() -> String {
@@ -323,6 +372,7 @@ impl Default for Config {
             plugins: PluginsConfig::default(),
             terminal: TerminalConfig::default(),
             monitor: MonitorConfig::default(),
+            daemon: DaemonConfig::default(),
         }
     }
 }
