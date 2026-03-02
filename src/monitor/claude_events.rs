@@ -67,28 +67,7 @@ fn parse_assistant_event(obj: &serde_json::Value) -> Option<AgentEvent> {
                 },
             })
         }
-        Some("tool_use") => {
-            let tool_block = content
-                .iter()
-                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))?;
-            let tool_id = tool_block
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let tool_name = tool_block
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let tool_context = extract_tool_context(&tool_name, tool_block);
-            Some(AgentEvent::ToolProposed {
-                engine: Engine::ClaudeCode,
-                tool_id,
-                tool_name,
-                tool_context,
-            })
-        }
+        Some("tool_use") => extract_tool_proposed(content),
         _ => {
             let first_type = content
                 .first()
@@ -105,26 +84,7 @@ fn parse_assistant_event(obj: &serde_json::Value) -> Option<AgentEvent> {
                         text,
                     })
                 }
-                Some("tool_use") => {
-                    let tool_block = content.first()?;
-                    let tool_id = tool_block
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let tool_name = tool_block
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let tool_context = extract_tool_context(&tool_name, tool_block);
-                    Some(AgentEvent::ToolProposed {
-                        engine: Engine::ClaudeCode,
-                        tool_id,
-                        tool_name,
-                        tool_context,
-                    })
-                }
+                Some("tool_use") => extract_tool_proposed(content),
                 _ => None,
             }
         }
@@ -132,21 +92,40 @@ fn parse_assistant_event(obj: &serde_json::Value) -> Option<AgentEvent> {
 }
 
 fn parse_system_event(obj: &serde_json::Value) -> Option<AgentEvent> {
-    let session_id = obj.get("sessionId").and_then(|v| v.as_str());
+    let session_id = obj.get("sessionId").and_then(|v| v.as_str())?;
     let model = obj
         .pointer("/message/model")
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    if let Some(sid) = session_id {
-        return Some(AgentEvent::SessionStarted {
-            engine: Engine::ClaudeCode,
-            session_id: sid.to_string(),
-            model,
-        });
-    }
+    Some(AgentEvent::SessionStarted {
+        engine: Engine::ClaudeCode,
+        session_id: session_id.to_string(),
+        model,
+    })
+}
 
-    None
+fn extract_tool_proposed(content: &[serde_json::Value]) -> Option<AgentEvent> {
+    let tool_block = content
+        .iter()
+        .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))?;
+    let tool_id = tool_block
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let tool_name = tool_block
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let tool_context = extract_tool_context(&tool_name, tool_block);
+    Some(AgentEvent::ToolProposed {
+        engine: Engine::ClaudeCode,
+        tool_id,
+        tool_name,
+        tool_context,
+    })
 }
 
 fn extract_text_content(content: &[serde_json::Value]) -> String {

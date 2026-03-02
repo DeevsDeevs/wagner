@@ -33,13 +33,11 @@ impl WagnerCore {
         self.plugins.iter().find(|p| p.id() == id).map(|p| &**p)
     }
 
-    /// Poll all sessions, detect transitions with debounce.
-    /// Returns CoreEvents for notification adapters.
     pub fn tick(&mut self, terminal: &dyn Terminal, tasks: &[Task]) -> Vec<CoreEvent> {
         self.status_engine.poll_transitions(terminal, tasks)
     }
 
-    /// Execute a core command. Returns CoreResponse (no buttons).
+    /// Returns CoreResponse without adapter-specific buttons.
     pub fn execute(
         &self,
         terminal: &dyn Terminal,

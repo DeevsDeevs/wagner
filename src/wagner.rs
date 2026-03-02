@@ -462,12 +462,10 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
 
-            // Agent is already running
             if pane_cmd.contains(tracked.engine.process_name()) {
                 continue;
             }
 
-            // Pane exists but agent is dead — resume it
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
             self.terminal.send_keys(pane, &resume_cmd)?;
             resumed += 1;

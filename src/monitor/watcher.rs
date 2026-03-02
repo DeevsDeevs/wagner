@@ -99,11 +99,7 @@ impl PaneWatcher {
         let mut line_buf = String::new();
         let mut lines_processed = 0;
 
-        loop {
-            if lines_processed >= max_lines {
-                break;
-            }
-
+        while lines_processed < max_lines {
             line_buf.clear();
             let Ok(bytes_read) = reader.read_line(&mut line_buf) else {
                 break;
@@ -220,7 +216,6 @@ impl SessionWatcher {
         for pane in panes {
             if let Some(watcher) = self.pane_watchers.get_mut(&pane.0) {
                 if watcher.jsonl_path.as_os_str() == PENDING_DISCOVERY {
-                    // No JSONL path — delegate to fallback content-hash monitor
                     untracked_panes.push(pane.clone());
                 } else if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
                     self.pane_statuses

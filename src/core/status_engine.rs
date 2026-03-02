@@ -36,16 +36,12 @@ impl StatusEngine {
         self.watcher.track_task(task, session_name);
     }
 
-    /// Poll all tracked sessions, detect status transitions with debounce.
-    /// Returns debounced CoreEvents suitable for notification adapters.
     pub fn poll_transitions(&mut self, terminal: &dyn Terminal, tasks: &[Task]) -> Vec<CoreEvent> {
-        // Track any new tasks
         for task in tasks {
             let session_name = session_name_for_task(&task.name);
             self.watcher.track_task(task, &session_name);
         }
 
-        // Poll all sessions
         let mut all_sessions: Vec<(String, Vec<PaneHandle>)> = Vec::new();
         for task in tasks {
             let session_name = session_name_for_task(&task.name);
@@ -60,18 +56,15 @@ impl StatusEngine {
             self.watcher.poll_active(terminal, session_name, panes);
         }
 
-        // Detect transitions and build events
         let mut events = Vec::new();
 
         for task in tasks {
             let session_name = session_name_for_task(&task.name);
 
-            // Session-level debounced transitions
             if let Some(event) = self.check_session_transition(task, &session_name) {
                 events.push(event);
             }
 
-            // Pane-level transitions
             let session_panes = all_sessions
                 .iter()
                 .find(|(n, _)| n == &session_name)

@@ -49,7 +49,7 @@ fn parse_response_item(obj: &serde_json::Value) -> Option<AgentEvent> {
                 text,
             })
         }
-        "function_call" => {
+        "function_call" | "custom_tool_call" => {
             let call_id = obj
                 .pointer("/payload/call_id")
                 .and_then(|v| v.as_str())
@@ -67,37 +67,7 @@ fn parse_response_item(obj: &serde_json::Value) -> Option<AgentEvent> {
                 tool_context: None,
             })
         }
-        "function_call_output" => {
-            let call_id = obj
-                .pointer("/payload/call_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            Some(AgentEvent::ToolCompleted {
-                engine: Engine::Codex,
-                tool_id: call_id,
-                is_error: false,
-            })
-        }
-        "custom_tool_call" => {
-            let call_id = obj
-                .pointer("/payload/call_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let name = obj
-                .pointer("/payload/name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            Some(AgentEvent::ToolProposed {
-                engine: Engine::Codex,
-                tool_id: call_id,
-                tool_name: name,
-                tool_context: None,
-            })
-        }
-        "custom_tool_call_output" => {
+        "function_call_output" | "custom_tool_call_output" => {
             let call_id = obj
                 .pointer("/payload/call_id")
                 .and_then(|v| v.as_str())

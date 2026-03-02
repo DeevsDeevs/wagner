@@ -1,4 +1,4 @@
-use crate::monitor::status::{PaneStatus, SessionAggregateStatus, WaitReason};
+use crate::monitor::status::{SessionAggregateStatus, WaitReason};
 use crate::transport::{CoreEvent, CoreResponse, ProgressStep};
 
 pub fn render_event(event: &CoreEvent) -> String {
@@ -126,7 +126,7 @@ pub fn render_response(response: &CoreResponse) -> String {
                 lines.push(String::from("  No panes\\."));
             } else {
                 for (title, pane_status) in panes {
-                    let picon = pane_icon(pane_status);
+                    let picon = pane_status.icon();
                     let title = escape(title);
                     let plabel = escape(&pane_status.label());
                     lines.push(format!("  {picon} {title} — {plabel}"));
@@ -149,7 +149,7 @@ pub fn render_response(response: &CoreResponse) -> String {
                     summary.repo_count
                 ));
                 for (title, pane_status) in panes {
-                    let picon = pane_icon(pane_status);
+                    let picon = pane_status.icon();
                     let title = escape(title);
                     let plabel = escape(&pane_status.label());
                     lines.push(format!("  {picon} {title} — {plabel}"));
@@ -387,7 +387,6 @@ fn markdown_to_telegram_html(md: &str) -> String {
         }
     }
 
-    // Trim trailing newlines
     while out.ends_with('\n') {
         out.pop();
     }
@@ -401,10 +400,6 @@ fn status_icon(status: &SessionAggregateStatus) -> &'static str {
         SessionAggregateStatus::Idle => "\u{26AA}",
         SessionAggregateStatus::Empty => "\u{26AB}",
     }
-}
-
-fn pane_icon(status: &PaneStatus) -> char {
-    status.icon()
 }
 
 fn escape(s: &str) -> String {

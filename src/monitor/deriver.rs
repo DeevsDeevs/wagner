@@ -232,10 +232,7 @@ impl StatusDeriver {
         let status = match &self.state {
             DerivedState::Idle => AgentStatus::Idle,
             DerivedState::Waiting(reason) => AgentStatus::Waiting(*reason),
-            DerivedState::Active => {
-                let activity = self.derive_activity();
-                AgentStatus::Active(activity)
-            }
+            DerivedState::Active => AgentStatus::Active(self.derive_activity()),
         };
 
         PaneStatus::Agent { agent_type, status }
@@ -269,13 +266,7 @@ fn tool_name_to_activity(engine: Engine, tool_name: &str) -> Activity {
             };
             Activity::new(ActivityKind::Claude(kind))
         }
-        Engine::Codex => {
-            let kind = match tool_name {
-                "exec_command" => CodexActivity::Working,
-                _ => CodexActivity::Working,
-            };
-            Activity::new(ActivityKind::Codex(kind))
-        }
+        Engine::Codex => Activity::new(ActivityKind::Codex(CodexActivity::Working)),
         Engine::Terminal => Activity::new(ActivityKind::Generic(GenericActivity::Working)),
     }
 }

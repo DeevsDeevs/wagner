@@ -533,7 +533,6 @@ impl TelegramAdapter {
 
                 match self.progress_messages.get(pane_id) {
                     None => {
-                        // Send new progress message
                         self.outbox.throttle().await;
                         let keyboard = build_keyboard(&[]);
                         if let Ok(Some(r)) = self.do_send(&text, keyboard).await {
@@ -760,7 +759,6 @@ impl TelegramAdapter {
                 let task = tasks.iter().find(|t| t.name == *task_name);
                 let mut buttons = vec![];
 
-                // Pane name buttons — drill-down to pane detail view
                 let mut pane_row = vec![];
                 for p in &session_panes {
                     let eid = self.register_entity(task_name, &p.0);
@@ -837,7 +835,6 @@ impl TelegramAdapter {
                     return self.smart_approve_with_buttons(core, terminal, tasks);
                 }
                 let response = core.execute(terminal, store, cmd, tasks);
-                // Set up awaiting_response for the approved pane
                 if matches!(&response, CoreResponse::Confirmation { .. }) {
                     let session_name = session_name_for_task(task_name);
                     let target = if let Some(name) = pane_name {
@@ -847,7 +844,6 @@ impl TelegramAdapter {
                             .and_then(|t| t.find_pane_by_name(name))
                             .map(|tp| (tp.pane_id.clone(), tp.engine))
                     } else {
-                        // Find the first waiting pane (matches resolve_pane logic)
                         let panes = terminal
                             .list_panes(&SessionHandle(session_name.clone()))
                             .unwrap_or_default();
@@ -927,7 +923,6 @@ impl TelegramAdapter {
                 pane_name,
                 mode,
             } => {
-                // Infer task name if empty (from focus or single task)
                 let resolved_task = if task_name.is_empty() {
                     if let Some(ref f) = self.focus {
                         f.task_name.clone()
@@ -953,7 +948,6 @@ impl TelegramAdapter {
                     mode: *mode,
                 };
 
-                // Store mode locally for all matching panes
                 let task = tasks.iter().find(|t| t.name == resolved_task);
                 if let Some(task) = task {
                     match pane_name {
@@ -995,7 +989,6 @@ impl TelegramAdapter {
         store: &Store,
         tasks: &[Task],
     ) -> (CoreResponse, Vec<Vec<ActionButton>>) {
-        // If the command was sent as a reply, inject pane context from message_to_pane
         if let Some(reply_id) = reply_to_id
             && let Some((task_name, pane_id)) = self.message_to_pane.get(&reply_id).cloned()
         {
@@ -1031,7 +1024,6 @@ impl TelegramAdapter {
             }
         }
 
-        // If command has empty task_name and no reply context, return usage error
         match cmd {
             CoreCommand::CaptureOutput { task_name, .. } if task_name.is_empty() => {
                 return (
@@ -1430,7 +1422,6 @@ impl TelegramAdapter {
                 match self.resolve_task(id) {
                     Some(task_name) => {
                         let task_name = task_name.to_string();
-                        // Register for reply routing: pick first waiting pane, or first pane
                         if let Some(task) = tasks.iter().find(|t| t.name == task_name) {
                             let session_name = session_name_for_task(&task_name);
                             let target_pane = task
@@ -1768,16 +1759,10 @@ impl TelegramAdapter {
                             .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
                             .map(|tp| tp.name.clone())
                             .unwrap_or_else(|| pane_id.clone());
-                        let display = pane_name.clone();
+                        let msg =
+                            format!("Reply to this message with the new name for '{pane_name}'");
                         self.rename_route_pending = Some((task, pane_name, pane_id));
-                        (
-                            CoreResponse::Confirmation {
-                                message: format!(
-                                    "Reply to this message with the new name for '{display}'"
-                                ),
-                            },
-                            vec![],
-                        )
+                        (CoreResponse::Confirmation { message: msg }, vec![])
                     }
                     None => (
                         CoreResponse::Error {

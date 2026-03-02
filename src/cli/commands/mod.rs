@@ -18,7 +18,6 @@ pub fn run(cli: Cli) -> Result<()> {
     let config = Config::load()?;
     debug!("Loaded config from {:?}", Config::config_path());
 
-    // Daemon and IPC commands don't need Wagner, handle early
     if let Some(Commands::Daemon { command }) = cli.command {
         return cmd_daemon(command, config);
     }
@@ -1161,59 +1160,50 @@ fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
             rt.block_on(wagner::transport::daemon::run_daemon(config))
         }
         DaemonCommands::Stop => {
-            let pid_path = wagner::transport::daemon::pid_path();
-            if !pid_path.exists() {
+            let Some(pid_str) = read_daemon_pid() else {
                 println!("Daemon not running (no PID file)");
                 return Ok(());
-            }
-            let pid_contents = std::fs::read_to_string(&pid_path)
-                .map_err(|e| wagner::WagnerError::Transport(format!("read PID file: {e}")))?;
-            let pid_str = pid_contents.trim();
-
-            let alive = std::process::Command::new("kill")
-                .args(["-0", pid_str])
-                .status()
-                .is_ok_and(|s| s.success());
-            if !alive {
+            };
+            if !daemon_alive(&pid_str) {
                 println!("Daemon not running (stale PID file, removing)");
-                let _ = std::fs::remove_file(&pid_path);
+                let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
                 return Ok(());
             }
-
             let sent = std::process::Command::new("kill")
-                .args(["-TERM", pid_str])
+                .args(["-TERM", &pid_str])
                 .status()
                 .is_ok_and(|s| s.success());
             if sent {
-                println!("Sent SIGTERM to daemon (PID {})", pid_str);
+                println!("Sent SIGTERM to daemon (PID {pid_str})");
             } else {
-                println!("Failed to send SIGTERM to daemon (PID {})", pid_str);
+                println!("Failed to send SIGTERM to daemon (PID {pid_str})");
             }
             Ok(())
         }
         DaemonCommands::Status => {
-            let pid_path = wagner::transport::daemon::pid_path();
-            if pid_path.exists() {
-                if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
-                    let pid_str = pid_str.trim();
-                    let alive = std::process::Command::new("kill")
-                        .args(["-0", pid_str])
-                        .status()
-                        .is_ok_and(|s| s.success());
-                    if alive {
-                        println!("Daemon running (PID {})", pid_str);
-                    } else {
-                        println!("Daemon not running (stale PID file)");
-                    }
-                } else {
-                    println!("Daemon not running");
+            match read_daemon_pid() {
+                Some(pid_str) if daemon_alive(&pid_str) => {
+                    println!("Daemon running (PID {pid_str})");
                 }
-            } else {
-                println!("Daemon not running");
+                _ => println!("Daemon not running"),
             }
             Ok(())
         }
     }
+}
+
+fn read_daemon_pid() -> Option<String> {
+    let path = wagner::transport::daemon::pid_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+fn daemon_alive(pid_str: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid_str])
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 fn cmd_plugin(command: PluginCommands) -> Result<()> {
