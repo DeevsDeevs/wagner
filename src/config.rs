@@ -27,16 +27,36 @@ pub struct MonitorConfig {
     pub daemon_seed_lines: usize,
 }
 
-fn default_active_poll_ms() -> u64 { 100 }
-fn default_monitor_background_poll_ms() -> u64 { 2000 }
-fn default_idle_threshold_ms() -> u64 { 2000 }
-fn default_approval_timeout_ms() -> u64 { 1000 }
-fn default_session_end_threshold_ms() -> u64 { 5000 }
-fn default_discovery_fast_poll_ms() -> u64 { 500 }
-fn default_discovery_fast_timeout_ms() -> u64 { 30000 }
-fn default_discovery_slow_poll_ms() -> u64 { 5000 }
-fn default_max_lines_per_poll() -> usize { 1000 }
-fn default_daemon_seed_lines() -> usize { 50 }
+fn default_active_poll_ms() -> u64 {
+    100
+}
+fn default_monitor_background_poll_ms() -> u64 {
+    2000
+}
+fn default_idle_threshold_ms() -> u64 {
+    2000
+}
+fn default_approval_timeout_ms() -> u64 {
+    1000
+}
+fn default_session_end_threshold_ms() -> u64 {
+    5000
+}
+fn default_discovery_fast_poll_ms() -> u64 {
+    500
+}
+fn default_discovery_fast_timeout_ms() -> u64 {
+    30000
+}
+fn default_discovery_slow_poll_ms() -> u64 {
+    5000
+}
+fn default_max_lines_per_poll() -> usize {
+    1000
+}
+fn default_daemon_seed_lines() -> usize {
+    50
+}
 
 impl Default for MonitorConfig {
     fn default() -> Self {

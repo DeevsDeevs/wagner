@@ -26,9 +26,7 @@ pub fn render_event(event: &CoreEvent) -> String {
                     format!("/approve {task}  /reject {task}")
                 }
             };
-            format!(
-                "\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}{tail}\n\n{hint}"
-            )
+            format!("\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}{tail}\n\n{hint}")
         }
 
         CoreEvent::AgentIdle {
@@ -60,10 +58,7 @@ pub fn render_event(event: &CoreEvent) -> String {
             format!("\u{1F7E2} *{task}* \\| {title} — {act}")
         }
 
-        CoreEvent::SessionStatusChanged {
-            task_name,
-            status,
-        } => {
+        CoreEvent::SessionStatusChanged { task_name, status } => {
             let icon = status_icon(status);
             let task = escape(task_name);
             let label = escape(status.label());
@@ -176,9 +171,7 @@ pub fn render_response(response: &CoreResponse) -> String {
             }
         }
 
-        CoreResponse::Confirmation { message } => {
-            escape(message)
-        }
+        CoreResponse::Confirmation { message } => escape(message),
 
         CoreResponse::ModeChanged {
             task_name,
@@ -215,7 +208,10 @@ pub fn render_response(response: &CoreResponse) -> String {
             lines.join("\n")
         }
 
-        CoreResponse::PluginDetail { plugin_id: _, detail } => {
+        CoreResponse::PluginDetail {
+            plugin_id: _,
+            detail,
+        } => {
             let name = escape(&detail.item.name);
             if detail.content.is_empty() {
                 format!("*{name}* — no content")
@@ -335,7 +331,7 @@ fn escape_html(s: &str) -> String {
 }
 
 fn markdown_to_telegram_html(md: &str) -> String {
-    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
+    use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -359,17 +355,15 @@ fn markdown_to_telegram_html(md: &str) -> String {
                 out.push_str(&format!("<a href=\"{}\">", escape_html(&dest_url)));
             }
             Event::End(TagEnd::Link) => out.push_str("</a>"),
-            Event::Start(Tag::CodeBlock(kind)) => {
-                match kind {
-                    CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
-                        out.push_str(&format!(
-                            "<pre><code class=\"language-{}\">",
-                            escape_html(&lang)
-                        ));
-                    }
-                    _ => out.push_str("<pre><code>"),
+            Event::Start(Tag::CodeBlock(kind)) => match kind {
+                CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
+                    out.push_str(&format!(
+                        "<pre><code class=\"language-{}\">",
+                        escape_html(&lang)
+                    ));
                 }
-            }
+                _ => out.push_str("<pre><code>"),
+            },
             Event::End(TagEnd::CodeBlock) => {
                 out.push_str("</code></pre>\n");
             }

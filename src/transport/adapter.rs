@@ -7,6 +7,7 @@ use crate::terminal::Terminal;
 
 use super::CoreEvent;
 
+#[allow(async_fn_in_trait)]
 pub trait Adapter: Send {
     fn name(&self) -> &str;
     async fn handle_events(
@@ -61,7 +62,7 @@ impl Adapter for LogAdapter {
 pub enum DaemonAdapter {
     Log(LogAdapter),
     #[cfg(feature = "telegram")]
-    Telegram(super::telegram::TelegramAdapter),
+    Telegram(Box<super::telegram::TelegramAdapter>),
 }
 
 impl Adapter for DaemonAdapter {
@@ -84,9 +85,7 @@ impl Adapter for DaemonAdapter {
         match self {
             Self::Log(a) => a.handle_events(events, core, terminal, store, tasks).await,
             #[cfg(feature = "telegram")]
-            Self::Telegram(a) => {
-                a.handle_events(events, core, terminal, store, tasks).await
-            }
+            Self::Telegram(a) => a.handle_events(events, core, terminal, store, tasks).await,
         }
     }
 
@@ -100,9 +99,7 @@ impl Adapter for DaemonAdapter {
         match self {
             Self::Log(a) => a.poll_and_handle(core, terminal, store, tasks).await,
             #[cfg(feature = "telegram")]
-            Self::Telegram(a) => {
-                a.poll_and_handle(core, terminal, store, tasks).await
-            }
+            Self::Telegram(a) => a.poll_and_handle(core, terminal, store, tasks).await,
         }
     }
 }

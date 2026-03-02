@@ -1,5 +1,5 @@
-use crate::model::Engine;
 use super::events::AgentEvent;
+use crate::model::Engine;
 
 pub fn parse_codex_event(line: &str) -> Option<AgentEvent> {
     let obj: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -157,62 +157,92 @@ mod tests {
 
     #[test]
     fn parse_session_meta() {
-        let line = r#"{"type":"session_meta","payload":{"id":"thread-123","model":"o3","cwd":"/tmp"}}"#;
+        let line =
+            r#"{"type":"session_meta","payload":{"id":"thread-123","model":"o3","cwd":"/tmp"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::SessionStarted {
-            engine: Engine::Codex,
-            session_id: "thread-123".to_string(),
-            model: Some("o3".to_string()),
-        });
+        assert_eq!(
+            event,
+            AgentEvent::SessionStarted {
+                engine: Engine::Codex,
+                session_id: "thread-123".to_string(),
+                model: Some("o3".to_string()),
+            }
+        );
     }
 
     #[test]
     fn parse_reasoning() {
-        let line = r#"{"type":"response_item","payload":{"type":"reasoning","content":"thinking..."}}"#;
+        let line =
+            r#"{"type":"response_item","payload":{"type":"reasoning","content":"thinking..."}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::Thinking { engine: Engine::Codex });
+        assert_eq!(
+            event,
+            AgentEvent::Thinking {
+                engine: Engine::Codex
+            }
+        );
     }
 
     #[test]
     fn parse_function_call() {
         let line = r#"{"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"call_123"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::Codex,
-            tool_id: "call_123".to_string(),
-            tool_name: "exec_command".to_string(),
-            tool_context: None,
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::Codex,
+                tool_id: "call_123".to_string(),
+                tool_name: "exec_command".to_string(),
+                tool_context: None,
+            }
+        );
     }
 
     #[test]
     fn parse_function_call_output() {
         let line = r#"{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_123","output":"file1\nfile2"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolCompleted {
-            engine: Engine::Codex,
-            tool_id: "call_123".to_string(),
-            is_error: false,
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolCompleted {
+                engine: Engine::Codex,
+                tool_id: "call_123".to_string(),
+                is_error: false,
+            }
+        );
     }
 
     #[test]
     fn parse_task_complete() {
         let line = r#"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"1","last_agent_message":"Done"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::Codex, response_text: Some("Done".into()) });
+        assert_eq!(
+            event,
+            AgentEvent::TurnComplete {
+                engine: Engine::Codex,
+                response_text: Some("Done".into())
+            }
+        );
     }
 
     #[test]
     fn parse_turn_aborted() {
-        let line = r#"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
+        let line =
+            r#"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::Codex, response_text: None });
+        assert_eq!(
+            event,
+            AgentEvent::TurnComplete {
+                engine: Engine::Codex,
+                response_text: None
+            }
+        );
     }
 
     #[test]
     fn parse_user_message() {
-        let line = r#"{"type":"event_msg","payload":{"type":"user_message","content":"fix the bug"}}"#;
+        let line =
+            r#"{"type":"event_msg","payload":{"type":"user_message","content":"fix the bug"}}"#;
         let event = parse_codex_event(line).unwrap();
         assert_eq!(event, AgentEvent::UserMessage);
     }
@@ -221,24 +251,34 @@ mod tests {
     fn parse_message_output() {
         let line = r#"{"type":"response_item","payload":{"type":"message","content":"Here is the result"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TextOutput { engine: Engine::Codex, text: "Here is the result".into() });
+        assert_eq!(
+            event,
+            AgentEvent::TextOutput {
+                engine: Engine::Codex,
+                text: "Here is the result".into()
+            }
+        );
     }
 
     #[test]
     fn parse_custom_tool_call() {
         let line = r#"{"type":"response_item","payload":{"type":"custom_tool_call","name":"my_tool","call_id":"call_456"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::Codex,
-            tool_id: "call_456".to_string(),
-            tool_name: "my_tool".to_string(),
-            tool_context: None,
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::Codex,
+                tool_id: "call_456".to_string(),
+                tool_name: "my_tool".to_string(),
+                tool_context: None,
+            }
+        );
     }
 
     #[test]
     fn parse_progress_events() {
-        let line = r#"{"type":"event_msg","payload":{"type":"token_count","input":100,"output":50}}"#;
+        let line =
+            r#"{"type":"event_msg","payload":{"type":"token_count","input":100,"output":50}}"#;
         assert_eq!(parse_codex_event(line).unwrap(), AgentEvent::Progress);
 
         let line = r#"{"type":"event_msg","payload":{"type":"agent_reasoning","content":"..."}}"#;

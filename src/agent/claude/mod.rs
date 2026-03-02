@@ -18,9 +18,7 @@ impl Default for ClaudeCode {
 }
 
 fn cwd_to_project_id(cwd: &Path) -> String {
-    cwd.to_string_lossy()
-        .replace('/', "-")
-        .replace('.', "-")
+    cwd.to_string_lossy().replace(['/', '.'], "-")
 }
 
 impl Agent for ClaudeCode {
@@ -72,10 +70,7 @@ mod tests {
     #[test]
     fn cwd_to_project_id_dots_in_path() {
         let cwd = Path::new("/Users/deevs/.local/share/chezmoi");
-        assert_eq!(
-            cwd_to_project_id(cwd),
-            "-Users-deevs--local-share-chezmoi"
-        );
+        assert_eq!(cwd_to_project_id(cwd), "-Users-deevs--local-share-chezmoi");
     }
 
     #[test]
@@ -86,9 +81,10 @@ mod tests {
         let path = agent.predict_jsonl_path(session_id, cwd).unwrap();
         assert!(path.to_string_lossy().contains(".claude/projects/"));
         assert!(path.to_string_lossy().contains("abc-123.jsonl"));
-        assert!(path
-            .to_string_lossy()
-            .contains("-Users-deevs-programming-agents"));
+        assert!(
+            path.to_string_lossy()
+                .contains("-Users-deevs-programming-agents")
+        );
     }
 
     #[test]

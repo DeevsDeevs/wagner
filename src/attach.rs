@@ -62,8 +62,7 @@ pub fn derive_task_name(detection: &AttachDetection) -> String {
 
 fn sanitize_branch_name(branch: &str) -> String {
     branch
-        .replace('/', "-")
-        .replace(' ', "-")
+        .replace(['/', ' '], "-")
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .collect()

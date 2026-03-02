@@ -1,10 +1,13 @@
-use wagner::{Agent, AgentChoice, WagnerError};
 use wagner::model::Engine;
+use wagner::{Agent, AgentChoice, WagnerError};
 
 #[test]
 fn test_agent_choice_claude() {
     let agent = AgentChoice::from_key("claude").unwrap();
-    assert_eq!(agent.launch_command("test-id"), "claude --session-id test-id");
+    assert_eq!(
+        agent.launch_command("test-id"),
+        "claude --session-id test-id"
+    );
     assert_eq!(agent.name(), "claude-code");
     assert_eq!(agent.engine(), Engine::ClaudeCode);
     assert!(matches!(agent, AgentChoice::Claude(_)));
@@ -46,5 +49,8 @@ fn test_codex_predict_jsonl_path_is_none() {
 #[test]
 fn test_claude_resume_command() {
     let agent = AgentChoice::from_key("claude").unwrap();
-    assert_eq!(agent.resume_command("my-session"), "claude --resume my-session");
+    assert_eq!(
+        agent.resume_command("my-session"),
+        "claude --resume my-session"
+    );
 }

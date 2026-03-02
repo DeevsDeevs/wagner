@@ -29,11 +29,7 @@ pub trait PluginProvider: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
     fn is_enabled(&self, config: &Config) -> bool;
-    fn list_items(
-        &self,
-        tasks_root: &Path,
-        task_name: Option<&str>,
-    ) -> Result<Vec<PluginItem>>;
+    fn list_items(&self, tasks_root: &Path, task_name: Option<&str>) -> Result<Vec<PluginItem>>;
     fn get_item(
         &self,
         tasks_root: &Path,
@@ -131,13 +127,10 @@ fn find_skill_source_dir(relative_path: &str) -> Option<std::path::PathBuf> {
             .map(|p| std::path::PathBuf::from(p).join(relative_path)),
     ];
 
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-
-    None
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|candidate| candidate.exists())
 }
 
 pub fn uninstall_skills(plugin: &dyn Plugin) -> Result<()> {

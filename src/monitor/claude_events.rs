@@ -1,5 +1,5 @@
-use crate::model::Engine;
 use super::events::AgentEvent;
+use crate::model::Engine;
 
 pub fn parse_claude_event(line: &str) -> Option<AgentEvent> {
     let obj: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -25,7 +25,10 @@ fn parse_user_event(obj: &serde_json::Value) -> Option<AgentEvent> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let is_error = block.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_error = block
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 if is_error {
                     let reason = extract_tool_result_text(block);
@@ -49,9 +52,7 @@ fn parse_user_event(obj: &serde_json::Value) -> Option<AgentEvent> {
 }
 
 fn parse_assistant_event(obj: &serde_json::Value) -> Option<AgentEvent> {
-    let stop_reason = obj
-        .pointer("/message/stop_reason")
-        .and_then(|v| v.as_str());
+    let stop_reason = obj.pointer("/message/stop_reason").and_then(|v| v.as_str());
     let content = obj.pointer("/message/content")?.as_array()?;
 
     match stop_reason {
@@ -214,55 +215,81 @@ mod tests {
     fn parse_thinking() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":null,"content":[{"type":"thinking","thinking":"let me think..."}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::Thinking { engine: Engine::ClaudeCode });
+        assert_eq!(
+            event,
+            AgentEvent::Thinking {
+                engine: Engine::ClaudeCode
+            }
+        );
     }
 
     #[test]
     fn parse_text_output() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":null,"content":[{"type":"text","text":"Here is my answer"}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TextOutput { engine: Engine::ClaudeCode, text: "Here is my answer".into() });
+        assert_eq!(
+            event,
+            AgentEvent::TextOutput {
+                engine: Engine::ClaudeCode,
+                text: "Here is my answer".into()
+            }
+        );
     }
 
     #[test]
     fn parse_turn_complete() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done!"}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::ClaudeCode, response_text: Some("Done!".into()) });
+        assert_eq!(
+            event,
+            AgentEvent::TurnComplete {
+                engine: Engine::ClaudeCode,
+                response_text: Some("Done!".into())
+            }
+        );
     }
 
     #[test]
     fn parse_tool_proposed() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_123","name":"Bash","input":{"command":"ls"}}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::ClaudeCode,
-            tool_id: "toolu_123".to_string(),
-            tool_name: "Bash".to_string(),
-            tool_context: Some("ls".to_string()),
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::ClaudeCode,
+                tool_id: "toolu_123".to_string(),
+                tool_name: "Bash".to_string(),
+                tool_context: Some("ls".to_string()),
+            }
+        );
     }
 
     #[test]
     fn parse_tool_completed() {
         let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","is_error":false,"content":"output here"}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolCompleted {
-            engine: Engine::ClaudeCode,
-            tool_id: "toolu_123".to_string(),
-            is_error: false,
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolCompleted {
+                engine: Engine::ClaudeCode,
+                tool_id: "toolu_123".to_string(),
+                is_error: false,
+            }
+        );
     }
 
     #[test]
     fn parse_tool_rejected() {
         let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_456","is_error":true,"content":"User rejected tool use"}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolRejected {
-            engine: Engine::ClaudeCode,
-            tool_id: "toolu_456".to_string(),
-            reason: "User rejected tool use".to_string(),
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolRejected {
+                engine: Engine::ClaudeCode,
+                tool_id: "toolu_456".to_string(),
+                reason: "User rejected tool use".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -287,24 +314,30 @@ mod tests {
     fn parse_tool_proposed_without_stop_reason() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":null,"content":[{"type":"tool_use","id":"toolu_789","name":"Read","input":{}}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::ClaudeCode,
-            tool_id: "toolu_789".to_string(),
-            tool_name: "Read".to_string(),
-            tool_context: None,
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::ClaudeCode,
+                tool_id: "toolu_789".to_string(),
+                tool_name: "Read".to_string(),
+                tool_context: None,
+            }
+        );
     }
 
     #[test]
     fn parse_ask_user_question_extracts_context() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_q1","name":"AskUserQuestion","input":{"questions":[{"question":"Which database should we use?","header":"DB","options":[{"label":"Postgres","description":"SQL"},{"label":"Mongo","description":"NoSQL"}],"multiSelect":false}]}}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::ClaudeCode,
-            tool_id: "toolu_q1".to_string(),
-            tool_name: "AskUserQuestion".to_string(),
-            tool_context: Some("Which database should we use?".to_string()),
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::ClaudeCode,
+                tool_id: "toolu_q1".to_string(),
+                tool_name: "AskUserQuestion".to_string(),
+                tool_context: Some("Which database should we use?".to_string()),
+            }
+        );
     }
 
     #[test]
@@ -328,12 +361,15 @@ mod tests {
     fn extract_context_read_with_file_path() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/src/main.rs"}}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::ClaudeCode,
-            tool_id: "t1".to_string(),
-            tool_name: "Read".to_string(),
-            tool_context: Some("/src/main.rs".to_string()),
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::ClaudeCode,
+                tool_id: "t1".to_string(),
+                tool_name: "Read".to_string(),
+                tool_context: Some("/src/main.rs".to_string()),
+            }
+        );
     }
 
     #[test]
@@ -352,12 +388,15 @@ mod tests {
     fn extract_context_unknown_tool_returns_none() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"WebSearch","input":{"query":"rust async"}}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolProposed {
-            engine: Engine::ClaudeCode,
-            tool_id: "t1".to_string(),
-            tool_name: "WebSearch".to_string(),
-            tool_context: None,
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::ClaudeCode,
+                tool_id: "t1".to_string(),
+                tool_name: "WebSearch".to_string(),
+                tool_context: None,
+            }
+        );
     }
 
     #[test]
@@ -382,10 +421,13 @@ mod tests {
     fn parse_tool_rejected_with_array_content() {
         let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_abc","is_error":true,"content":[{"type":"text","text":"Error: This command requires approval"}]}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::ToolRejected {
-            engine: Engine::ClaudeCode,
-            tool_id: "toolu_abc".to_string(),
-            reason: "Error: This command requires approval".to_string(),
-        });
+        assert_eq!(
+            event,
+            AgentEvent::ToolRejected {
+                engine: Engine::ClaudeCode,
+                tool_id: "toolu_abc".to_string(),
+                reason: "Error: This command requires approval".to_string(),
+            }
+        );
     }
 }

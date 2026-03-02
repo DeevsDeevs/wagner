@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::config::MonitorConfig;
-use crate::model::{Engine, Task, TrackedPane, PENDING_DISCOVERY};
+use crate::model::{Engine, PENDING_DISCOVERY, Task, TrackedPane};
 use crate::terminal::{PaneHandle, Terminal};
 
 use super::StatusMonitor;
@@ -154,11 +154,7 @@ fn resolve_jsonl_path(tracked: &TrackedPane, task: &Task) -> PathBuf {
 
     let repo = task.repos.iter().find(|r| r.name == tracked.repo_name);
     if let Some(repo) = repo {
-        let project_id = repo
-            .worktree
-            .to_string_lossy()
-            .replace('/', "-")
-            .replace('.', "-");
+        let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
         if let Ok(home) = std::env::var("HOME") {
             return PathBuf::from(home)
                 .join(".claude")
@@ -301,12 +297,12 @@ impl SessionWatcher {
                         .or_else(|| self.fallback.get_pane_status(session_name, id))
                 };
 
-                let has_waiting = pane_ids.iter().any(|id| {
-                    get_status(id).is_some_and(|s| s.is_waiting())
-                });
-                let has_active = pane_ids.iter().any(|id| {
-                    get_status(id).is_some_and(|s| s.is_active())
-                });
+                let has_waiting = pane_ids
+                    .iter()
+                    .any(|id| get_status(id).is_some_and(|s| s.is_waiting()));
+                let has_active = pane_ids
+                    .iter()
+                    .any(|id| get_status(id).is_some_and(|s| s.is_active()));
 
                 if has_waiting {
                     SessionAggregateStatus::NeedsAttention
@@ -335,10 +331,7 @@ impl SessionWatcher {
             .unwrap_or(0)
     }
 
-    pub fn get_pane_completed_steps(
-        &self,
-        pane_id: &str,
-    ) -> Vec<super::deriver::CompletedStep> {
+    pub fn get_pane_completed_steps(&self, pane_id: &str) -> Vec<super::deriver::CompletedStep> {
         self.pane_watchers
             .get(pane_id)
             .map(|w| w.deriver.completed_steps().to_vec())
@@ -370,8 +363,8 @@ impl SessionWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{RepoSource, TaskKind, TaskRepo};
     use crate::model::TrackedPane as ModelTrackedPane;
+    use crate::model::{RepoSource, TaskKind, TaskRepo};
     use chrono::Utc;
     use std::io::Write;
 
@@ -669,7 +662,11 @@ mod tests {
         watcher.track_task(&task, "wagner_test");
 
         let mock = crate::terminal::MockTerminal::new();
-        watcher.poll_active(&mock, "wagner_test", &[PaneHandle("%3".into(), "repo1".into())]);
+        watcher.poll_active(
+            &mock,
+            "wagner_test",
+            &[PaneHandle("%3".into(), "repo1".into())],
+        );
 
         let status = watcher.get_pane_status("wagner_test", "%3");
         assert!(status.is_some());
@@ -694,7 +691,11 @@ mod tests {
         assert!(status.is_active(), "SessionStarted → Active");
 
         // 2. User sends message
-        writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"fix the bug"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"user","message":{{"role":"user","content":"fix the bug"}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
         watcher.poll(1000); // stays Active
 
@@ -726,7 +727,10 @@ mod tests {
         writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"toolu_001","is_error":false,"content":"test passed"}}]}}}}"#).unwrap();
         file.flush().unwrap();
         watcher.poll(1000);
-        assert!(watcher.deriver.last_tool_name().is_none(), "Tool cleared after result");
+        assert!(
+            watcher.deriver.last_tool_name().is_none(),
+            "Tool cleared after result"
+        );
 
         // 7. Agent responds with text + end_turn
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","stop_reason":"end_turn","content":[{{"type":"text","text":"Fixed!"}}]}}}}"#).unwrap();
@@ -747,18 +751,30 @@ mod tests {
         );
 
         // 1. Session meta
-        writeln!(file, r#"{{"type":"session_meta","payload":{{"id":"thread-xyz","model":"o3","cwd":"/tmp"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"session_meta","payload":{{"id":"thread-xyz","model":"o3","cwd":"/tmp"}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
         let status = watcher.poll(1000).unwrap();
         assert!(status.is_active(), "SessionMeta → Active");
 
         // 2. User message
-        writeln!(file, r#"{{"type":"event_msg","payload":{{"type":"user_message","content":"fix bug"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"event_msg","payload":{{"type":"user_message","content":"fix bug"}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
         watcher.poll(1000);
 
         // 3. Reasoning
-        writeln!(file, r#"{{"type":"response_item","payload":{{"type":"reasoning","content":"thinking..."}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"response_item","payload":{{"type":"reasoning","content":"thinking..."}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
         watcher.poll(1000);
 
@@ -773,12 +789,20 @@ mod tests {
         watcher.poll(1000);
 
         // 6. Message output
-        writeln!(file, r#"{{"type":"response_item","payload":{{"type":"message","content":"Done fixing"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"response_item","payload":{{"type":"message","content":"Done fixing"}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
         watcher.poll(1000);
 
         // 7. Task complete
-        writeln!(file, r#"{{"type":"event_msg","payload":{{"type":"task_complete","turn_id":"1"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"event_msg","payload":{{"type":"task_complete","turn_id":"1"}}}}"#
+        )
+        .unwrap();
         file.flush().unwrap();
         let status = watcher.poll(1000).unwrap();
         assert!(status.is_idle(), "task_complete → Idle");
@@ -855,7 +879,11 @@ mod tests {
         // File appears with events
         {
             let mut file = File::create(&path).unwrap();
-            writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"hello"}}}}"#).unwrap();
+            writeln!(
+                file,
+                r#"{{"type":"user","message":{{"role":"user","content":"hello"}}}}"#
+            )
+            .unwrap();
             writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","stop_reason":"tool_use","content":[{{"type":"tool_use","id":"t1","name":"Read","input":{{}}}}]}}}}"#).unwrap();
         }
 
@@ -876,7 +904,11 @@ mod tests {
 
         // Create two JSONL files: one active, one idle
         let mut file_active = tempfile::NamedTempFile::new().unwrap();
-        writeln!(file_active, r#"{{"type":"user","message":{{"role":"user","content":"hi"}}}}"#).unwrap();
+        writeln!(
+            file_active,
+            r#"{{"type":"user","message":{{"role":"user","content":"hi"}}}}"#
+        )
+        .unwrap();
         file_active.flush().unwrap();
 
         let mut file_idle = tempfile::NamedTempFile::new().unwrap();
@@ -989,7 +1021,11 @@ mod tests {
         // Simulate a realistic multi-turn Claude session
         // Turn 1: user asks, agent responds with tool, tool runs, agent continues
         writeln!(file, r#"{{"type":"system","sessionId":"abc-123","message":{{"model":"claude-opus-4-20250514"}}}}"#).unwrap();
-        writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"fix the tests"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"user","message":{{"role":"user","content":"fix the tests"}}}}"#
+        )
+        .unwrap();
         writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","stop_reason":"tool_use","content":[{{"type":"thinking","thinking":"Let me check the test files"}},{{"type":"tool_use","id":"t1","name":"Bash","input":{{"command":"cargo test"}}}}]}}}}"#).unwrap();
         writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","is_error":false,"content":"test result: FAILED. 2 passed; 1 failed"}}]}}}}"#).unwrap();
         // Turn 2: agent reads a file, edits it
@@ -1014,7 +1050,11 @@ mod tests {
 
         let file_len = std::fs::metadata(file.path()).unwrap().len();
         assert_eq!(watcher.file_offset, file_len, "Should consume entire file");
-        assert!(watcher.last_status.is_idle(), "Session ends idle after end_turn, got: {:?}", watcher.last_status);
+        assert!(
+            watcher.last_status.is_idle(),
+            "Session ends idle after end_turn, got: {:?}",
+            watcher.last_status
+        );
     }
 
     #[test]
@@ -1022,7 +1062,11 @@ mod tests {
         let mut file = tempfile::NamedTempFile::new().unwrap();
         // Write 10 events
         for i in 0..10 {
-            writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"msg {i}"}}}}"#).unwrap();
+            writeln!(
+                file,
+                r#"{{"type":"user","message":{{"role":"user","content":"msg {i}"}}}}"#
+            )
+            .unwrap();
         }
         file.flush().unwrap();
 
@@ -1062,7 +1106,11 @@ mod tests {
         // Write initial data
         {
             let mut file = File::create(&path).unwrap();
-            writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"first session"}}}}"#).unwrap();
+            writeln!(
+                file,
+                r#"{{"type":"user","message":{{"role":"user","content":"first session"}}}}"#
+            )
+            .unwrap();
             writeln!(file, r#"{{"type":"assistant","message":{{"role":"assistant","stop_reason":"end_turn","content":[{{"type":"text","text":"done"}}]}}}}"#).unwrap();
         }
 
@@ -1081,7 +1129,11 @@ mod tests {
         // Truncate and write shorter content (simulating new session)
         {
             let mut file = File::create(&path).unwrap();
-            writeln!(file, r#"{{"type":"user","message":{{"role":"user","content":"new session"}}}}"#).unwrap();
+            writeln!(
+                file,
+                r#"{{"type":"user","message":{{"role":"user","content":"new session"}}}}"#
+            )
+            .unwrap();
         }
 
         // File is now shorter than offset — should reset and read new data
@@ -1115,7 +1167,11 @@ mod tests {
         watcher.track_task(&task, "wagner_ctx");
 
         let mock = crate::terminal::MockTerminal::new();
-        watcher.poll_active(&mock, "wagner_ctx", &[PaneHandle("%7".into(), "repo1".into())]);
+        watcher.poll_active(
+            &mock,
+            "wagner_ctx",
+            &[PaneHandle("%7".into(), "repo1".into())],
+        );
 
         let ctx = watcher.get_pane_context("%7");
         assert_eq!(ctx, Some("/src/main.rs".to_string()));

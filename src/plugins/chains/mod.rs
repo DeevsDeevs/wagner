@@ -69,9 +69,7 @@ impl PluginProvider for ChainsProvider {
 
         for chain in data.all_chains() {
             let latest = chain.latest_link();
-            let summary = latest
-                .and_then(|l| l.summary.clone())
-                .unwrap_or_default();
+            let summary = latest.and_then(|l| l.summary.clone()).unwrap_or_default();
 
             let mut metadata = HashMap::new();
             metadata.insert("link_count".into(), chain.link_count().to_string());
@@ -120,9 +118,7 @@ impl PluginProvider for ChainsProvider {
                     String::new()
                 };
 
-                let summary = latest
-                    .and_then(|l| l.summary.clone())
-                    .unwrap_or_default();
+                let summary = latest.and_then(|l| l.summary.clone()).unwrap_or_default();
 
                 return Ok(Some(PluginItemDetail {
                     item: PluginItem {

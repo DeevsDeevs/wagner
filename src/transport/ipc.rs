@@ -36,11 +36,9 @@ pub async fn run_ipc_server(listener: UnixListener, cmd_tx: IpcCommandTx) {
             Ok((stream, _)) => {
                 let tx = cmd_tx.clone();
                 tokio::spawn(async move {
-                    let result = tokio::time::timeout(
-                        CONNECTION_TIMEOUT,
-                        handle_connection(stream, tx),
-                    )
-                    .await;
+                    let result =
+                        tokio::time::timeout(CONNECTION_TIMEOUT, handle_connection(stream, tx))
+                            .await;
                     if result.is_err() {
                         tracing::warn!("IPC connection timed out");
                     }
@@ -291,8 +289,7 @@ mod tests {
         let sock = dir.path().join("test.sock");
         let listener = UnixListener::bind(&sock).unwrap();
 
-        let (cmd_tx, _cmd_rx) =
-            mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(8);
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(8);
 
         tokio::spawn(async move {
             run_ipc_server(listener, cmd_tx).await;
@@ -342,8 +339,7 @@ mod tests {
         let sock = dir.path().join("test.sock");
         let listener = UnixListener::bind(&sock).unwrap();
 
-        let (cmd_tx, _cmd_rx) =
-            mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(8);
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(8);
 
         tokio::spawn(async move {
             run_ipc_server(listener, cmd_tx).await;
@@ -392,8 +388,7 @@ mod tests {
         let sock = dir.path().join("test.sock");
         let listener = UnixListener::bind(&sock).unwrap();
 
-        let (cmd_tx, mut cmd_rx) =
-            mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(8);
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(8);
 
         tokio::spawn(async move {
             run_ipc_server(listener, cmd_tx).await;
@@ -441,7 +436,9 @@ mod tests {
                 let resp_len = u32::from_be_bytes(len_buf) as usize;
                 let mut buf = vec![0u8; resp_len];
                 stream.read_exact(&mut buf).unwrap();
-                serde_json::from_slice::<IpcResponse>(&buf).unwrap().response
+                serde_json::from_slice::<IpcResponse>(&buf)
+                    .unwrap()
+                    .response
             }),
             tokio::task::spawn_blocking(move || {
                 use std::io::{Read, Write};
@@ -465,7 +462,9 @@ mod tests {
                 let resp_len = u32::from_be_bytes(len_buf) as usize;
                 let mut buf = vec![0u8; resp_len];
                 stream.read_exact(&mut buf).unwrap();
-                serde_json::from_slice::<IpcResponse>(&buf).unwrap().response
+                serde_json::from_slice::<IpcResponse>(&buf)
+                    .unwrap()
+                    .response
             }),
         );
 

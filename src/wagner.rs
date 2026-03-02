@@ -7,7 +7,7 @@ use crate::plugins::builtin_plugins;
 use crate::store::Store;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use chrono::Utc;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::debug;
 use uuid::Uuid;
@@ -115,11 +115,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let session = self.terminal.create_session(name, &session_dir)?;
 
-        if let Ok(panes) = self.terminal.list_panes(&session) {
-            if let Some(pane) = panes.first() {
-                let first_repo = task.repos[0].clone();
-                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
-            }
+        if let Ok(panes) = self.terminal.list_panes(&session)
+            && let Some(pane) = panes.first()
+        {
+            let first_repo = task.repos[0].clone();
+            let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
         }
 
         if is_multi_repo {
@@ -189,11 +189,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let session = self.terminal.create_session(name, &session_dir)?;
 
-        if let Ok(panes) = self.terminal.list_panes(&session) {
-            if let Some(pane) = panes.first() {
-                let first_repo = task.repos[0].clone();
-                let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
-            }
+        if let Ok(panes) = self.terminal.list_panes(&session)
+            && let Some(pane) = panes.first()
+        {
+            let first_repo = task.repos[0].clone();
+            let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
         }
 
         if is_multi_repo {
@@ -261,7 +261,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(())
     }
 
-    fn fetch_and_update_branch(&self, repo: &PathBuf, branch: &str) {
+    fn fetch_and_update_branch(&self, repo: &Path, branch: &str) {
         let _ = Command::new("git")
             .args(["-C", &repo.to_string_lossy(), "fetch", "origin", branch])
             .output();
@@ -315,7 +315,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.store.delete_task(name)
     }
 
-    fn get_main_repo(&self, worktree: &PathBuf, source: &RepoSource) -> PathBuf {
+    fn get_main_repo(&self, worktree: &Path, source: &RepoSource) -> PathBuf {
         if worktree.exists() {
             let output = Command::new("git")
                 .args([
@@ -326,25 +326,25 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 ])
                 .output();
 
-            if let Ok(output) = output {
-                if output.status.success() {
-                    let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    let git_path = PathBuf::from(&git_dir);
+            if let Ok(output) = output
+                && output.status.success()
+            {
+                let git_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let git_path = PathBuf::from(&git_dir);
 
-                    let git_path = if git_path.is_relative() {
-                        worktree.join(&git_path).canonicalize().unwrap_or(git_path)
-                    } else {
-                        git_path
-                    };
+                let git_path = if git_path.is_relative() {
+                    worktree.join(&git_path).canonicalize().unwrap_or(git_path)
+                } else {
+                    git_path
+                };
 
-                    if git_path.join("HEAD").exists() {
-                        return git_path;
-                    }
-                    if let Some(parent) = git_path.parent() {
-                        if parent.join(".git").exists() || parent.join("HEAD").exists() {
-                            return parent.to_path_buf();
-                        }
-                    }
+                if git_path.join("HEAD").exists() {
+                    return git_path;
+                }
+                if let Some(parent) = git_path.parent()
+                    && (parent.join(".git").exists() || parent.join("HEAD").exists())
+                {
+                    return parent.to_path_buf();
                 }
             }
         }
@@ -355,7 +355,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         }
     }
 
-    pub fn add_pane(&self, task_name: &str, repo_name: Option<&str>, pane_name: Option<&str>) -> Result<PaneHandle> {
+    pub fn add_pane(
+        &self,
+        task_name: &str,
+        repo_name: Option<&str>,
+        pane_name: Option<&str>,
+    ) -> Result<PaneHandle> {
         let mut task = self.store.load_task(task_name)?;
         let session = SessionHandle(session_name_for_task(task_name));
 
@@ -367,15 +372,12 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         };
 
         let repo = match repo_name {
-            Some(name) => {
-                task.repos
-                    .iter()
-                    .find(|r| r.name == name)
-                    .ok_or_else(|| {
-                        WagnerError::RepoNotFound(name.to_string(), PathBuf::new())
-                    })?
-                    .clone()
-            }
+            Some(name) => task
+                .repos
+                .iter()
+                .find(|r| r.name == name)
+                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
+                .clone(),
             None => {
                 if task.repos.len() == 1 {
                     task.repos[0].clone()
@@ -542,7 +544,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.store.save_task(&task)
     }
 
-    fn create_worktree(&self, repo: &PathBuf, worktree: &PathBuf, branch: &str) -> Result<()> {
+    fn create_worktree(&self, repo: &Path, worktree: &Path, branch: &str) -> Result<()> {
         let start_point = self.get_default_ref(repo);
         let repo_str = repo.to_string_lossy();
         let worktree_str = worktree.to_string_lossy();
@@ -583,7 +585,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(())
     }
 
-    fn get_default_ref(&self, repo: &PathBuf) -> Option<String> {
+    fn get_default_ref(&self, repo: &Path) -> Option<String> {
         let is_bare = Command::new("git")
             .args([
                 "-C",
@@ -643,7 +645,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         None
     }
 
-    fn remove_worktree(&self, main_repo: &PathBuf, worktree: &PathBuf) -> Result<()> {
+    fn remove_worktree(&self, main_repo: &Path, worktree: &Path) -> Result<()> {
         let output = Command::new("git")
             .args([
                 "-C",
@@ -655,22 +657,20 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             ])
             .output()?;
 
-        if !output.status.success() {
-            if worktree.exists() {
-                std::fs::remove_dir_all(worktree)?;
-            }
+        if !output.status.success() && worktree.exists() {
+            std::fs::remove_dir_all(worktree)?;
         }
 
         Ok(())
     }
 
-    fn prune_worktrees(&self, main_repo: &PathBuf) {
+    fn prune_worktrees(&self, main_repo: &Path) {
         let _ = Command::new("git")
             .args(["-C", &main_repo.to_string_lossy(), "worktree", "prune"])
             .output();
     }
 
-    fn delete_branch(&self, main_repo: &PathBuf, branch: &str) -> Result<()> {
+    fn delete_branch(&self, main_repo: &Path, branch: &str) -> Result<()> {
         let output = Command::new("git")
             .args(["-C", &main_repo.to_string_lossy(), "branch", "-D", branch])
             .output()?;
@@ -712,7 +712,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(clone_path)
     }
 
-    fn fetch_repo(&self, repo_path: &PathBuf) -> Result<()> {
+    fn fetch_repo(&self, repo_path: &Path) -> Result<()> {
         let output = Command::new("git")
             .args([
                 "-C",
@@ -731,7 +731,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(())
     }
 
-    fn cleanup_partial_task(&self, task_path: &PathBuf, created_worktrees: &[(PathBuf, PathBuf)]) {
+    fn cleanup_partial_task(&self, task_path: &Path, created_worktrees: &[(PathBuf, PathBuf)]) {
         for (main_repo, worktree) in created_worktrees {
             let _ = self.remove_worktree(main_repo, worktree);
             self.prune_worktrees(main_repo);
@@ -805,7 +805,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(())
     }
 
-    fn ensure_gitignore_has_wagner(&self, repo_path: &PathBuf) -> Result<()> {
+    fn ensure_gitignore_has_wagner(&self, repo_path: &Path) -> Result<()> {
         let gitignore_path = repo_path.join(".gitignore");
 
         let content = if gitignore_path.exists() {
@@ -838,7 +838,7 @@ fn url_to_repo_path(url: &str) -> PathBuf {
     let url = url.strip_suffix(".git").unwrap_or(url);
 
     if let Some(rest) = url.strip_prefix("ssh://") {
-        let without_user = rest.split('@').last().unwrap_or(rest);
+        let without_user = rest.split('@').next_back().unwrap_or(rest);
         let normalized = if let Some(colon_pos) = without_user.find(':') {
             let after_colon = &without_user[colon_pos + 1..];
             if after_colon.starts_with(|c: char| c.is_ascii_digit()) {

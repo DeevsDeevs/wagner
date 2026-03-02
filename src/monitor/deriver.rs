@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
 
-use crate::model::Engine;
 use super::events::AgentEvent;
 use super::status::{
     Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, GenericActivity,
     PaneStatus, TerminalStatus, WaitReason,
 };
+use crate::model::Engine;
 
 #[derive(Debug, Clone)]
 pub struct CompletedStep {
@@ -108,7 +108,9 @@ impl StatusDeriver {
                 });
                 self.action_seq += 1;
             }
-            AgentEvent::ToolCompleted { tool_id, is_error, .. } => {
+            AgentEvent::ToolCompleted {
+                tool_id, is_error, ..
+            } => {
                 if let Some(pending) = self.pending_tool.take() {
                     if pending.tool_id == *tool_id {
                         self.completed_steps.push(CompletedStep {
@@ -159,15 +161,15 @@ impl StatusDeriver {
     }
 
     pub fn tick(&mut self) -> PaneStatus {
-        if let Some(ref pending) = self.pending_tool {
-            if pending.proposed_at.elapsed() >= self.approval_timeout {
-                let reason = if pending.tool_name == "AskUserQuestion" {
-                    WaitReason::Question
-                } else {
-                    WaitReason::Approval
-                };
-                self.state = DerivedState::Waiting(reason);
-            }
+        if let Some(ref pending) = self.pending_tool
+            && pending.proposed_at.elapsed() >= self.approval_timeout
+        {
+            let reason = if pending.tool_name == "AskUserQuestion" {
+                WaitReason::Question
+            } else {
+                WaitReason::Approval
+            };
+            self.state = DerivedState::Waiting(reason);
         }
 
         if self.state == DerivedState::Active
@@ -175,10 +177,10 @@ impl StatusDeriver {
         {
             self.state = DerivedState::Idle;
             self.pending_tool = None;
-            if self.response_text.is_none() {
-                if let Some(text) = self.accumulated_text.take() {
-                    self.response_text = Some(text);
-                }
+            if self.response_text.is_none()
+                && let Some(text) = self.accumulated_text.take()
+            {
+                self.response_text = Some(text);
             }
         }
 

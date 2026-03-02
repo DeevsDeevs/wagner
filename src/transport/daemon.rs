@@ -44,15 +44,15 @@ fn cleanup_stale_socket(sock_path: &Path) {
         return;
     }
     let pid_file = pid_path();
-    if pid_file.exists() {
-        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-            let alive = std::process::Command::new("kill")
-                .args(["-0", pid_str.trim()])
-                .status()
-                .is_ok_and(|s| s.success());
-            if alive {
-                return;
-            }
+    if pid_file.exists()
+        && let Ok(pid_str) = std::fs::read_to_string(&pid_file)
+    {
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid_str.trim()])
+            .status()
+            .is_ok_and(|s| s.success());
+        if alive {
+            return;
         }
     }
     let _ = std::fs::remove_file(sock_path);
@@ -84,7 +84,7 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
         #[cfg(feature = "telegram")]
         {
             if let Some(tg_config) = config.daemon.telegram.as_ref() {
-                DaemonAdapter::Telegram(super::telegram::TelegramAdapter::new(tg_config)?)
+                DaemonAdapter::Telegram(Box::new(super::telegram::TelegramAdapter::new(tg_config)?))
             } else {
                 info!("No Telegram configured, running with log transport");
                 DaemonAdapter::Log(LogAdapter)
@@ -130,8 +130,7 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
 
     info!(task_count = tasks.len(), "daemon started");
 
-    let (ipc_tx, mut ipc_rx) =
-        mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
+    let (ipc_tx, mut ipc_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
 
     tokio::spawn(async move {
         ipc::run_ipc_server(listener, ipc_tx).await;
@@ -171,7 +170,13 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
     let stop_events = vec![CoreEvent::DaemonStopping];
     let tasks = state.store.list_tasks().unwrap_or_default();
     let _ = adapter
-        .handle_events(&stop_events, &state.core, &state.terminal, &state.store, &tasks)
+        .handle_events(
+            &stop_events,
+            &state.core,
+            &state.terminal,
+            &state.store,
+            &tasks,
+        )
         .await;
 
     remove_pid_file();
@@ -180,10 +185,7 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
     Ok(())
 }
 
-async fn daemon_tick(
-    state: &mut DaemonState,
-    adapter: &mut DaemonAdapter,
-) -> crate::Result<()> {
+async fn daemon_tick(state: &mut DaemonState, adapter: &mut DaemonAdapter) -> crate::Result<()> {
     let tasks = state.store.list_tasks()?;
 
     let events = state.core.tick(&state.terminal, &tasks);

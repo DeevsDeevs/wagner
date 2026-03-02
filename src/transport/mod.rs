@@ -75,7 +75,9 @@ pub struct TaskSummary {
 #[serde(rename_all = "snake_case")]
 pub enum CoreCommand {
     ListTasks,
-    TaskStatus { task_name: String },
+    TaskStatus {
+        task_name: String,
+    },
     FullStatus,
     SendMessage {
         task_name: String,
@@ -132,6 +134,7 @@ pub enum CoreCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::type_complexity)]
 pub enum CoreResponse {
     TaskList {
         tasks: Vec<(TaskSummary, SessionAggregateStatus)>,
@@ -143,7 +146,11 @@ pub enum CoreResponse {
         panes: Vec<(String, PaneStatus)>,
     },
     FullStatus {
-        tasks: Vec<(TaskSummary, SessionAggregateStatus, Vec<(String, PaneStatus)>)>,
+        tasks: Vec<(
+            TaskSummary,
+            SessionAggregateStatus,
+            Vec<(String, PaneStatus)>,
+        )>,
     },
     Output {
         task_name: String,

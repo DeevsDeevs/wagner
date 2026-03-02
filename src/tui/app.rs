@@ -1,8 +1,8 @@
 use crate::agent::Agent;
+use crate::core::status_engine::StatusEngine;
 use crate::error::Result;
 use crate::git::{DiffFile, RepoStats};
 use crate::model::Task;
-use crate::core::status_engine::StatusEngine;
 use crate::monitor::{PaneStatus, SessionAggregateStatus, strip_ansi};
 use crate::plugins::PluginStates;
 use crate::plugins::chains::ChainsViewMode;
@@ -341,12 +341,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn get_diff_base(&self) -> String {
-        if let Some(task_name) = &self.selected_task {
-            if let Ok(task) = self.wagner.get_task(task_name) {
-                if let Some(base) = task.diff_base {
-                    return base;
-                }
-            }
+        if let Some(task_name) = &self.selected_task
+            && let Ok(task) = self.wagner.get_task(task_name)
+            && let Some(base) = task.diff_base
+        {
+            return base;
         }
         self.wagner.config.diff_base.clone()
     }
@@ -467,12 +466,11 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
 
                 for pane in &self.panes {
-                    if !self.pane_statuses.contains_key(&pane.0) {
-                        if let Some(status) =
+                    if !self.pane_statuses.contains_key(&pane.0)
+                        && let Some(status) =
                             self.status_engine.get_pane_status(&session_name, &pane.0)
-                        {
-                            self.pane_statuses.insert(pane.0.clone(), status.clone());
-                        }
+                    {
+                        self.pane_statuses.insert(pane.0.clone(), status.clone());
                     }
                 }
 
@@ -494,10 +492,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 continue;
             }
 
-            if let Some(last_check) = self.inactive_sessions.get(&task_name) {
-                if last_check.elapsed() < recheck_interval {
-                    continue;
-                }
+            if let Some(last_check) = self.inactive_sessions.get(&task_name)
+                && last_check.elapsed() < recheck_interval
+            {
+                continue;
             }
 
             if self
@@ -541,19 +539,18 @@ impl<T: Terminal, A: Agent> App<T, A> {
         if let Some(pane) = self.current_pane() {
             self.capture_pane(&pane);
         } else if let Some(task_name) = &self.selected_task.clone() {
-            if let Ok(task) = self.wagner.get_task(task_name) {
-                if !task.repos.is_empty() {
-                    let session_name = session_name_for_task(task_name);
-                    if let Ok(panes) = self
-                        .wagner
-                        .terminal
-                        .list_panes(&SessionHandle(session_name))
-                    {
-                        if let Some(first_pane) = panes.first() {
-                            self.selected_pane = Some(first_pane.0.clone());
-                            self.capture_pane(first_pane);
-                        }
-                    }
+            if let Ok(task) = self.wagner.get_task(task_name)
+                && !task.repos.is_empty()
+            {
+                let session_name = session_name_for_task(task_name);
+                if let Ok(panes) = self
+                    .wagner
+                    .terminal
+                    .list_panes(&SessionHandle(session_name))
+                    && let Some(first_pane) = panes.first()
+                {
+                    self.selected_pane = Some(first_pane.0.clone());
+                    self.capture_pane(first_pane);
                 }
             }
         } else {
@@ -664,22 +661,23 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let task = &self.tasks[task_idx];
         let is_expanded = self.expanded_tasks.contains(&task.name);
 
-        if is_expanded && !task.repos.is_empty() {
-            if let Some(repo_name) = &self.selected_repo {
-                let repo_idx = task
-                    .repos
-                    .iter()
-                    .position(|r| &r.name == repo_name)
-                    .unwrap_or(0);
-                if repo_idx > 0 {
-                    self.selected_repo = Some(task.repos[repo_idx - 1].name.clone());
-                    self.update_task_list_selection();
-                    return;
-                } else {
-                    self.selected_repo = None;
-                    self.update_task_list_selection();
-                    return;
-                }
+        if is_expanded
+            && !task.repos.is_empty()
+            && let Some(repo_name) = &self.selected_repo
+        {
+            let repo_idx = task
+                .repos
+                .iter()
+                .position(|r| &r.name == repo_name)
+                .unwrap_or(0);
+            if repo_idx > 0 {
+                self.selected_repo = Some(task.repos[repo_idx - 1].name.clone());
+                self.update_task_list_selection();
+                return;
+            } else {
+                self.selected_repo = None;
+                self.update_task_list_selection();
+                return;
             }
         }
 
@@ -855,17 +853,18 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     fn capture_pane(&mut self, pane: &PaneHandle) {
-        if let Some((w, h)) = self.terminal_view_size {
-            if w > 0 && h > 0 {
-                let needs_resize = self
-                    .last_resized_pane
-                    .as_ref()
-                    .map(|(id, lw, lh)| id != &pane.0 || *lw != w || *lh != h)
-                    .unwrap_or(true);
-                if needs_resize {
-                    let _ = self.wagner.terminal.resize_pane(pane, w, h);
-                    self.last_resized_pane = Some((pane.0.clone(), w, h));
-                }
+        if let Some((w, h)) = self.terminal_view_size
+            && w > 0
+            && h > 0
+        {
+            let needs_resize = self
+                .last_resized_pane
+                .as_ref()
+                .map(|(id, lw, lh)| id != &pane.0 || *lw != w || *lh != h)
+                .unwrap_or(true);
+            if needs_resize {
+                let _ = self.wagner.terminal.resize_pane(pane, w, h);
+                self.last_resized_pane = Some((pane.0.clone(), w, h));
             }
         }
 
@@ -1345,10 +1344,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn open_diff_view(&mut self) {
         let repo_name = self.selected_repo.clone();
-        if !self.open_diff_for_repo_impl(repo_name.as_deref(), true) {
-            if self.selected_task.is_none() {
-                self.set_status("No task selected");
-            }
+        if !self.open_diff_for_repo_impl(repo_name.as_deref(), true) && self.selected_task.is_none()
+        {
+            self.set_status("No task selected");
         }
     }
 
@@ -1526,13 +1524,13 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     self.plugin_states.chains.selected_chain_idx = None;
                 } else if self.plugin_states.chains.list_state.selected().is_none() {
                     self.plugin_states.chains.list_state.select(Some(0));
-                } else if let Some(idx) = self.plugin_states.chains.list_state.selected() {
-                    if idx >= total {
-                        self.plugin_states
-                            .chains
-                            .list_state
-                            .select(Some(total.saturating_sub(1)));
-                    }
+                } else if let Some(idx) = self.plugin_states.chains.list_state.selected()
+                    && idx >= total
+                {
+                    self.plugin_states
+                        .chains
+                        .list_state
+                        .select(Some(total.saturating_sub(1)));
                 }
             }
             Err(e) => {
@@ -1739,14 +1737,13 @@ impl<T: Terminal, A: Agent> App<T, A> {
             }
             ChainsViewMode::LinkList => {
                 self.focus = Focus::Terminal;
-                if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx {
-                    if let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx) {
-                        if content_row < chain.links.len() {
-                            self.plugin_states.chains.selected_link_idx = Some(content_row);
-                            if is_double_click {
-                                let _ = self.plugin_states.chains.select_link();
-                            }
-                        }
+                if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx
+                    && let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx)
+                    && content_row < chain.links.len()
+                {
+                    self.plugin_states.chains.selected_link_idx = Some(content_row);
+                    if is_double_click {
+                        let _ = self.plugin_states.chains.select_link();
                     }
                 }
             }
@@ -1754,14 +1751,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 let split_point = main_start + (main_width * 30 / 100);
                 if col < split_point {
                     self.focus = Focus::Terminal;
-                    if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx {
-                        if let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx)
-                        {
-                            if content_row < chain.links.len() {
-                                self.plugin_states.chains.selected_link_idx = Some(content_row);
-                                self.plugin_states.chains.reload_link_content();
-                            }
-                        }
+                    if let Some(chain_idx) = self.plugin_states.chains.selected_chain_idx
+                        && let Some(chain) = self.plugin_states.chains.get_chain_at_index(chain_idx)
+                        && content_row < chain.links.len()
+                    {
+                        self.plugin_states.chains.selected_link_idx = Some(content_row);
+                        self.plugin_states.chains.reload_link_content();
                     }
                 }
             }

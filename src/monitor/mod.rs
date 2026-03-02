@@ -1,8 +1,8 @@
 mod ansi;
 pub mod claude_events;
 pub mod codex_events;
-mod detector;
 pub mod deriver;
+mod detector;
 mod detectors;
 pub mod events;
 pub mod status;
@@ -93,14 +93,14 @@ impl StatusMonitor {
         let now = Instant::now();
         let background: Vec<_> = sessions
             .iter()
-            .filter(|(name, _)| active_session.map_or(true, |a| a != name))
+            .filter(|(name, _)| active_session.is_none_or(|a| a != name))
             .collect();
 
         if background.is_empty() {
             return;
         }
 
-        self.background_index = self.background_index % background.len();
+        self.background_index %= background.len();
         let (session_name, panes) = &background[self.background_index];
 
         let session = self
@@ -160,7 +160,7 @@ impl StatusMonitor {
                 (
                     output_changed && !is_first_poll,
                     tracked.last_change.elapsed(),
-                    tracked.agent_type.clone(),
+                    tracked.agent_type,
                     tracked.status.clone(),
                 )
             };
@@ -182,12 +182,12 @@ impl StatusMonitor {
 
             let session = self.sessions.get_mut(session_name).unwrap();
             let tracked = session.panes.get_mut(&pane_id).unwrap();
-            tracked.agent_type = agent_type.clone();
+            tracked.agent_type = agent_type;
 
             if new_status.is_active() && since_change > STUCK_THRESHOLD {
                 new_status = match &agent_type {
                     Some(at) => PaneStatus::Agent {
-                        agent_type: at.clone(),
+                        agent_type: *at,
                         status: AgentStatus::Idle,
                     },
                     None => PaneStatus::Terminal(TerminalStatus::Idle),
@@ -256,7 +256,7 @@ impl StatusMonitor {
                 let detector = self.detectors.iter().find(|d| &d.agent_type() == at);
                 match detector {
                     Some(d) => PaneStatus::Agent {
-                        agent_type: at.clone(),
+                        agent_type: *at,
                         status: d.detect_status(
                             raw_output,
                             clean_output,

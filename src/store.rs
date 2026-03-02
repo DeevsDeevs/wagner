@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::error::{Result, WagnerError};
 use crate::model::Task;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Store {
     config: Config,
@@ -38,9 +38,9 @@ impl Store {
         Ok(())
     }
 
-    pub fn register_attached(&self, name: &str, task_path: &PathBuf) -> Result<()> {
+    pub fn register_attached(&self, name: &str, task_path: &Path) -> Result<()> {
         let mut registry = self.load_attached_registry();
-        registry.insert(name.to_string(), task_path.clone());
+        registry.insert(name.to_string(), task_path.to_path_buf());
         self.save_attached_registry(&registry)
     }
 
@@ -99,13 +99,12 @@ impl Store {
 
                 if path.is_dir() {
                     let metadata_path = path.join(".wagner").join("task.json");
-                    if metadata_path.exists() {
-                        if let Ok(content) = std::fs::read_to_string(&metadata_path) {
-                            if let Ok(mut task) = serde_json::from_str::<Task>(&content) {
-                                task.fixup_pane_names();
-                                tasks.push(task);
-                            }
-                        }
+                    if metadata_path.exists()
+                        && let Ok(content) = std::fs::read_to_string(&metadata_path)
+                        && let Ok(mut task) = serde_json::from_str::<Task>(&content)
+                    {
+                        task.fixup_pane_names();
+                        tasks.push(task);
                     }
                 }
             }
@@ -114,14 +113,13 @@ impl Store {
         let registry = self.load_attached_registry();
         for (_name, attached_path) in registry {
             let metadata_path = attached_path.join(".wagner").join("task.json");
-            if metadata_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&metadata_path) {
-                    if let Ok(mut task) = serde_json::from_str::<Task>(&content) {
-                        task.fixup_pane_names();
-                        if !tasks.iter().any(|t| t.name == task.name) {
-                            tasks.push(task);
-                        }
-                    }
+            if metadata_path.exists()
+                && let Ok(content) = std::fs::read_to_string(&metadata_path)
+                && let Ok(mut task) = serde_json::from_str::<Task>(&content)
+            {
+                task.fixup_pane_names();
+                if !tasks.iter().any(|t| t.name == task.name) {
+                    tasks.push(task);
                 }
             }
         }

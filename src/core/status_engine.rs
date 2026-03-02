@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::config::MonitorConfig;
 use crate::model::Task;
+use crate::monitor::StatusMonitor;
 use crate::monitor::status::{AgentStatus, PaneStatus, SessionAggregateStatus, WaitReason};
 use crate::monitor::watcher::SessionWatcher;
-use crate::monitor::StatusMonitor;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::transport::{CoreEvent, ProgressStep};
 
@@ -38,11 +38,7 @@ impl StatusEngine {
 
     /// Poll all tracked sessions, detect status transitions with debounce.
     /// Returns debounced CoreEvents suitable for notification adapters.
-    pub fn poll_transitions(
-        &mut self,
-        terminal: &dyn Terminal,
-        tasks: &[Task],
-    ) -> Vec<CoreEvent> {
+    pub fn poll_transitions(&mut self, terminal: &dyn Terminal, tasks: &[Task]) -> Vec<CoreEvent> {
         // Track any new tasks
         for task in tasks {
             let session_name = session_name_for_task(&task.name);
@@ -53,10 +49,10 @@ impl StatusEngine {
         let mut all_sessions: Vec<(String, Vec<PaneHandle>)> = Vec::new();
         for task in tasks {
             let session_name = session_name_for_task(&task.name);
-            if terminal.session_exists(&task.name).unwrap_or(false) {
-                if let Ok(panes) = terminal.list_panes(&SessionHandle(session_name.clone())) {
-                    all_sessions.push((session_name, panes));
-                }
+            if terminal.session_exists(&task.name).unwrap_or(false)
+                && let Ok(panes) = terminal.list_panes(&SessionHandle(session_name.clone()))
+            {
+                all_sessions.push((session_name, panes));
             }
         }
 
@@ -148,24 +144,23 @@ impl StatusEngine {
         if last.as_ref() == Some(&current) {
             // Status unchanged — but the agent may have gone Idle→Active→Idle
             // within a single poll cycle. Check for a pending response.
-            if current.is_idle() {
-                if let Some(response) = self.watcher.take_pane_response(pane_id) {
-                    if !response.is_empty() {
-                        let pane_name = task
-                            .panes
-                            .iter()
-                            .find(|tp| tp.pane_id == *pane_id)
-                            .map(|tp| tp.name.clone())
-                            .unwrap_or_else(|| pane_title.clone());
-                        return Some(CoreEvent::AgentIdle {
-                            task_name: task.name.clone(),
-                            pane_name,
-                            pane_id: pane_id.clone(),
-                            output_tail: String::new(),
-                            response_text: Some(response),
-                        });
-                    }
-                }
+            if current.is_idle()
+                && let Some(response) = self.watcher.take_pane_response(pane_id)
+                && !response.is_empty()
+            {
+                let pane_name = task
+                    .panes
+                    .iter()
+                    .find(|tp| tp.pane_id == *pane_id)
+                    .map(|tp| tp.name.clone())
+                    .unwrap_or_else(|| pane_title.clone());
+                return Some(CoreEvent::AgentIdle {
+                    task_name: task.name.clone(),
+                    pane_name,
+                    pane_id: pane_id.clone(),
+                    output_tail: String::new(),
+                    response_text: Some(response),
+                });
             }
             return None;
         }
@@ -186,10 +181,7 @@ impl StatusEngine {
             .unwrap_or_else(|| pane_title.clone());
 
         if is_waiting && !was_waiting {
-            let output_tail = self
-                .watcher
-                .get_pane_context(pane_id)
-                .unwrap_or_default();
+            let output_tail = self.watcher.get_pane_context(pane_id).unwrap_or_default();
             let reason = match &current {
                 PaneStatus::Agent {
                     status: AgentStatus::Waiting(r),

@@ -79,38 +79,38 @@ impl ChainsState {
     }
 
     pub fn navigate_link_list_next(&mut self) {
-        if let Some(chain_idx) = self.selected_chain_idx {
-            if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                if chain.links.is_empty() {
-                    return;
-                }
-                let current = self.selected_link_idx.unwrap_or(0);
-                let next = if current + 1 >= chain.links.len() {
-                    0
-                } else {
-                    current + 1
-                };
-                self.selected_link_idx = Some(next);
-                self.reload_link_content_if_previewing();
+        if let Some(chain_idx) = self.selected_chain_idx
+            && let Some(chain) = self.get_chain_at_index(chain_idx)
+        {
+            if chain.links.is_empty() {
+                return;
             }
+            let current = self.selected_link_idx.unwrap_or(0);
+            let next = if current + 1 >= chain.links.len() {
+                0
+            } else {
+                current + 1
+            };
+            self.selected_link_idx = Some(next);
+            self.reload_link_content_if_previewing();
         }
     }
 
     pub fn navigate_link_list_prev(&mut self) {
-        if let Some(chain_idx) = self.selected_chain_idx {
-            if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                if chain.links.is_empty() {
-                    return;
-                }
-                let current = self.selected_link_idx.unwrap_or(0);
-                let prev = if current == 0 {
-                    chain.links.len().saturating_sub(1)
-                } else {
-                    current - 1
-                };
-                self.selected_link_idx = Some(prev);
-                self.reload_link_content_if_previewing();
+        if let Some(chain_idx) = self.selected_chain_idx
+            && let Some(chain) = self.get_chain_at_index(chain_idx)
+        {
+            if chain.links.is_empty() {
+                return;
             }
+            let current = self.selected_link_idx.unwrap_or(0);
+            let prev = if current == 0 {
+                chain.links.len().saturating_sub(1)
+            } else {
+                current - 1
+            };
+            self.selected_link_idx = Some(prev);
+            self.reload_link_content_if_previewing();
         }
     }
 
@@ -122,17 +122,14 @@ impl ChainsState {
     }
 
     pub fn reload_link_content(&mut self) {
-        if let Some(chain_idx) = self.selected_chain_idx {
-            if let Some(link_idx) = self.selected_link_idx {
-                if let Some(chain) = self.get_chain_at_index(chain_idx) {
-                    if let Some(link) = chain.links.get(link_idx) {
-                        if let Ok(content) = std::fs::read_to_string(&link.file_path) {
-                            self.link_content = content;
-                            self.link_scroll = 0;
-                        }
-                    }
-                }
-            }
+        if let Some(chain_idx) = self.selected_chain_idx
+            && let Some(link_idx) = self.selected_link_idx
+            && let Some(chain) = self.get_chain_at_index(chain_idx)
+            && let Some(link) = chain.links.get(link_idx)
+            && let Ok(content) = std::fs::read_to_string(&link.file_path)
+        {
+            self.link_content = content;
+            self.link_scroll = 0;
         }
     }
 
@@ -212,7 +209,7 @@ impl ChainsState {
             }
         };
 
-        let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
+        let chain_name = chain.name.split('/').next_back().unwrap_or(&chain.name);
         let local_chain_dir = source_path.join(".claude").join("chains").join(chain_name);
 
         if !local_chain_dir.exists() {
@@ -266,7 +263,7 @@ impl ChainsState {
             .ok_or("Chain not found")?
             .clone();
 
-        let chain_name = chain.name.split('/').last().unwrap_or(&chain.name);
+        let chain_name = chain.name.split('/').next_back().unwrap_or(&chain.name);
 
         let chain_dir = match &chain.source {
             ChainSource::TaskLocal(p) => p.join(".claude").join("chains").join(chain_name),
@@ -298,7 +295,7 @@ impl ChainsState {
             chain
                 .name
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap_or(&chain.name)
                 .to_string(),
         )

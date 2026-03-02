@@ -22,10 +22,10 @@ pub fn run(cli: Cli) -> Result<()> {
     if let Some(Commands::Daemon { command }) = cli.command {
         return cmd_daemon(command, config);
     }
-    if let Some(ref cmd) = cli.command {
-        if let Some(result) = try_ipc_command(cmd) {
-            return result;
-        }
+    if let Some(ref cmd) = cli.command
+        && let Some(result) = try_ipc_command(cmd)
+    {
+        return result;
     }
 
     let terminal = Tmux::with_config(config.terminal.clone());
@@ -298,7 +298,10 @@ fn cmd_rename_pane<T: Terminal, A: Agent>(
     let mut task = wagner.store.load_task(task_name)?;
     if task.rename_pane(old_name, new_name) {
         wagner.store.save_task(&task)?;
-        println!("Renamed pane '{}' to '{}' in task '{}'", old_name, new_name, task_name);
+        println!(
+            "Renamed pane '{}' to '{}' in task '{}'",
+            old_name, new_name, task_name
+        );
         Ok(())
     } else {
         Err(wagner::WagnerError::Terminal(format!(
@@ -510,49 +513,49 @@ fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
                 ])
                 .output();
 
-            if let Ok(output) = output {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines() {
-                        if let Some(wt_path) = line.strip_prefix("worktree ") {
-                            let wt_path = std::path::PathBuf::from(wt_path);
+            if let Ok(output) = output
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if let Some(wt_path) = line.strip_prefix("worktree ") {
+                        let wt_path = std::path::PathBuf::from(wt_path);
 
-                            if wt_path.starts_with(&config.tasks_root) {
-                                if let Some(task_dir) = wt_path.parent() {
-                                    let task_json = task_dir.join(".wagner").join("task.json");
-                                    if !task_json.exists() && task_dir != config.tasks_root {
-                                        found_issues = true;
-                                        println!(
-                                            "  Orphaned worktree in {}/{}: {}",
-                                            ws_name,
-                                            repo_name,
-                                            wt_path.display()
-                                        );
+                        if wt_path.starts_with(&config.tasks_root)
+                            && let Some(task_dir) = wt_path.parent()
+                        {
+                            let task_json = task_dir.join(".wagner").join("task.json");
+                            if !task_json.exists() && task_dir != config.tasks_root {
+                                found_issues = true;
+                                println!(
+                                    "  Orphaned worktree in {}/{}: {}",
+                                    ws_name,
+                                    repo_name,
+                                    wt_path.display()
+                                );
 
-                                        if !dry_run {
-                                            let _ = std::process::Command::new("git")
-                                                .args([
-                                                    "-C",
-                                                    &repo_path.to_string_lossy(),
-                                                    "worktree",
-                                                    "remove",
-                                                    "--force",
-                                                    &wt_path.to_string_lossy(),
-                                                ])
-                                                .output();
-                                            println!("    -> Removed");
-                                        }
-                                    }
+                                if !dry_run {
+                                    let _ = std::process::Command::new("git")
+                                        .args([
+                                            "-C",
+                                            &repo_path.to_string_lossy(),
+                                            "worktree",
+                                            "remove",
+                                            "--force",
+                                            &wt_path.to_string_lossy(),
+                                        ])
+                                        .output();
+                                    println!("    -> Removed");
                                 }
                             }
                         }
                     }
+                }
 
-                    if !dry_run {
-                        let _ = std::process::Command::new("git")
-                            .args(["-C", &repo_path.to_string_lossy(), "worktree", "prune"])
-                            .output();
-                    }
+                if !dry_run {
+                    let _ = std::process::Command::new("git")
+                        .args(["-C", &repo_path.to_string_lossy(), "worktree", "prune"])
+                        .output();
                 }
             }
         }
@@ -570,44 +573,41 @@ fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
 }
 
 fn cleanup_orphaned_dir(path: &std::path::Path) {
-    for entry in std::fs::read_dir(path).into_iter().flatten() {
-        if let Ok(entry) = entry {
-            let subpath = entry.path();
-            let git_file = subpath.join(".git");
-            if subpath.is_dir() && git_file.exists() && git_file.is_file() {
-                if let Ok(content) = std::fs::read_to_string(&git_file) {
-                    if let Some(gitdir) = content.strip_prefix("gitdir: ") {
-                        let gitdir = gitdir.trim();
-                        let gitdir_path = std::path::PathBuf::from(gitdir);
-                        // gitdir: /path/to/repo/.git/worktrees/name (regular)
-                        // gitdir: /path/to/bare-repo/worktrees/name (bare)
-                        if let Some(worktrees_dir) = gitdir_path.parent() {
-                            if let Some(git_or_repo) = worktrees_dir.parent() {
-                                let main_repo = if git_or_repo
-                                    .file_name()
-                                    .map(|n| n == ".git")
-                                    .unwrap_or(false)
-                                {
-                                    git_or_repo.parent().map(|p| p.to_path_buf())
-                                } else {
-                                    Some(git_or_repo.to_path_buf())
-                                };
+    for entry in std::fs::read_dir(path).into_iter().flatten().flatten() {
+        let subpath = entry.path();
+        let git_file = subpath.join(".git");
+        if subpath.is_dir()
+            && git_file.exists()
+            && git_file.is_file()
+            && let Ok(content) = std::fs::read_to_string(&git_file)
+            && let Some(gitdir) = content.strip_prefix("gitdir: ")
+        {
+            let gitdir = gitdir.trim();
+            let gitdir_path = std::path::PathBuf::from(gitdir);
+            if let Some(worktrees_dir) = gitdir_path.parent()
+                && let Some(git_or_repo) = worktrees_dir.parent()
+            {
+                let main_repo = if git_or_repo
+                    .file_name()
+                    .map(|n| n == ".git")
+                    .unwrap_or(false)
+                {
+                    git_or_repo.parent().map(|p| p.to_path_buf())
+                } else {
+                    Some(git_or_repo.to_path_buf())
+                };
 
-                                if let Some(main_repo) = main_repo {
-                                    let _ = std::process::Command::new("git")
-                                        .args([
-                                            "-C",
-                                            &main_repo.to_string_lossy(),
-                                            "worktree",
-                                            "remove",
-                                            "--force",
-                                            &subpath.to_string_lossy(),
-                                        ])
-                                        .output();
-                                }
-                            }
-                        }
-                    }
+                if let Some(main_repo) = main_repo {
+                    let _ = std::process::Command::new("git")
+                        .args([
+                            "-C",
+                            &main_repo.to_string_lossy(),
+                            "worktree",
+                            "remove",
+                            "--force",
+                            &subpath.to_string_lossy(),
+                        ])
+                        .output();
                 }
             }
         }
@@ -1001,8 +1001,6 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
 }
 
 fn try_ipc_command(cmd: &Commands) -> Option<Result<()>> {
-    use wagner::transport::{CoreCommand, CoreResponse, ipc};
-
     match cmd {
         Commands::Status { task } => Some(cmd_ipc_status(task.clone())),
         Commands::Send {
@@ -1108,7 +1106,9 @@ fn print_response(response: &wagner::transport::CoreResponse) {
                 );
             }
         }
-        CoreResponse::Status { task_name, panes, .. } => {
+        CoreResponse::Status {
+            task_name, panes, ..
+        } => {
             println!("{}", task_name);
             if panes.is_empty() {
                 println!("  (no panes)");

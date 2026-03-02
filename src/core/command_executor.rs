@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::config::Config;
-use crate::model::{Engine, Task, TrackedPane, PENDING_DISCOVERY};
+use crate::model::{Engine, PENDING_DISCOVERY, Task, TrackedPane};
 use crate::monitor::status::PaneStatus;
 use crate::monitor::strip_ansi;
 use crate::plugins::PluginProvider;
@@ -127,7 +127,15 @@ pub fn execute(
             message,
         } => {
             let session_name = session_name_for_task(task_name);
-            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
+            match resolve_pane(
+                terminal,
+                engine,
+                &session_name,
+                tasks,
+                task_name,
+                pane_name.as_deref(),
+                None,
+            ) {
                 Some(pane) => {
                     if let Err(e) = terminal.send_keys(&pane, message) {
                         return CoreResponse::Error {
@@ -154,7 +162,15 @@ pub fn execute(
             }
 
             let session_name = session_name_for_task(task_name);
-            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), Some(true)) {
+            match resolve_pane(
+                terminal,
+                engine,
+                &session_name,
+                tasks,
+                task_name,
+                pane_name.as_deref(),
+                Some(true),
+            ) {
                 Some(pane) => {
                     if let Err(e) = terminal.send_key(&pane, "y") {
                         return CoreResponse::Error {
@@ -182,7 +198,15 @@ pub fn execute(
             pane_name,
         } => {
             let session_name = session_name_for_task(task_name);
-            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), Some(true)) {
+            match resolve_pane(
+                terminal,
+                engine,
+                &session_name,
+                tasks,
+                task_name,
+                pane_name.as_deref(),
+                Some(true),
+            ) {
                 Some(pane) => {
                     if let Err(e) = terminal.send_key(&pane, "n") {
                         return CoreResponse::Error {
@@ -214,17 +238,25 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("Task '{task_name}' not found"),
-                    }
+                    };
                 }
             };
 
             let session_name = session_name_for_task(task_name);
-            let target_pane = match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
+            let target_pane = match resolve_pane(
+                terminal,
+                engine,
+                &session_name,
+                tasks,
+                task_name,
+                pane_name.as_deref(),
+                None,
+            ) {
                 Some(p) => p,
                 None => {
                     return CoreResponse::Error {
                         message: format!("No pane found for task '{task_name}'"),
-                    }
+                    };
                 }
             };
 
@@ -233,7 +265,7 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("No session data for pane in '{task_name}'"),
-                    }
+                    };
                 }
             };
 
@@ -270,7 +302,15 @@ pub fn execute(
         } => {
             let session_name = session_name_for_task(task_name);
             let capture_lines = lines.unwrap_or(config.daemon.default_output_lines);
-            match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
+            match resolve_pane(
+                terminal,
+                engine,
+                &session_name,
+                tasks,
+                task_name,
+                pane_name.as_deref(),
+                None,
+            ) {
                 Some(pane) => {
                     let content = capture_tail(terminal, &pane, capture_lines);
                     let resolved_name = pane_name.clone().unwrap_or_else(|| {
@@ -314,10 +354,7 @@ pub fn execute(
             }
         }
 
-        CoreCommand::PluginGet {
-            plugin_id,
-            item_id,
-        } => {
+        CoreCommand::PluginGet { plugin_id, item_id } => {
             let provider = plugins.iter().find(|p| p.id() == plugin_id);
             match provider {
                 Some(p) => match p.get_item(&config.tasks_root, None, item_id) {
@@ -349,8 +386,10 @@ pub fn execute(
                 Some("claude") | None => Engine::ClaudeCode,
                 Some(other) => {
                     return CoreResponse::Error {
-                        message: format!("Unknown agent type '{other}'. Use claude, codex, or terminal."),
-                    }
+                        message: format!(
+                            "Unknown agent type '{other}'. Use claude, codex, or terminal."
+                        ),
+                    };
                 }
             };
 
@@ -359,7 +398,7 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("Task '{task_name}' not found"),
-                    }
+                    };
                 }
             };
 
@@ -368,13 +407,11 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("Task '{task_name}' has no repos"),
-                    }
+                    };
                 }
             };
 
-            let session_alive = terminal
-                .session_exists(task_name)
-                .unwrap_or(false);
+            let session_alive = terminal.session_exists(task_name).unwrap_or(false);
 
             let session = if session_alive {
                 SessionHandle(session_name_for_task(task_name))
@@ -384,7 +421,7 @@ pub fn execute(
                     Err(e) => {
                         return CoreResponse::Error {
                             message: format!("Failed to create session: {e}"),
-                        }
+                        };
                     }
                 }
             };
@@ -395,7 +432,7 @@ pub fn execute(
                     Err(e) => {
                         return CoreResponse::Error {
                             message: format!("Failed to create pane: {e}"),
-                        }
+                        };
                     }
                 }
             } else {
@@ -404,7 +441,7 @@ pub fn execute(
                     _ => {
                         return CoreResponse::Error {
                             message: "Session created but no panes found".into(),
-                        }
+                        };
                     }
                 }
             };
@@ -439,9 +476,7 @@ pub fn execute(
 
             let jsonl_path = match engine_type {
                 Engine::ClaudeCode => {
-                    let project_id = repo.worktree.to_string_lossy()
-                        .replace('/', "-")
-                        .replace('.', "-");
+                    let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
                     if let Ok(home) = std::env::var("HOME") {
                         PathBuf::from(home)
                             .join(".claude")
@@ -492,7 +527,7 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("Task '{task_name}' not found"),
-                    }
+                    };
                 }
             };
 
@@ -524,7 +559,7 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("Task '{task_name}' not found"),
-                    }
+                    };
                 }
             };
 
@@ -533,7 +568,7 @@ pub fn execute(
                 None => {
                     return CoreResponse::Error {
                         message: format!("Pane '{pane_name}' not found in task '{task_name}'"),
-                    }
+                    };
                 }
             };
 
@@ -579,11 +614,7 @@ pub fn execute(
     }
 }
 
-fn smart_approve(
-    terminal: &dyn Terminal,
-    engine: &StatusEngine,
-    tasks: &[Task],
-) -> CoreResponse {
+fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task]) -> CoreResponse {
     let mut waiting_panes: Vec<(String, String, String)> = vec![];
 
     for task in tasks {
@@ -654,13 +685,13 @@ fn resolve_pane(
     let task = tasks.iter().find(|t| t.name == task_name);
 
     if let Some(name) = pane_name {
-        if let Some(task) = task {
-            if let Some(tracked) = task.find_pane_by_name(name) {
-                let panes = terminal
-                    .list_panes(&SessionHandle(session_name.to_string()))
-                    .unwrap_or_default();
-                return panes.into_iter().find(|p| p.0 == tracked.pane_id);
-            }
+        if let Some(task) = task
+            && let Some(tracked) = task.find_pane_by_name(name)
+        {
+            let panes = terminal
+                .list_panes(&SessionHandle(session_name.to_string()))
+                .unwrap_or_default();
+            return panes.into_iter().find(|p| p.0 == tracked.pane_id);
         }
         return None;
     }
@@ -671,10 +702,10 @@ fn resolve_pane(
 
     if want_waiting == Some(true) {
         for pane in &panes {
-            if let Some(status) = engine.get_pane_status(session_name, &pane.0) {
-                if status.is_waiting() {
-                    return Some(pane.clone());
-                }
+            if let Some(status) = engine.get_pane_status(session_name, &pane.0)
+                && status.is_waiting()
+            {
+                return Some(pane.clone());
             }
         }
     }

@@ -22,7 +22,7 @@ fn matches_key_with_modifiers(code: KeyCode, modifiers: KeyModifiers, binding: &
             return false;
         }
         if let KeyCode::Char(c) = code {
-            return key.len() == 1 && key.chars().next() == Some(c);
+            return key.len() == 1 && key.starts_with(c);
         }
         return false;
     }
@@ -33,7 +33,7 @@ fn matches_key_with_modifiers(code: KeyCode, modifiers: KeyModifiers, binding: &
         KeyCode::Enter => binding == "Enter",
         KeyCode::Char(c) => {
             if binding.len() == 1 {
-                binding.chars().next() == Some(c)
+                binding.starts_with(c)
             } else {
                 false
             }
@@ -183,10 +183,10 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             }
         },
         MouseEventKind::Up(MouseButton::Left) => {
-            if let Some(row) = app.pending_select_row.take() {
-                if app.input_mode != InputMode::VisualSelect {
-                    app.handle_click(mouse.column, row, area);
-                }
+            if let Some(row) = app.pending_select_row.take()
+                && app.input_mode != InputMode::VisualSelect
+            {
+                app.handle_click(mouse.column, row, area);
             }
             app.dragging_sidebar = false;
         }
@@ -312,20 +312,21 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     // Ctrl+E sends Escape to pane, Ctrl+T sends Tab to pane (when in terminal focus)
-    if app.focus == Focus::Terminal && modifiers.contains(KeyModifiers::CONTROL) {
-        if let KeyCode::Char(c) = code {
-            let key_to_send = match c {
-                'e' => Some("Escape"),
-                't' => Some("Tab"),
-                _ => None,
-            };
-            if let Some(key) = key_to_send {
-                if let Some(pane) = app.current_pane() {
-                    let _ = app.wagner.terminal.send_key(&pane, key);
-                    let _ = app.refresh_terminal_output();
-                }
-                return;
+    if app.focus == Focus::Terminal
+        && modifiers.contains(KeyModifiers::CONTROL)
+        && let KeyCode::Char(c) = code
+    {
+        let key_to_send = match c {
+            'e' => Some("Escape"),
+            't' => Some("Tab"),
+            _ => None,
+        };
+        if let Some(key) = key_to_send {
+            if let Some(pane) = app.current_pane() {
+                let _ = app.wagner.terminal.send_key(&pane, key);
+                let _ = app.refresh_terminal_output();
             }
+            return;
         }
     }
 
@@ -348,13 +349,12 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         return;
     }
 
-    if let KeyCode::Char(c) = code {
-        if let Some(n) = c.to_digit(10) {
-            if n >= 1 && n <= 9 {
-                app.select_pane((n - 1) as usize);
-                return;
-            }
-        }
+    if let KeyCode::Char(c) = code
+        && let Some(n) = c.to_digit(10)
+        && (1..=9).contains(&n)
+    {
+        app.select_pane((n - 1) as usize);
+        return;
     }
 
     if matches_key(code, &kb.toggle_sidebar) {
@@ -564,10 +564,10 @@ fn handle_diff_file_list_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: 
         app.diff_prev_file();
     } else if matches_key(code, &kb.scroll_top) || code == KeyCode::Home {
         app.diff_file_index = 0;
-    } else if matches_key(code, &kb.scroll_bottom) || code == KeyCode::End {
-        if !app.diff_files.is_empty() {
-            app.diff_file_index = app.diff_files.len() - 1;
-        }
+    } else if (matches_key(code, &kb.scroll_bottom) || code == KeyCode::End)
+        && !app.diff_files.is_empty()
+    {
+        app.diff_file_index = app.diff_files.len() - 1;
     }
 }
 
