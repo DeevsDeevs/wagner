@@ -117,6 +117,60 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
             }))
         }
 
+        "/add" => {
+            if rest.is_empty() {
+                return Some(ParsedCommand::UsageError {
+                    usage: "/add <task> [name]",
+                });
+            }
+            let (task_name, pane_name) = split_task_pane(rest);
+            Some(ParsedCommand::Core(CoreCommand::AddPane {
+                task_name,
+                pane_name,
+                agent: None,
+            }))
+        }
+
+        "/rename" => {
+            if rest.is_empty() {
+                return Some(ParsedCommand::UsageError {
+                    usage: "/rename <task> <old> <new>",
+                });
+            }
+            let mut parts = rest.split_whitespace();
+            let task_name = parts.next().unwrap_or("").to_string();
+            let old_name = parts.next().map(String::from);
+            let new_name = parts.next().map(String::from);
+            match (old_name, new_name) {
+                (Some(old), Some(new)) => Some(ParsedCommand::Core(CoreCommand::RenamePane {
+                    task_name,
+                    pane_name: old,
+                    new_name: new,
+                })),
+                _ => Some(ParsedCommand::UsageError {
+                    usage: "/rename <task> <old> <new>",
+                }),
+            }
+        }
+
+        "/kill" => {
+            if rest.is_empty() {
+                return Some(ParsedCommand::UsageError {
+                    usage: "/kill <task> <pane>",
+                });
+            }
+            let (task_name, pane_name) = split_task_pane(rest);
+            match pane_name {
+                Some(pane) => Some(ParsedCommand::Core(CoreCommand::KillPane {
+                    task_name,
+                    pane_name: pane,
+                })),
+                None => Some(ParsedCommand::UsageError {
+                    usage: "/kill <task> <pane>",
+                }),
+            }
+        }
+
         "/focus" => {
             if rest.is_empty() {
                 return Some(ParsedCommand::UsageError {
@@ -360,6 +414,104 @@ mod tests {
     #[test]
     fn parse_reject_no_task() {
         match parse_command("/reject") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_add() {
+        match parse_command("/add my-task") {
+            Some(ParsedCommand::Core(CoreCommand::AddPane {
+                task_name,
+                pane_name,
+                agent,
+            })) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_name, None);
+                assert_eq!(agent, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        match parse_command("/add my-task custom-name") {
+            Some(ParsedCommand::Core(CoreCommand::AddPane {
+                task_name,
+                pane_name,
+                agent,
+            })) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_name, Some("custom-name".into()));
+                assert_eq!(agent, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_add_no_task() {
+        match parse_command("/add") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rename() {
+        match parse_command("/rename my-task api backend") {
+            Some(ParsedCommand::Core(CoreCommand::RenamePane {
+                task_name,
+                pane_name,
+                new_name,
+            })) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_name, "api");
+                assert_eq!(new_name, "backend");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rename_missing_args() {
+        match parse_command("/rename my-task api") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        match parse_command("/rename my-task") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        match parse_command("/rename") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_kill() {
+        match parse_command("/kill my-task api") {
+            Some(ParsedCommand::Core(CoreCommand::KillPane {
+                task_name,
+                pane_name,
+            })) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_name, "api");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_kill_missing_pane() {
+        match parse_command("/kill my-task") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        match parse_command("/kill") {
             Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }

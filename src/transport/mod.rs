@@ -83,6 +83,21 @@ pub enum CoreCommand {
         plugin_id: String,
         item_id: String,
     },
+    AddPane {
+        task_name: String,
+        pane_name: Option<String>,
+        #[serde(default)]
+        agent: Option<String>,
+    },
+    RenamePane {
+        task_name: String,
+        pane_name: String,
+        new_name: String,
+    },
+    KillPane {
+        task_name: String,
+        pane_name: String,
+    },
     Help,
 }
 
@@ -192,6 +207,30 @@ mod tests {
             CoreCommand::PluginGet {
                 plugin_id: "chains".into(),
                 item_id: "link-1".into(),
+            },
+            CoreCommand::AddPane {
+                task_name: "t".into(),
+                pane_name: Some("api".into()),
+                agent: None,
+            },
+            CoreCommand::AddPane {
+                task_name: "t".into(),
+                pane_name: None,
+                agent: Some("codex".into()),
+            },
+            CoreCommand::AddPane {
+                task_name: "t".into(),
+                pane_name: None,
+                agent: Some("terminal".into()),
+            },
+            CoreCommand::RenamePane {
+                task_name: "t".into(),
+                pane_name: "old".into(),
+                new_name: "new".into(),
+            },
+            CoreCommand::KillPane {
+                task_name: "t".into(),
+                pane_name: "api".into(),
             },
             CoreCommand::Help,
         ];

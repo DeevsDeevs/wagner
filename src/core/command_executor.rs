@@ -1,5 +1,9 @@
+use chrono::Utc;
+use std::path::PathBuf;
+use uuid::Uuid;
+
 use crate::config::Config;
-use crate::model::Task;
+use crate::model::{Engine, Task, TrackedPane, PENDING_DISCOVERY};
 use crate::monitor::status::PaneStatus;
 use crate::monitor::strip_ansi;
 use crate::plugins::PluginProvider;
@@ -11,7 +15,7 @@ use super::status_engine::StatusEngine;
 
 pub fn execute(
     terminal: &dyn Terminal,
-    _store: &Store,
+    store: &Store,
     engine: &StatusEngine,
     config: &Config,
     plugins: &[Box<dyn PluginProvider>],
@@ -328,6 +332,208 @@ pub fn execute(
                 None => CoreResponse::Error {
                     message: format!("Plugin '{plugin_id}' not found"),
                 },
+            }
+        }
+
+        CoreCommand::AddPane {
+            task_name,
+            pane_name,
+            agent,
+        } => {
+            let engine_type = match agent.as_deref() {
+                Some("codex") => Engine::Codex,
+                Some("terminal") => Engine::Terminal,
+                Some("claude") | None => Engine::ClaudeCode,
+                Some(other) => {
+                    return CoreResponse::Error {
+                        message: format!("Unknown agent type '{other}'. Use claude, codex, or terminal."),
+                    }
+                }
+            };
+
+            let mut task = match tasks.iter().find(|t| t.name == *task_name) {
+                Some(t) => t.clone(),
+                None => {
+                    return CoreResponse::Error {
+                        message: format!("Task '{task_name}' not found"),
+                    }
+                }
+            };
+
+            let repo = match task.repos.first() {
+                Some(r) => r.clone(),
+                None => {
+                    return CoreResponse::Error {
+                        message: format!("Task '{task_name}' has no repos"),
+                    }
+                }
+            };
+
+            let session_alive = terminal
+                .session_exists(task_name)
+                .unwrap_or(false);
+
+            let session = if session_alive {
+                SessionHandle(session_name_for_task(task_name))
+            } else {
+                match terminal.create_session(task_name, &repo.worktree) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        return CoreResponse::Error {
+                            message: format!("Failed to create session: {e}"),
+                        }
+                    }
+                }
+            };
+
+            let pane = if session_alive {
+                match terminal.create_pane(&session, &repo.worktree) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return CoreResponse::Error {
+                            message: format!("Failed to create pane: {e}"),
+                        }
+                    }
+                }
+            } else {
+                match terminal.list_panes(&session) {
+                    Ok(panes) if !panes.is_empty() => panes.into_iter().next().unwrap(),
+                    _ => {
+                        return CoreResponse::Error {
+                            message: "Session created but no panes found".into(),
+                        }
+                    }
+                }
+            };
+
+            let session_id = Uuid::new_v4().to_string();
+            let name = match pane_name {
+                Some(n) => {
+                    if task.panes.iter().any(|p| p.name == *n) {
+                        task.next_pane_name(n)
+                    } else {
+                        n.clone()
+                    }
+                }
+                None => {
+                    let base = match engine_type {
+                        Engine::ClaudeCode => format!("claude-{}", repo.name),
+                        Engine::Codex => format!("codex-{}", repo.name),
+                        Engine::Terminal => repo.name.clone(),
+                    };
+                    task.next_pane_name(&base)
+                }
+            };
+
+            if engine_type != Engine::Terminal {
+                let launch_cmd = engine_type.launch_command(&session_id);
+                if let Err(e) = terminal.send_literal(&pane, &launch_cmd) {
+                    return CoreResponse::Error {
+                        message: format!("Failed to launch agent: {e}"),
+                    };
+                }
+                let _ = terminal.send_key(&pane, "Enter");
+            }
+
+            let tracked = TrackedPane {
+                name: name.clone(),
+                repo_name: repo.name.clone(),
+                engine: engine_type,
+                session_id,
+                pane_id: pane.0.clone(),
+                jsonl_path: PathBuf::from(PENDING_DISCOVERY),
+                launched_at: Utc::now(),
+            };
+            task.panes.push(tracked);
+
+            if let Err(e) = store.save_task(&task) {
+                return CoreResponse::Error {
+                    message: format!("Pane created but failed to save: {e}"),
+                };
+            }
+
+            let label = match engine_type {
+                Engine::ClaudeCode => "Claude",
+                Engine::Codex => "Codex",
+                Engine::Terminal => "terminal",
+            };
+            CoreResponse::Confirmation {
+                message: format!("Added {label} pane '{name}' to {task_name}"),
+            }
+        }
+
+        CoreCommand::RenamePane {
+            task_name,
+            pane_name,
+            new_name,
+        } => {
+            let mut task = match tasks.iter().find(|t| t.name == *task_name) {
+                Some(t) => t.clone(),
+                None => {
+                    return CoreResponse::Error {
+                        message: format!("Task '{task_name}' not found"),
+                    }
+                }
+            };
+
+            if !task.rename_pane(pane_name, new_name) {
+                return CoreResponse::Error {
+                    message: format!(
+                        "Cannot rename '{pane_name}' to '{new_name}' — source not found or target exists"
+                    ),
+                };
+            }
+
+            if let Err(e) = store.save_task(&task) {
+                return CoreResponse::Error {
+                    message: format!("Renamed but failed to save: {e}"),
+                };
+            }
+
+            CoreResponse::Confirmation {
+                message: format!("Renamed '{pane_name}' to '{new_name}' in {task_name}"),
+            }
+        }
+
+        CoreCommand::KillPane {
+            task_name,
+            pane_name,
+        } => {
+            let mut task = match tasks.iter().find(|t| t.name == *task_name) {
+                Some(t) => t.clone(),
+                None => {
+                    return CoreResponse::Error {
+                        message: format!("Task '{task_name}' not found"),
+                    }
+                }
+            };
+
+            let pane_id = match task.find_pane_by_name(pane_name) {
+                Some(tp) => tp.pane_id.clone(),
+                None => {
+                    return CoreResponse::Error {
+                        message: format!("Pane '{pane_name}' not found in task '{task_name}'"),
+                    }
+                }
+            };
+
+            let handle = PaneHandle(pane_id.clone(), String::new());
+            if let Err(e) = terminal.kill_pane(&handle) {
+                return CoreResponse::Error {
+                    message: format!("Failed to kill pane: {e}"),
+                };
+            }
+
+            task.panes.retain(|p| p.pane_id != pane_id);
+
+            if let Err(e) = store.save_task(&task) {
+                return CoreResponse::Error {
+                    message: format!("Pane killed but failed to save: {e}"),
+                };
+            }
+
+            CoreResponse::Confirmation {
+                message: format!("Killed pane '{pane_name}' in {task_name}"),
             }
         }
 

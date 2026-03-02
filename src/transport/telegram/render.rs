@@ -204,6 +204,9 @@ pub fn render_response(response: &CoreResponse) -> String {
              /send <task> <msg> — Send message to pane\n\
              /output <task> \\[N\\] — Capture pane output\n\
              /resume <task> — Resume dead agent session\n\
+             /add <task> \\[name\\] — Add pane to task\n\
+             /rename <task> <old> <new> — Rename pane\n\
+             /kill <task> <pane> — Kill pane\n\
              /focus <task> \\[pane\\] — Focus on task/pane\n\
              /unfocus — Exit focus mode\n\
              /help — Show this message\n\n\
@@ -284,6 +287,9 @@ mod tests {
         let text = render_response(&CoreResponse::HelpText);
         assert!(text.contains("Wagner Remote Commands"));
         assert!(text.contains("/status"));
+        assert!(text.contains("/add"));
+        assert!(text.contains("/rename"));
+        assert!(text.contains("/kill"));
     }
 
     #[test]

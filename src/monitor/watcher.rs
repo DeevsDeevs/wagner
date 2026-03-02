@@ -118,6 +118,7 @@ impl PaneWatcher {
             let event = match self.engine {
                 Engine::ClaudeCode => parse_claude_event(trimmed),
                 Engine::Codex => parse_codex_event(trimmed),
+                Engine::Terminal => None,
             };
 
             if let Some(event) = event {

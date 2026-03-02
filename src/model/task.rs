@@ -17,6 +17,7 @@ pub enum TaskKind {
 pub enum Engine {
     ClaudeCode,
     Codex,
+    Terminal,
 }
 
 impl Engine {
@@ -24,6 +25,15 @@ impl Engine {
         match self {
             Engine::ClaudeCode => format!("claude --resume {session_id}"),
             Engine::Codex => "codex".to_string(),
+            Engine::Terminal => String::new(),
+        }
+    }
+
+    pub fn launch_command(&self, session_id: &str) -> String {
+        match self {
+            Engine::ClaudeCode => format!("claude --session-id {session_id}"),
+            Engine::Codex => "codex".to_string(),
+            Engine::Terminal => String::new(),
         }
     }
 
@@ -31,6 +41,7 @@ impl Engine {
         match self {
             Engine::ClaudeCode => "claude",
             Engine::Codex => "codex",
+            Engine::Terminal => "",
         }
     }
 }
@@ -292,6 +303,15 @@ mod tests {
         let mut task = make_task();
         task.panes.push(make_pane("api", "api"));
         assert!(!task.rename_pane("missing", "new-name"));
+    }
+
+    #[test]
+    fn engine_launch_command() {
+        assert_eq!(
+            Engine::ClaudeCode.launch_command("my-uuid"),
+            "claude --session-id my-uuid"
+        );
+        assert_eq!(Engine::Codex.launch_command("my-uuid"), "codex");
     }
 
     #[test]

@@ -68,6 +68,10 @@ pub struct TelegramAdapter {
     suppressed_count: u32,
     // Pending reply-route: set by handlers so the response message gets tracked for replies
     reply_route_pending: Option<(String, String)>,
+    // Pending rename: set by rn callback so poll_and_handle stores it keyed by message_id
+    rename_route_pending: Option<(String, String, String)>,
+    // Active renames: message_id → (task_name, pane_name, pane_id)
+    pending_rename: HashMap<i32, (String, String, String)>,
     // Authorization
     allowed_users: Vec<i64>,
 }
@@ -88,6 +92,9 @@ impl TelegramAdapter {
                 BotCommand::new("send", "Send message to pane"),
                 BotCommand::new("output", "Capture pane output"),
                 BotCommand::new("resume", "Resume dead agent session"),
+                BotCommand::new("add", "Add pane to task"),
+                BotCommand::new("rename", "Rename pane"),
+                BotCommand::new("kill", "Kill pane"),
                 BotCommand::new("focus", "Focus on pane/task"),
                 BotCommand::new("unfocus", "Exit focus mode"),
                 BotCommand::new("help", "Show commands"),
@@ -113,6 +120,8 @@ impl TelegramAdapter {
             focus: None,
             suppressed_count: 0,
             reply_route_pending: None,
+            rename_route_pending: None,
+            pending_rename: HashMap::new(),
             allowed_users: config.allowed_users.clone(),
         })
     }
@@ -576,31 +585,25 @@ impl TelegramAdapter {
 
                 let task = tasks.iter().find(|t| t.name == *task_name);
                 let mut buttons = vec![];
+
+                // Pane name buttons — drill-down to pane detail view
+                let mut pane_row = vec![];
                 for p in &session_panes {
                     let eid = self.register_entity(task_name, &p.0);
-                    let status = core
-                        .status_engine
-                        .get_pane_status(&session_name, &p.0)
-                        .cloned()
-                        .unwrap_or(PaneStatus::Unknown);
                     let display_name = task
                         .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == p.0))
                         .map(|tp| tp.name.as_str())
                         .unwrap_or(&p.1);
-                    let mut row = vec![];
-                    if status.is_waiting() {
-                        row.push(ActionButton {
-                            label: format!("Approve {display_name}"),
-                            callback_data: format!("a:{eid}"),
-                        });
-                    }
-                    row.push(ActionButton {
-                        label: format!("Output {display_name}"),
-                        callback_data: format!("o:{eid}"),
+                    pane_row.push(ActionButton {
+                        label: display_name.to_string(),
+                        callback_data: format!("pd:{eid}"),
                     });
-                    if !row.is_empty() {
-                        buttons.push(row);
+                    if pane_row.len() >= 3 {
+                        buttons.push(std::mem::take(&mut pane_row));
                     }
+                }
+                if !pane_row.is_empty() {
+                    buttons.push(pane_row);
                 }
 
                 let tid = self.register_task(task_name);
@@ -612,10 +615,16 @@ impl TelegramAdapter {
                         }]);
                     }
                 }
-                buttons.push(vec![ActionButton {
-                    label: "Back".into(),
-                    callback_data: "bk".into(),
-                }]);
+                buttons.push(vec![
+                    ActionButton {
+                        label: "Add Pane".into(),
+                        callback_data: format!("ap:{tid}"),
+                    },
+                    ActionButton {
+                        label: "Back".into(),
+                        callback_data: "bk".into(),
+                    },
+                ]);
 
                 (response, buttons)
             }
@@ -654,6 +663,26 @@ impl TelegramAdapter {
                 (response, vec![])
             }
 
+            CoreCommand::AddPane { task_name, .. } => {
+                let response = core.execute(terminal, store, cmd, tasks);
+                let tid = self.register_task(task_name);
+                let buttons = vec![vec![ActionButton {
+                    label: "Back to task".into(),
+                    callback_data: format!("td:{tid}"),
+                }]];
+                (response, buttons)
+            }
+
+            CoreCommand::RenamePane { task_name, .. } | CoreCommand::KillPane { task_name, .. } => {
+                let response = core.execute(terminal, store, cmd, tasks);
+                let tid = self.register_task(task_name);
+                let buttons = vec![vec![ActionButton {
+                    label: "Back to task".into(),
+                    callback_data: format!("td:{tid}"),
+                }]];
+                (response, buttons)
+            }
+
             CoreCommand::SendMessage { .. }
             | CoreCommand::Reject { .. }
             | CoreCommand::Resume { .. }
@@ -672,7 +701,35 @@ impl TelegramAdapter {
         reply_to_message_id: i32,
         text: &str,
         terminal: &dyn Terminal,
+        core: &WagnerCore,
+        store: &Store,
+        tasks: &[Task],
     ) -> (CoreResponse, Vec<Vec<ActionButton>>) {
+        if let Some((task_name, pane_name, _pane_id)) =
+            self.pending_rename.remove(&reply_to_message_id)
+        {
+            let new_name = text.trim().to_string();
+            if new_name.is_empty() || new_name.contains(char::is_whitespace) {
+                return (
+                    CoreResponse::Error {
+                        message: "Pane name must be a single word with no spaces.".into(),
+                    },
+                    vec![],
+                );
+            }
+            return self.handle_command(
+                &CoreCommand::RenamePane {
+                    task_name,
+                    pane_name,
+                    new_name,
+                },
+                core,
+                terminal,
+                store,
+                tasks,
+            );
+        }
+
         match self.message_to_pane.get(&reply_to_message_id) {
             Some((task_name, pane_id)) => {
                 let task_name = task_name.clone();
@@ -1053,6 +1110,274 @@ impl TelegramAdapter {
                 }
             }
 
+            "pd" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                match self.resolve_entity(id) {
+                    Some((task_name, pane_id)) => {
+                        let task_name = task_name.to_string();
+                        let pane_id = pane_id.to_string();
+                        let session_name = session_name_for_task(&task_name);
+                        let task = tasks.iter().find(|t| t.name == task_name);
+                        let display_name = task
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane_id.clone());
+                        let status = core
+                            .status_engine
+                            .get_pane_status(&session_name, &pane_id)
+                            .cloned()
+                            .unwrap_or(PaneStatus::Unknown);
+
+                        let tid = self.register_task(&task_name);
+                        let mut buttons = vec![];
+
+                        if status.is_waiting() {
+                            buttons.push(vec![
+                                ActionButton {
+                                    label: "Approve".into(),
+                                    callback_data: format!("a:{id}"),
+                                },
+                                ActionButton {
+                                    label: "Reject".into(),
+                                    callback_data: format!("r:{id}"),
+                                },
+                            ]);
+                        }
+
+                        buttons.push(vec![
+                            ActionButton {
+                                label: "Output".into(),
+                                callback_data: format!("o:{id}"),
+                            },
+                            ActionButton {
+                                label: "Resume".into(),
+                                callback_data: format!("rs:{id}"),
+                            },
+                        ]);
+                        buttons.push(vec![
+                            ActionButton {
+                                label: "Rename".into(),
+                                callback_data: format!("rn:{id}"),
+                            },
+                            ActionButton {
+                                label: "Kill".into(),
+                                callback_data: format!("kp:{id}"),
+                            },
+                        ]);
+                        buttons.push(vec![ActionButton {
+                            label: "Back to task".into(),
+                            callback_data: format!("td:{tid}"),
+                        }]);
+
+                        let icon = status.icon();
+                        let label = status.label();
+                        (
+                            CoreResponse::Confirmation {
+                                message: format!(
+                                    "{task_name} / {display_name} — {icon} {label}"
+                                ),
+                            },
+                            buttons,
+                        )
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — entity no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
+            "ap" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                match self.resolve_task(id) {
+                    Some(task_name) => {
+                        let task_name = task_name.to_string();
+                        let tid = self.register_task(&task_name);
+                        let buttons = vec![
+                            vec![
+                                ActionButton {
+                                    label: "Claude".into(),
+                                    callback_data: format!("apc:{tid}"),
+                                },
+                                ActionButton {
+                                    label: "Codex".into(),
+                                    callback_data: format!("apx:{tid}"),
+                                },
+                                ActionButton {
+                                    label: "Terminal".into(),
+                                    callback_data: format!("apt:{tid}"),
+                                },
+                            ],
+                            vec![ActionButton {
+                                label: "Cancel".into(),
+                                callback_data: format!("td:{tid}"),
+                            }],
+                        ];
+                        (
+                            CoreResponse::Confirmation {
+                                message: format!("Select agent type for new pane in {task_name}"),
+                            },
+                            buttons,
+                        )
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — task no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
+            "apc" | "apx" | "apt" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                let agent = match action {
+                    "apc" => Some("claude".to_string()),
+                    "apx" => Some("codex".to_string()),
+                    "apt" => Some("terminal".to_string()),
+                    _ => unreachable!(),
+                };
+                match self.resolve_task(id) {
+                    Some(task_name) => {
+                        let task_name = task_name.to_string();
+                        self.handle_command(
+                            &CoreCommand::AddPane {
+                                task_name,
+                                pane_name: None,
+                                agent,
+                            },
+                            core,
+                            terminal,
+                            store,
+                            tasks,
+                        )
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — task no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
+            "kp" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                match self.resolve_entity(id) {
+                    Some((task, pane_id)) => {
+                        let task = task.to_string();
+                        let pane_id = pane_id.to_string();
+                        let pane_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane_id.clone());
+                        self.handle_command(
+                            &CoreCommand::KillPane {
+                                task_name: task,
+                                pane_name,
+                            },
+                            core,
+                            terminal,
+                            store,
+                            tasks,
+                        )
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — entity no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
+            "rn" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                match self.resolve_entity(id) {
+                    Some((task, pane_id)) => {
+                        let task = task.to_string();
+                        let pane_id = pane_id.to_string();
+                        let pane_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane_id.clone());
+                        let display = pane_name.clone();
+                        self.rename_route_pending =
+                            Some((task, pane_name, pane_id));
+                        (
+                            CoreResponse::Confirmation {
+                                message: format!(
+                                    "Reply to this message with the new name for '{display}'"
+                                ),
+                            },
+                            vec![],
+                        )
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — entity no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
             "sr" => self.handle_command(&CoreCommand::FullStatus, core, terminal, store, tasks),
             "bk" => self.handle_command(&CoreCommand::FullStatus, core, terminal, store, tasks),
             "uf" => self.handle_unfocus(),
@@ -1259,13 +1584,14 @@ impl Adapter for TelegramAdapter {
                 TelegramInput::Reply {
                     reply_to_message_id,
                     text,
-                } => self.handle_reply(reply_to_message_id, &text, terminal),
+                } => self.handle_reply(reply_to_message_id, &text, terminal, core, store, tasks),
                 TelegramInput::Callback { data } => {
                     self.handle_callback(&data, core, terminal, store, tasks)
                 }
             };
 
             let pane_assoc = self.reply_route_pending.take();
+            let rename_assoc = self.rename_route_pending.take();
             match self
                 .send_response_text(&response, &buttons, Some(&msg_ref))
                 .await
@@ -1274,6 +1600,9 @@ impl Adapter for TelegramAdapter {
                     if let Some((task, pane_id)) = pane_assoc {
                         self.message_to_pane
                             .insert(sent.message_id, (task, pane_id));
+                    }
+                    if let Some(rename_info) = rename_assoc {
+                        self.pending_rename.insert(sent.message_id, rename_info);
                     }
                 }
                 Err(e) => {
