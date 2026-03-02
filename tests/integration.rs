@@ -183,7 +183,7 @@ fn test_create_multi_repo_task() {
     let sent_keys = terminal.get_sent_keys();
     assert_eq!(
         sent_keys.len(),
-        4,
+        2,
         "Should have sent launch command + Enter to 2 repo panes"
     );
 

@@ -45,6 +45,7 @@ pub fn execute(
         CoreCommand::TaskStatus { task_name } => {
             let task = tasks.iter().find(|t| t.name == *task_name);
             let session_name = session_name_for_task(task_name);
+            let session_status = engine.get_session_status(&session_name);
             let session_panes = terminal
                 .list_panes(&SessionHandle(session_name.clone()))
                 .unwrap_or_default();
@@ -64,8 +65,16 @@ pub fn execute(
                 })
                 .collect();
 
+            let summary = TaskSummary {
+                name: task_name.clone(),
+                repo_count: task.map(|t| t.repos.len()).unwrap_or(0),
+                pane_count: task.map(|t| t.panes.len()).unwrap_or(0),
+            };
+
             CoreResponse::Status {
                 task_name: task_name.clone(),
+                summary,
+                status: session_status,
                 panes,
             }
         }
@@ -120,18 +129,14 @@ pub fn execute(
             let session_name = session_name_for_task(task_name);
             match resolve_pane(terminal, engine, &session_name, tasks, task_name, pane_name.as_deref(), None) {
                 Some(pane) => {
-                    if let Err(e) = terminal.send_literal(&pane, message) {
+                    if let Err(e) = terminal.send_keys(&pane, message) {
                         return CoreResponse::Error {
                             message: format!("Failed to send: {e}"),
                         };
                     }
-                    if let Err(e) = terminal.send_key(&pane, "Enter") {
-                        return CoreResponse::Error {
-                            message: format!("Failed to send Enter: {e}"),
-                        };
-                    }
+                    let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
                     CoreResponse::Confirmation {
-                        message: format!("Sent to {task_name}"),
+                        message: format!("Sent to {task_name} | {display_pane}"),
                     }
                 }
                 None => CoreResponse::Error {
@@ -161,8 +166,9 @@ pub fn execute(
                             message: format!("Failed to send Enter: {e}"),
                         };
                     }
+                    let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
                     CoreResponse::Confirmation {
-                        message: format!("Approved {task_name}"),
+                        message: format!("Approved {task_name} | {display_pane}"),
                     }
                 }
                 None => CoreResponse::Error {
@@ -188,8 +194,9 @@ pub fn execute(
                             message: format!("Failed to send Enter: {e}"),
                         };
                     }
+                    let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
                     CoreResponse::Confirmation {
-                        message: format!("Rejected {task_name}"),
+                        message: format!("Rejected {task_name} | {display_pane}"),
                     }
                 }
                 None => CoreResponse::Error {
@@ -245,18 +252,14 @@ pub fn execute(
             let _ = terminal.send_key(&target_pane, "C-u");
 
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            if let Err(e) = terminal.send_literal(&target_pane, &resume_cmd) {
+            if let Err(e) = terminal.send_keys(&target_pane, &resume_cmd) {
                 return CoreResponse::Error {
                     message: format!("Failed to send resume command: {e}"),
                 };
             }
-            if let Err(e) = terminal.send_key(&target_pane, "Enter") {
-                return CoreResponse::Error {
-                    message: format!("Failed to execute resume: {e}"),
-                };
-            }
+            let display_pane = resolve_pane_display_name(tasks, task_name, &target_pane.0);
             CoreResponse::Confirmation {
-                message: format!("Resuming {task_name}"),
+                message: format!("Resuming {task_name} | {display_pane}"),
             }
         }
 
@@ -427,13 +430,30 @@ pub fn execute(
 
             if engine_type != Engine::Terminal {
                 let launch_cmd = engine_type.launch_command(&session_id);
-                if let Err(e) = terminal.send_literal(&pane, &launch_cmd) {
+                if let Err(e) = terminal.send_keys(&pane, &launch_cmd) {
                     return CoreResponse::Error {
                         message: format!("Failed to launch agent: {e}"),
                     };
                 }
-                let _ = terminal.send_key(&pane, "Enter");
             }
+
+            let jsonl_path = match engine_type {
+                Engine::ClaudeCode => {
+                    let project_id = repo.worktree.to_string_lossy()
+                        .replace('/', "-")
+                        .replace('.', "-");
+                    if let Ok(home) = std::env::var("HOME") {
+                        PathBuf::from(home)
+                            .join(".claude")
+                            .join("projects")
+                            .join(project_id)
+                            .join(format!("{session_id}.jsonl"))
+                    } else {
+                        PathBuf::from(PENDING_DISCOVERY)
+                    }
+                }
+                _ => PathBuf::from(PENDING_DISCOVERY),
+            };
 
             let tracked = TrackedPane {
                 name: name.clone(),
@@ -441,7 +461,7 @@ pub fn execute(
                 engine: engine_type,
                 session_id,
                 pane_id: pane.0.clone(),
-                jsonl_path: PathBuf::from(PENDING_DISCOVERY),
+                jsonl_path,
                 launched_at: Utc::now(),
             };
             task.panes.push(tracked);
@@ -537,6 +557,24 @@ pub fn execute(
             }
         }
 
+        CoreCommand::SetPaneMode {
+            task_name,
+            pane_name,
+            mode,
+        } => {
+            if !tasks.iter().any(|t| t.name == *task_name) {
+                return CoreResponse::Error {
+                    message: format!("Task '{}' not found", task_name),
+                };
+            }
+            let resolved_name = pane_name.clone().unwrap_or_else(|| "all".to_string());
+            CoreResponse::ModeChanged {
+                task_name: task_name.clone(),
+                pane_name: resolved_name,
+                mode: *mode,
+            }
+        }
+
         CoreCommand::Help => CoreResponse::HelpText,
     }
 }
@@ -577,8 +615,9 @@ fn smart_approve(
                 };
             }
             let _ = terminal.send_key(&handle, "Enter");
+            let display_pane = resolve_pane_display_name(tasks, task_name, pane_id);
             CoreResponse::Confirmation {
-                message: format!("Approved {task_name}"),
+                message: format!("Approved {task_name} | {display_pane}"),
             }
         }
         _ => CoreResponse::Confirmation {
@@ -592,6 +631,15 @@ fn capture_tail(terminal: &dyn Terminal, pane: &PaneHandle, lines: usize) -> Str
         .capture(pane, lines)
         .map(|s| strip_ansi(&s))
         .unwrap_or_default()
+}
+
+fn resolve_pane_display_name(tasks: &[Task], task_name: &str, pane_id: &str) -> String {
+    tasks
+        .iter()
+        .find(|t| t.name == task_name)
+        .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+        .map(|tp| tp.name.clone())
+        .unwrap_or_else(|| pane_id.to_string())
 }
 
 fn resolve_pane(

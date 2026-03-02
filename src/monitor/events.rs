@@ -28,9 +28,11 @@ pub enum AgentEvent {
     },
     TextOutput {
         engine: Engine,
+        text: String,
     },
     TurnComplete {
         engine: Engine,
+        response_text: Option<String>,
     },
     UserMessage,
     Progress,

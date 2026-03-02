@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::config::MonitorConfig;
-use crate::model::{Engine, Task, PENDING_DISCOVERY};
+use crate::model::{Engine, Task, TrackedPane, PENDING_DISCOVERY};
 use crate::terminal::{PaneHandle, Terminal};
 
 use super::StatusMonitor;
@@ -71,8 +71,16 @@ impl PaneWatcher {
             self.file_offset = 0;
         }
 
+        let was_initial = self.file_offset == 0;
         if file_len > self.file_offset {
             self.read_new_lines(max_lines);
+        }
+
+        // After initial read of existing JSONL, discard stale response/progress
+        // to avoid emitting old responses on daemon restart or path resolution.
+        if was_initial && self.file_offset > 0 {
+            self.deriver.take_response_text();
+            self.deriver.clear_steps();
         }
 
         let status = self.deriver.tick();
@@ -139,6 +147,30 @@ impl PaneWatcher {
     }
 }
 
+fn resolve_jsonl_path(tracked: &TrackedPane, task: &Task) -> PathBuf {
+    if !tracked.is_discovery_pending() || tracked.engine != Engine::ClaudeCode {
+        return tracked.jsonl_path.clone();
+    }
+
+    let repo = task.repos.iter().find(|r| r.name == tracked.repo_name);
+    if let Some(repo) = repo {
+        let project_id = repo
+            .worktree
+            .to_string_lossy()
+            .replace('/', "-")
+            .replace('.', "-");
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home)
+                .join(".claude")
+                .join("projects")
+                .join(project_id)
+                .join(format!("{}.jsonl", tracked.session_id));
+        }
+    }
+
+    tracked.jsonl_path.clone()
+}
+
 impl SessionWatcher {
     pub fn new(fallback: StatusMonitor, config: &MonitorConfig) -> Self {
         Self {
@@ -154,10 +186,18 @@ impl SessionWatcher {
 
     pub fn track_task(&mut self, task: &Task, _session_name: &str) {
         for tracked in &task.panes {
-            if !self.pane_watchers.contains_key(&tracked.pane_id) {
+            if let Some(watcher) = self.pane_watchers.get_mut(&tracked.pane_id) {
+                if watcher.jsonl_path.as_os_str() == PENDING_DISCOVERY {
+                    let resolved = resolve_jsonl_path(tracked, task);
+                    if resolved.as_os_str() != PENDING_DISCOVERY {
+                        watcher.jsonl_path = resolved;
+                    }
+                }
+            } else {
+                let jsonl_path = resolve_jsonl_path(tracked, task);
                 let watcher = PaneWatcher::new(
                     tracked.engine,
-                    tracked.jsonl_path.clone(),
+                    jsonl_path,
                     self.approval_timeout,
                     self.idle_threshold,
                 );
@@ -183,7 +223,10 @@ impl SessionWatcher {
 
         for pane in panes {
             if let Some(watcher) = self.pane_watchers.get_mut(&pane.0) {
-                if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
+                if watcher.jsonl_path.as_os_str() == PENDING_DISCOVERY {
+                    // No JSONL path — delegate to fallback content-hash monitor
+                    untracked_panes.push(pane.clone());
+                } else if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
                     self.pane_statuses
                         .insert(pane.0.clone(), new_status.clone());
                     updates.push(StatusUpdate {
@@ -283,6 +326,38 @@ impl SessionWatcher {
             .deriver
             .last_context()
             .map(String::from)
+    }
+
+    pub fn get_pane_action_seq(&self, pane_id: &str) -> u64 {
+        self.pane_watchers
+            .get(pane_id)
+            .map(|w| w.deriver.action_seq())
+            .unwrap_or(0)
+    }
+
+    pub fn get_pane_completed_steps(
+        &self,
+        pane_id: &str,
+    ) -> Vec<super::deriver::CompletedStep> {
+        self.pane_watchers
+            .get(pane_id)
+            .map(|w| w.deriver.completed_steps().to_vec())
+            .unwrap_or_default()
+    }
+
+    pub fn get_pane_pending_tool(&self, pane_id: &str) -> Option<(String, Option<String>)> {
+        self.pane_watchers
+            .get(pane_id)?
+            .deriver
+            .pending_tool_info()
+            .map(|(name, ctx)| (name.to_string(), ctx.map(String::from)))
+    }
+
+    pub fn take_pane_response(&mut self, pane_id: &str) -> Option<String> {
+        self.pane_watchers
+            .get_mut(pane_id)?
+            .deriver
+            .take_response_text()
     }
 
     pub fn get_pane_status(&self, session_name: &str, pane_id: &str) -> Option<&PaneStatus> {

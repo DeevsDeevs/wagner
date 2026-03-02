@@ -422,8 +422,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         };
 
         let cmd = self.agent.launch_command(&session_id);
-        self.terminal.send_literal(pane, &cmd)?;
-        self.terminal.send_key(pane, "Enter")?;
+        self.terminal.send_keys(pane, &cmd)?;
 
         let jsonl_path = self
             .agent
@@ -468,8 +467,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
             // Pane exists but agent is dead — resume it
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            self.terminal.send_literal(pane, &resume_cmd)?;
-            self.terminal.send_key(pane, "Enter")?;
+            self.terminal.send_keys(pane, &resume_cmd)?;
             resumed += 1;
         }
 

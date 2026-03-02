@@ -7,13 +7,14 @@ use crate::monitor::status::{AgentStatus, PaneStatus, SessionAggregateStatus, Wa
 use crate::monitor::watcher::SessionWatcher;
 use crate::monitor::StatusMonitor;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
-use crate::transport::CoreEvent;
+use crate::transport::{CoreEvent, ProgressStep};
 
 pub struct StatusEngine {
     watcher: SessionWatcher,
     last_statuses: HashMap<String, PaneStatus>,
     last_session_statuses: HashMap<String, SessionAggregateStatus>,
     session_stable_since: HashMap<String, (SessionAggregateStatus, Instant)>,
+    last_action_seqs: HashMap<String, u64>,
     startup_time: Instant,
 }
 
@@ -26,6 +27,7 @@ impl StatusEngine {
             last_statuses: HashMap::new(),
             last_session_statuses: HashMap::new(),
             session_stable_since: HashMap::new(),
+            last_action_seqs: HashMap::new(),
             startup_time: Instant::now(),
         }
     }
@@ -84,6 +86,9 @@ impl StatusEngine {
                 if let Some(event) = self.check_pane_transition(task, &session_name, pane) {
                     events.push(event);
                 }
+                if let Some(event) = self.check_pane_progress(task, &session_name, pane) {
+                    events.push(event);
+                }
             }
         }
 
@@ -139,13 +144,34 @@ impl StatusEngine {
             .cloned()
             .unwrap_or(PaneStatus::Unknown);
 
-        let last = self.last_statuses.get(pane_id);
-        if last == Some(&current) {
+        let last = self.last_statuses.get(pane_id).cloned();
+        if last.as_ref() == Some(&current) {
+            // Status unchanged — but the agent may have gone Idle→Active→Idle
+            // within a single poll cycle. Check for a pending response.
+            if current.is_idle() {
+                if let Some(response) = self.watcher.take_pane_response(pane_id) {
+                    if !response.is_empty() {
+                        let pane_name = task
+                            .panes
+                            .iter()
+                            .find(|tp| tp.pane_id == *pane_id)
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane_title.clone());
+                        return Some(CoreEvent::AgentIdle {
+                            task_name: task.name.clone(),
+                            pane_name,
+                            pane_id: pane_id.clone(),
+                            output_tail: String::new(),
+                            response_text: Some(response),
+                        });
+                    }
+                }
+            }
             return None;
         }
 
-        let was_waiting = last.is_some_and(|s| s.is_waiting());
-        let was_active = last.is_some_and(|s| s.is_active());
+        let was_waiting = last.as_ref().is_some_and(|s| s.is_waiting());
+        let was_active = last.as_ref().is_some_and(|s| s.is_active());
         let is_waiting = current.is_waiting();
         let is_active = current.is_active();
         let is_idle = current.is_idle();
@@ -178,12 +204,14 @@ impl StatusEngine {
                 reason,
                 output_tail,
             })
-        } else if is_idle && was_active {
+        } else if is_idle && (was_active || was_waiting) {
+            let response_text = self.watcher.take_pane_response(pane_id);
             Some(CoreEvent::AgentIdle {
                 task_name: task.name.clone(),
                 pane_name,
                 pane_id: pane_id.clone(),
                 output_tail: String::new(),
+                response_text,
             })
         } else if is_active && !was_active {
             Some(CoreEvent::AgentWorking {
@@ -195,6 +223,61 @@ impl StatusEngine {
         } else {
             None
         }
+    }
+
+    fn check_pane_progress(
+        &mut self,
+        task: &Task,
+        _session_name: &str,
+        pane: &PaneHandle,
+    ) -> Option<CoreEvent> {
+        let pane_id = &pane.0;
+        let action_seq = self.watcher.get_pane_action_seq(pane_id);
+        let last_seq = self.last_action_seqs.get(pane_id).copied().unwrap_or(0);
+
+        if action_seq == last_seq {
+            return None;
+        }
+
+        self.last_action_seqs.insert(pane_id.clone(), action_seq);
+
+        let completed = self.watcher.get_pane_completed_steps(pane_id);
+        let pending = self.watcher.get_pane_pending_tool(pane_id);
+
+        let steps: Vec<ProgressStep> = completed
+            .iter()
+            .map(|s| ProgressStep {
+                tool_name: s.tool_name.clone(),
+                context: s.context.clone(),
+                done: true,
+                ok: s.ok,
+            })
+            .collect();
+
+        let pending_step = pending.map(|(name, ctx)| ProgressStep {
+            tool_name: name,
+            context: ctx,
+            done: false,
+            ok: true,
+        });
+
+        let step_count = steps.len() + if pending_step.is_some() { 1 } else { 0 };
+
+        let pane_name = task
+            .panes
+            .iter()
+            .find(|tp| tp.pane_id == *pane_id)
+            .map(|tp| tp.name.clone())
+            .unwrap_or_else(|| pane.1.clone());
+
+        Some(CoreEvent::AgentProgress {
+            task_name: task.name.clone(),
+            pane_name,
+            pane_id: pane_id.clone(),
+            steps,
+            pending: pending_step,
+            step_count,
+        })
     }
 
     // --- Low-level access for TUI (active/background polling) ---

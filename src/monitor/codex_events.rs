@@ -38,9 +38,17 @@ fn parse_response_item(obj: &serde_json::Value) -> Option<AgentEvent> {
         "reasoning" => Some(AgentEvent::Thinking {
             engine: Engine::Codex,
         }),
-        "message" => Some(AgentEvent::TextOutput {
-            engine: Engine::Codex,
-        }),
+        "message" => {
+            let text = obj
+                .pointer("/payload/content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            Some(AgentEvent::TextOutput {
+                engine: Engine::Codex,
+                text,
+            })
+        }
         "function_call" => {
             let call_id = obj
                 .pointer("/payload/call_id")
@@ -122,11 +130,19 @@ fn parse_event_msg(obj: &serde_json::Value) -> Option<AgentEvent> {
     let payload_type = obj.pointer("/payload/type")?.as_str()?;
 
     match payload_type {
-        "task_complete" => Some(AgentEvent::TurnComplete {
-            engine: Engine::Codex,
-        }),
+        "task_complete" => {
+            let response_text = obj
+                .pointer("/payload/last_agent_message")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            Some(AgentEvent::TurnComplete {
+                engine: Engine::Codex,
+                response_text,
+            })
+        }
         "turn_aborted" => Some(AgentEvent::TurnComplete {
             engine: Engine::Codex,
+            response_text: None,
         }),
         "user_message" => Some(AgentEvent::UserMessage),
         "agent_reasoning" | "agent_message" | "token_count" | "item_completed"
@@ -184,14 +200,14 @@ mod tests {
     fn parse_task_complete() {
         let line = r#"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"1","last_agent_message":"Done"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::Codex });
+        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::Codex, response_text: Some("Done".into()) });
     }
 
     #[test]
     fn parse_turn_aborted() {
         let line = r#"{"type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::Codex });
+        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::Codex, response_text: None });
     }
 
     #[test]
@@ -205,7 +221,7 @@ mod tests {
     fn parse_message_output() {
         let line = r#"{"type":"response_item","payload":{"type":"message","content":"Here is the result"}}"#;
         let event = parse_codex_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TextOutput { engine: Engine::Codex });
+        assert_eq!(event, AgentEvent::TextOutput { engine: Engine::Codex, text: "Here is the result".into() });
     }
 
     #[test]

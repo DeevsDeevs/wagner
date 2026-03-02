@@ -55,9 +55,17 @@ fn parse_assistant_event(obj: &serde_json::Value) -> Option<AgentEvent> {
     let content = obj.pointer("/message/content")?.as_array()?;
 
     match stop_reason {
-        Some("end_turn") => Some(AgentEvent::TurnComplete {
-            engine: Engine::ClaudeCode,
-        }),
+        Some("end_turn") => {
+            let response_text = extract_text_content(content);
+            Some(AgentEvent::TurnComplete {
+                engine: Engine::ClaudeCode,
+                response_text: if response_text.is_empty() {
+                    None
+                } else {
+                    Some(response_text)
+                },
+            })
+        }
         Some("tool_use") => {
             let tool_block = content
                 .iter()
@@ -89,9 +97,13 @@ fn parse_assistant_event(obj: &serde_json::Value) -> Option<AgentEvent> {
                 Some("thinking") => Some(AgentEvent::Thinking {
                     engine: Engine::ClaudeCode,
                 }),
-                Some("text") => Some(AgentEvent::TextOutput {
-                    engine: Engine::ClaudeCode,
-                }),
+                Some("text") => {
+                    let text = extract_text_content(content);
+                    Some(AgentEvent::TextOutput {
+                        engine: Engine::ClaudeCode,
+                        text,
+                    })
+                }
                 Some("tool_use") => {
                     let tool_block = content.first()?;
                     let tool_id = tool_block
@@ -134,6 +146,15 @@ fn parse_system_event(obj: &serde_json::Value) -> Option<AgentEvent> {
     }
 
     None
+}
+
+fn extract_text_content(content: &[serde_json::Value]) -> String {
+    content
+        .iter()
+        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn extract_tool_context(tool_name: &str, tool_block: &serde_json::Value) -> Option<String> {
@@ -200,14 +221,14 @@ mod tests {
     fn parse_text_output() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":null,"content":[{"type":"text","text":"Here is my answer"}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TextOutput { engine: Engine::ClaudeCode });
+        assert_eq!(event, AgentEvent::TextOutput { engine: Engine::ClaudeCode, text: "Here is my answer".into() });
     }
 
     #[test]
     fn parse_turn_complete() {
         let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"Done!"}]}}"#;
         let event = parse_claude_event(line).unwrap();
-        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::ClaudeCode });
+        assert_eq!(event, AgentEvent::TurnComplete { engine: Engine::ClaudeCode, response_text: Some("Done!".into()) });
     }
 
     #[test]

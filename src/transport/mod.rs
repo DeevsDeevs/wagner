@@ -9,6 +9,20 @@ use serde::{Deserialize, Serialize};
 use crate::monitor::status::{PaneStatus, SessionAggregateStatus, WaitReason};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgressStep {
+    pub tool_name: String,
+    pub context: Option<String>,
+    pub done: bool,
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum PaneOutputMode {
+    Alerts,
+    Stream,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CoreEvent {
     NeedsAttention {
@@ -23,6 +37,16 @@ pub enum CoreEvent {
         pane_name: String,
         pane_id: String,
         output_tail: String,
+        #[serde(default)]
+        response_text: Option<String>,
+    },
+    AgentProgress {
+        task_name: String,
+        pane_name: String,
+        pane_id: String,
+        steps: Vec<ProgressStep>,
+        pending: Option<ProgressStep>,
+        step_count: usize,
     },
     AgentWorking {
         task_name: String,
@@ -98,6 +122,11 @@ pub enum CoreCommand {
         task_name: String,
         pane_name: String,
     },
+    SetPaneMode {
+        task_name: String,
+        pane_name: Option<String>,
+        mode: PaneOutputMode,
+    },
     Help,
 }
 
@@ -109,6 +138,8 @@ pub enum CoreResponse {
     },
     Status {
         task_name: String,
+        summary: TaskSummary,
+        status: SessionAggregateStatus,
         panes: Vec<(String, PaneStatus)>,
     },
     FullStatus {
@@ -129,6 +160,11 @@ pub enum CoreResponse {
     PluginDetail {
         plugin_id: String,
         detail: crate::plugins::PluginItemDetail,
+    },
+    ModeChanged {
+        task_name: String,
+        pane_name: String,
+        mode: PaneOutputMode,
     },
     Error {
         message: String,
@@ -232,6 +268,11 @@ mod tests {
                 task_name: "t".into(),
                 pane_name: "api".into(),
             },
+            CoreCommand::SetPaneMode {
+                task_name: "t".into(),
+                pane_name: Some("api".into()),
+                mode: PaneOutputMode::Stream,
+            },
             CoreCommand::Help,
         ];
         for cmd in &variants {
@@ -254,6 +295,12 @@ mod tests {
             },
             CoreResponse::Status {
                 task_name: "t".into(),
+                summary: TaskSummary {
+                    name: "t".into(),
+                    repo_count: 1,
+                    pane_count: 3,
+                },
+                status: SessionAggregateStatus::Working,
                 panes: vec![
                     (
                         "api".into(),
@@ -314,6 +361,11 @@ mod tests {
                     content: "full content".into(),
                 },
             },
+            CoreResponse::ModeChanged {
+                task_name: "t".into(),
+                pane_name: "api".into(),
+                mode: PaneOutputMode::Stream,
+            },
             CoreResponse::Error {
                 message: "something failed".into(),
             },
@@ -339,6 +391,7 @@ mod tests {
                 pane_name: "web".into(),
                 pane_id: "%2".into(),
                 output_tail: "done".into(),
+                response_text: None,
             },
             CoreEvent::AgentWorking {
                 task_name: "t".into(),
@@ -356,6 +409,24 @@ mod tests {
                     repo_count: 1,
                     pane_count: 2,
                 }],
+            },
+            CoreEvent::AgentProgress {
+                task_name: "t".into(),
+                pane_name: "api".into(),
+                pane_id: "%4".into(),
+                steps: vec![ProgressStep {
+                    tool_name: "Bash".into(),
+                    context: Some("cargo test".into()),
+                    done: true,
+                    ok: true,
+                }],
+                pending: Some(ProgressStep {
+                    tool_name: "Edit".into(),
+                    context: Some("src/lib.rs".into()),
+                    done: false,
+                    ok: true,
+                }),
+                step_count: 2,
             },
             CoreEvent::DaemonStopping,
         ];

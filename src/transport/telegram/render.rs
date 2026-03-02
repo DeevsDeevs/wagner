@@ -1,5 +1,5 @@
 use crate::monitor::status::{PaneStatus, SessionAggregateStatus, WaitReason};
-use crate::transport::{CoreEvent, CoreResponse};
+use crate::transport::{CoreEvent, CoreResponse, ProgressStep};
 
 pub fn render_event(event: &CoreEvent) -> String {
     match event {
@@ -36,6 +36,7 @@ pub fn render_event(event: &CoreEvent) -> String {
             pane_name,
             pane_id: _,
             output_tail,
+            response_text: _,
         } => {
             let task = escape(task_name);
             let title = escape(pane_name);
@@ -85,6 +86,11 @@ pub fn render_event(event: &CoreEvent) -> String {
             lines.join("\n")
         }
 
+        CoreEvent::AgentProgress { .. } => {
+            // Rendered via render_progress() / render_progress_done() instead
+            String::new()
+        }
+
         CoreEvent::DaemonStopping => String::from("*Wagner Daemon Stopping*"),
     }
 }
@@ -108,17 +114,27 @@ pub fn render_response(response: &CoreResponse) -> String {
             lines.join("\n")
         }
 
-        CoreResponse::Status { task_name, panes } => {
-            let task = escape(task_name);
-            let mut lines = vec![format!("*{task}*\n")];
+        CoreResponse::Status {
+            task_name: _,
+            summary,
+            status,
+            panes,
+        } => {
+            let icon = status_icon(status);
+            let name = escape(&summary.name);
+            let label = escape(status.label());
+            let mut lines = vec![format!(
+                "{icon} *{name}* — {} repos, {label}\n",
+                summary.repo_count
+            )];
             if panes.is_empty() {
                 lines.push(String::from("  No panes\\."));
             } else {
-                for (title, status) in panes {
-                    let icon = pane_icon(status);
+                for (title, pane_status) in panes {
+                    let picon = pane_icon(pane_status);
                     let title = escape(title);
-                    let label = escape(&status.label());
-                    lines.push(format!("  {icon} {title} — {label}"));
+                    let plabel = escape(&pane_status.label());
+                    lines.push(format!("  {picon} {title} — {plabel}"));
                 }
             }
             lines.join("\n")
@@ -164,6 +180,20 @@ pub fn render_response(response: &CoreResponse) -> String {
             escape(message)
         }
 
+        CoreResponse::ModeChanged {
+            task_name,
+            pane_name,
+            mode,
+        } => {
+            let task = escape(task_name);
+            let pane = escape(pane_name);
+            let mode_label = match mode {
+                crate::transport::PaneOutputMode::Alerts => "Alerts",
+                crate::transport::PaneOutputMode::Stream => "Stream",
+            };
+            format!("Mode set to *{mode_label}* for *{task}* \\| {pane}")
+        }
+
         CoreResponse::Error { message } => {
             format!("\u{274C} {}", escape(message))
         }
@@ -207,12 +237,167 @@ pub fn render_response(response: &CoreResponse) -> String {
              /add <task> \\[name\\] — Add pane to task\n\
              /rename <task> <old> <new> — Rename pane\n\
              /kill <task> <pane> — Kill pane\n\
+             /mode <task> \\[pane\\] <alerts\\|stream> — Output mode\n\
              /focus <task> \\[pane\\] — Focus on task/pane\n\
              /unfocus — Exit focus mode\n\
              /help — Show this message\n\n\
              _Reply to a notification to send input directly\\._",
         ),
     }
+}
+
+pub fn render_progress(
+    task_name: &str,
+    pane_name: &str,
+    steps: &[ProgressStep],
+    pending: Option<&ProgressStep>,
+    step_count: usize,
+) -> String {
+    let task = escape(task_name);
+    let pane = escape(pane_name);
+    let mut lines = vec![format!(
+        "\u{1F7E2} *{task}* \\| {pane} — Working \u{00B7} step {step_count}\n"
+    )];
+
+    for step in steps {
+        let icon = if step.ok { "\u{2713}" } else { "\u{2717}" };
+        let ctx = step
+            .context
+            .as_deref()
+            .map(|c| format!(" `{}`", escape_code(c)))
+            .unwrap_or_default();
+        lines.push(format!("{icon} {}{ctx}", escape(&step.tool_name)));
+    }
+
+    if let Some(p) = pending {
+        let ctx = p
+            .context
+            .as_deref()
+            .map(|c| format!(" `{}`", escape_code(c)))
+            .unwrap_or_default();
+        lines.push(format!("\u{25B8} {}{ctx}", escape(&p.tool_name)));
+    }
+
+    lines.join("\n")
+}
+
+pub fn render_progress_done(
+    task_name: &str,
+    pane_name: &str,
+    steps: &[ProgressStep],
+    step_count: usize,
+) -> String {
+    let task = escape(task_name);
+    let pane = escape(pane_name);
+    let mut lines = vec![format!(
+        "\u{26AA} *{task}* \\| {pane} — Done \u{00B7} {step_count} steps\n"
+    )];
+
+    for step in steps {
+        let icon = if step.ok { "\u{2713}" } else { "\u{2717}" };
+        let ctx = step
+            .context
+            .as_deref()
+            .map(|c| format!(" `{}`", escape_code(c)))
+            .unwrap_or_default();
+        lines.push(format!("{icon} {}{ctx}", escape(&step.tool_name)));
+    }
+
+    lines.join("\n")
+}
+
+pub fn render_agent_response(task_name: &str, pane_name: &str, markdown: &str) -> String {
+    let header = format!(
+        "<b>{} | {}</b>\n\n",
+        escape_html(task_name),
+        escape_html(pane_name)
+    );
+    // Truncate markdown BEFORE conversion to avoid breaking HTML tags
+    let max_md_len = 3500;
+    let md = if markdown.len() > max_md_len {
+        let mut end = max_md_len;
+        while end > 0 && !markdown.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…(truncated)", &markdown[..end])
+    } else {
+        markdown.to_string()
+    };
+    let body = markdown_to_telegram_html(&md);
+    format!("{header}{body}")
+}
+
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn markdown_to_telegram_html(md: &str) -> String {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
+
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    let parser = Parser::new_ext(md, opts);
+
+    let mut out = String::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Heading { .. }) => out.push_str("<b>"),
+            Event::End(TagEnd::Heading(_)) => out.push_str("</b>\n"),
+            Event::Start(Tag::Paragraph) => {}
+            Event::End(TagEnd::Paragraph) => out.push_str("\n\n"),
+            Event::Start(Tag::Emphasis) => out.push_str("<i>"),
+            Event::End(TagEnd::Emphasis) => out.push_str("</i>"),
+            Event::Start(Tag::Strong) => out.push_str("<b>"),
+            Event::End(TagEnd::Strong) => out.push_str("</b>"),
+            Event::Start(Tag::Strikethrough) => out.push_str("<s>"),
+            Event::End(TagEnd::Strikethrough) => out.push_str("</s>"),
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                out.push_str(&format!("<a href=\"{}\">", escape_html(&dest_url)));
+            }
+            Event::End(TagEnd::Link) => out.push_str("</a>"),
+            Event::Start(Tag::CodeBlock(kind)) => {
+                match kind {
+                    CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
+                        out.push_str(&format!(
+                            "<pre><code class=\"language-{}\">",
+                            escape_html(&lang)
+                        ));
+                    }
+                    _ => out.push_str("<pre><code>"),
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                out.push_str("</code></pre>\n");
+            }
+            Event::Start(Tag::List(None)) => {}
+            Event::End(TagEnd::List(false)) => out.push('\n'),
+            Event::Start(Tag::List(Some(_))) => {}
+            Event::End(TagEnd::List(true)) => out.push('\n'),
+            Event::Start(Tag::Item) => out.push_str("• "),
+            Event::End(TagEnd::Item) => out.push('\n'),
+            Event::Code(code) => {
+                out.push_str("<code>");
+                out.push_str(&escape_html(&code));
+                out.push_str("</code>");
+            }
+            Event::Text(text) => {
+                out.push_str(&escape_html(&text));
+            }
+            Event::SoftBreak => out.push('\n'),
+            Event::HardBreak => out.push('\n'),
+            _ => {}
+        }
+    }
+
+    // Trim trailing newlines
+    while out.ends_with('\n') {
+        out.pop();
+    }
+    out
 }
 
 fn status_icon(status: &SessionAggregateStatus) -> &'static str {

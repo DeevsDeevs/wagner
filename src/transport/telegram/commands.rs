@@ -1,4 +1,4 @@
-use crate::transport::CoreCommand;
+use crate::transport::{CoreCommand, PaneOutputMode};
 
 #[derive(Debug)]
 pub enum ParsedCommand {
@@ -24,8 +24,11 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
     }
 
     let mut parts = text.splitn(2, |c: char| c.is_whitespace());
-    let cmd = parts.next()?;
+    let raw_cmd = parts.next()?;
     let rest = parts.next().unwrap_or("").trim();
+
+    // Strip @BotName suffix from commands (e.g. "/tasks@MyBot" → "/tasks")
+    let cmd = raw_cmd.split('@').next().unwrap_or(raw_cmd);
 
     match cmd {
         "/status" | "/s" => {
@@ -90,15 +93,26 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
 
         "/output" | "/o" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::UsageError {
-                    usage: "/output <task> [lines]",
-                });
+                // Empty args — may be enriched by reply context in the adapter
+                return Some(ParsedCommand::Core(CoreCommand::CaptureOutput {
+                    task_name: String::new(),
+                    pane_name: None,
+                    lines: None,
+                }));
             }
             let mut parts = rest.split_whitespace();
-            let task_name = parts.next()?.to_string();
+            let first = parts.next()?.to_string();
+            // If the first arg is a number, treat it as lines (task from reply context)
+            if let Ok(n) = first.parse::<usize>() {
+                return Some(ParsedCommand::Core(CoreCommand::CaptureOutput {
+                    task_name: String::new(),
+                    pane_name: None,
+                    lines: Some(n),
+                }));
+            }
             let lines = parts.next().and_then(|s| s.parse().ok());
             Some(ParsedCommand::Core(CoreCommand::CaptureOutput {
-                task_name,
+                task_name: first,
                 pane_name: None,
                 lines,
             }))
@@ -185,6 +199,38 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
                 pane_name,
                 sticky,
             })
+        }
+
+        "/mode" => {
+            if rest.is_empty() {
+                return Some(ParsedCommand::UsageError {
+                    usage: "/mode [task] [pane] <alerts|stream>",
+                });
+            }
+            let parts: Vec<&str> = rest.split_whitespace().collect();
+            let mode_str = parts.last().copied().unwrap_or("");
+            let mode = match mode_str {
+                "alerts" => PaneOutputMode::Alerts,
+                "stream" => PaneOutputMode::Stream,
+                _ => {
+                    return Some(ParsedCommand::UsageError {
+                        usage: "/mode [task] [pane] <alerts|stream>",
+                    });
+                }
+            };
+            let (task_name, pane_name) = if parts.len() >= 3 {
+                (parts[0].to_string(), Some(parts[1].to_string()))
+            } else if parts.len() == 2 {
+                (parts[0].to_string(), None)
+            } else {
+                // Just mode name — task will be inferred by the adapter
+                (String::new(), None)
+            };
+            Some(ParsedCommand::Core(CoreCommand::SetPaneMode {
+                task_name,
+                pane_name,
+                mode,
+            }))
         }
 
         "/unfocus" => Some(ParsedCommand::Unfocus),
@@ -372,8 +418,27 @@ mod tests {
 
     #[test]
     fn parse_output_no_task() {
+        // Empty /output now returns CaptureOutput with empty task (enriched by reply context)
         match parse_command("/output") {
-            Some(ParsedCommand::UsageError { .. }) => {}
+            Some(ParsedCommand::Core(CoreCommand::CaptureOutput {
+                task_name, lines, ..
+            })) => {
+                assert!(task_name.is_empty());
+                assert_eq!(lines, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_output_lines_only() {
+        match parse_command("/output 50") {
+            Some(ParsedCommand::Core(CoreCommand::CaptureOutput {
+                task_name, lines, ..
+            })) => {
+                assert!(task_name.is_empty());
+                assert_eq!(lines, Some(50));
+            }
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -512,6 +577,89 @@ mod tests {
         }
 
         match parse_command("/kill") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bot_username_suffix() {
+        assert!(matches!(
+            parse_command("/tasks@MyBot"),
+            Some(ParsedCommand::Core(CoreCommand::ListTasks))
+        ));
+        assert!(matches!(
+            parse_command("/status@MyBot"),
+            Some(ParsedCommand::Core(CoreCommand::FullStatus))
+        ));
+        match parse_command("/status@MyBot my-task") {
+            Some(ParsedCommand::Core(CoreCommand::TaskStatus { task_name })) => {
+                assert_eq!(task_name, "my-task");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        assert!(matches!(
+            parse_command("/help@MyBot"),
+            Some(ParsedCommand::Core(CoreCommand::Help))
+        ));
+    }
+
+    #[test]
+    fn parse_mode() {
+        match parse_command("/mode my-task stream") {
+            Some(ParsedCommand::Core(CoreCommand::SetPaneMode {
+                task_name,
+                pane_name,
+                mode,
+            })) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_name, None);
+                assert_eq!(mode, PaneOutputMode::Stream);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+
+        match parse_command("/mode my-task api alerts") {
+            Some(ParsedCommand::Core(CoreCommand::SetPaneMode {
+                task_name,
+                pane_name,
+                mode,
+            })) => {
+                assert_eq!(task_name, "my-task");
+                assert_eq!(pane_name, Some("api".into()));
+                assert_eq!(mode, PaneOutputMode::Alerts);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_mode_infer_task() {
+        match parse_command("/mode stream") {
+            Some(ParsedCommand::Core(CoreCommand::SetPaneMode {
+                task_name,
+                pane_name,
+                mode,
+            })) => {
+                assert!(task_name.is_empty());
+                assert_eq!(pane_name, None);
+                assert_eq!(mode, PaneOutputMode::Stream);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_mode_no_args() {
+        match parse_command("/mode") {
+            Some(ParsedCommand::UsageError { .. }) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_mode_invalid_mode() {
+        match parse_command("/mode my-task foo") {
             Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }

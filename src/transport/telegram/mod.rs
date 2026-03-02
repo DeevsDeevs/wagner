@@ -15,17 +15,17 @@ use tracing::{debug, warn};
 use crate::config::TelegramConfig;
 use crate::core::WagnerCore;
 use crate::error::WagnerError;
-use crate::model::Task;
+use crate::model::{Engine, Task};
 use crate::monitor::status::PaneStatus;
 use crate::monitor::strip_ansi;
 use crate::store::Store;
 use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task};
 use crate::transport::adapter::Adapter;
-use crate::transport::{CoreCommand, CoreEvent, CoreResponse};
+use crate::transport::{CoreCommand, CoreEvent, CoreResponse, PaneOutputMode};
 
 use self::commands::{ParsedCommand, parse_command};
 use self::outbox::Outbox;
-use self::render::{render_event, render_response};
+use self::render::{render_event, render_response, render_progress, render_progress_done, render_agent_response};
 
 const MAX_MESSAGE_LEN: usize = 4000;
 
@@ -46,6 +46,14 @@ struct FocusTarget {
     task_name: String,
     pane_name: Option<String>,
     sticky: bool,
+}
+
+struct ProgressMsgState {
+    message_id: i32,
+    last_rendered: String,
+    last_edit: std::time::Instant,
+    last_steps: Vec<crate::transport::ProgressStep>,
+    last_step_count: usize,
 }
 
 pub struct TelegramAdapter {
@@ -74,6 +82,12 @@ pub struct TelegramAdapter {
     pending_rename: HashMap<i32, (String, String, String)>,
     // Authorization
     allowed_users: Vec<i64>,
+    // Per-pane output mode
+    pane_modes: HashMap<String, PaneOutputMode>,
+    // Progress message state for Stream mode
+    progress_messages: HashMap<String, ProgressMsgState>,
+    // Panes that received user input — stores (task_name, baseline_line_count, engine)
+    awaiting_response: HashMap<String, (String, usize, Engine)>,
 }
 
 impl TelegramAdapter {
@@ -95,6 +109,7 @@ impl TelegramAdapter {
                 BotCommand::new("add", "Add pane to task"),
                 BotCommand::new("rename", "Rename pane"),
                 BotCommand::new("kill", "Kill pane"),
+                BotCommand::new("mode", "Set pane output mode"),
                 BotCommand::new("focus", "Focus on pane/task"),
                 BotCommand::new("unfocus", "Exit focus mode"),
                 BotCommand::new("help", "Show commands"),
@@ -123,6 +138,9 @@ impl TelegramAdapter {
             rename_route_pending: None,
             pending_rename: HashMap::new(),
             allowed_users: config.allowed_users.clone(),
+            pane_modes: HashMap::new(),
+            progress_messages: HashMap::new(),
+            awaiting_response: HashMap::new(),
         })
     }
 
@@ -176,6 +194,13 @@ impl TelegramAdapter {
         }
     }
 
+    fn get_pane_mode(&self, pane_id: &str) -> PaneOutputMode {
+        self.pane_modes
+            .get(pane_id)
+            .copied()
+            .unwrap_or(PaneOutputMode::Alerts)
+    }
+
     // --- Telegram API methods ---
 
     async fn do_send(
@@ -199,6 +224,28 @@ impl TelegramAdapter {
             })),
             Err(e) => {
                 warn!(%e, "telegram send failed");
+                Err(WagnerError::Transport(format!("Telegram send error: {e}")))
+            }
+        }
+    }
+
+    async fn do_send_html(
+        &self,
+        text: &str,
+    ) -> crate::Result<Option<MessageRef>> {
+        let text = truncate_message(text);
+        let req = self
+            .bot
+            .send_message(self.chat_id, &text)
+            .parse_mode(ParseMode::Html);
+        match req.await {
+            Ok(msg) => Ok(Some(MessageRef {
+                chat_id: self.chat_id.0,
+                message_id: msg.id.0,
+                edit_in_place: false,
+            })),
+            Err(e) => {
+                warn!(%e, "telegram send html failed");
                 Err(WagnerError::Transport(format!("Telegram send error: {e}")))
             }
         }
@@ -362,6 +409,7 @@ impl TelegramAdapter {
                 task_name,
                 pane_name,
                 pane_id,
+                response_text,
                 ..
             } => {
                 if !self.matches_focus(task_name, pane_name) {
@@ -369,21 +417,84 @@ impl TelegramAdapter {
                     return Ok(());
                 }
 
-                if config.daemon.notify_idle {
-                    let pane = PaneHandle(pane_id.clone(), String::new());
-                    let output_tail = capture_tail(
-                        terminal,
-                        &pane,
-                        config.daemon.default_output_lines,
-                    );
-                    let enriched = CoreEvent::AgentIdle {
-                        task_name: task_name.clone(),
-                        pane_name: pane_name.clone(),
-                        pane_id: pane_id.clone(),
-                        output_tail,
-                    };
-                    let msg_ref = self.send_event_text(&enriched, &[]).await?;
-                    if let Some(r) = msg_ref {
+                // Suppress status labels when we're awaiting a reply — the response
+                // message itself provides the feedback the user needs.
+                let awaiting = self.awaiting_response.contains_key(pane_id);
+                if !awaiting {
+                    let mode = self.get_pane_mode(pane_id);
+                    if mode == PaneOutputMode::Stream {
+                        if let Some(progress_state) = self.progress_messages.remove(pane_id) {
+                            let done_text = render_progress_done(
+                                task_name,
+                                pane_name,
+                                &progress_state.last_steps,
+                                progress_state.last_step_count,
+                            );
+                            let msg_ref = MessageRef {
+                                chat_id: self.chat_id.0,
+                                message_id: progress_state.message_id,
+                                edit_in_place: true,
+                            };
+                            self.outbox.throttle().await;
+                            let _ = self.do_edit(&msg_ref, &done_text, None).await;
+                        }
+                    } else if config.daemon.notify_idle {
+                        let pane = PaneHandle(pane_id.clone(), String::new());
+                        let output_tail = capture_tail(
+                            terminal,
+                            &pane,
+                            config.daemon.default_output_lines,
+                        );
+                        let enriched = CoreEvent::AgentIdle {
+                            task_name: task_name.clone(),
+                            pane_name: pane_name.clone(),
+                            pane_id: pane_id.clone(),
+                            output_tail,
+                            response_text: None,
+                        };
+                        let msg_ref = self.send_event_text(&enriched, &[]).await?;
+                        if let Some(r) = msg_ref {
+                            self.message_to_pane
+                                .insert(r.message_id, (task_name.clone(), pane_id.clone()));
+                        }
+                    }
+                }
+
+                // Send response — from JSONL if available, otherwise capture terminal output.
+                // Claude Code has JSONL monitoring so we never use terminal capture for it
+                // (TUI output is garbled). For engines without JSONL (Codex), capture terminal.
+                let response_content = match response_text {
+                    Some(text) if !text.is_empty() => {
+                        self.awaiting_response.remove(pane_id);
+                        Some(text.clone())
+                    }
+                    _ if self.awaiting_response.contains_key(pane_id) => {
+                        let &(_, _, engine) = self.awaiting_response.get(pane_id).unwrap();
+                        if engine == Engine::ClaudeCode {
+                            // JSONL will deliver response on a later poll — wait for it
+                            None
+                        } else {
+                            let (_, baseline, engine) = self.awaiting_response.remove(pane_id).unwrap();
+                            let pane = PaneHandle(pane_id.clone(), String::new());
+                            let full_output = terminal
+                                .capture(&pane, 500)
+                                .map(|s| strip_ansi(&s))
+                                .unwrap_or_default();
+                            let new_lines = full_output
+                                .lines()
+                                .skip(baseline)
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let new_lines = strip_tui_chrome(new_lines.trim(), engine);
+                            if new_lines.is_empty() { None } else { Some(new_lines) }
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(text) = response_content {
+                    let html = render_agent_response(task_name, pane_name, &text);
+                    self.outbox.throttle().await;
+                    if let Ok(Some(r)) = self.do_send_html(&html).await {
                         self.message_to_pane
                             .insert(r.message_id, (task_name.clone(), pane_id.clone()));
                     }
@@ -391,19 +502,96 @@ impl TelegramAdapter {
             }
 
             CoreEvent::AgentWorking { pane_id, .. } => {
-                if let Some(msg_ref) = self.live_messages.remove(pane_id) {
-                    self.message_to_pane.remove(&msg_ref.message_id);
-                    self.edit_event_text(&msg_ref, event, &[]).await?;
+                if self.awaiting_response.contains_key(pane_id) {
+                    // Suppress — response message provides the feedback
+                } else {
+                    let mode = self.get_pane_mode(pane_id);
+                    if mode == PaneOutputMode::Stream {
+                        // Progress messages handle the working state in stream mode
+                    } else if let Some(msg_ref) = self.live_messages.remove(pane_id) {
+                        self.message_to_pane.remove(&msg_ref.message_id);
+                        self.edit_event_text(&msg_ref, event, &[]).await?;
+                    }
+                }
+            }
+
+            CoreEvent::AgentProgress {
+                task_name,
+                pane_name,
+                pane_id,
+                steps,
+                pending,
+                step_count,
+            } => {
+                let mode = self.get_pane_mode(pane_id);
+                if mode != PaneOutputMode::Stream {
+                    return Ok(());
+                }
+
+                let text = render_progress(
+                    task_name,
+                    pane_name,
+                    steps,
+                    pending.as_ref(),
+                    *step_count,
+                );
+
+                match self.progress_messages.get(pane_id) {
+                    None => {
+                        // Send new progress message
+                        self.outbox.throttle().await;
+                        let keyboard = build_keyboard(&[]);
+                        if let Ok(Some(r)) = self.do_send(&text, keyboard).await {
+                            self.message_to_pane
+                                .insert(r.message_id, (task_name.clone(), pane_id.clone()));
+                            self.progress_messages.insert(
+                                pane_id.clone(),
+                                ProgressMsgState {
+                                    message_id: r.message_id,
+                                    last_rendered: text,
+                                    last_edit: std::time::Instant::now(),
+                                    last_steps: steps.clone(),
+                                    last_step_count: *step_count,
+                                },
+                            );
+                        }
+                    }
+                    Some(state) => {
+                        let elapsed = state.last_edit.elapsed();
+                        if elapsed >= std::time::Duration::from_secs(2)
+                            && text != state.last_rendered
+                        {
+                            let msg_ref = MessageRef {
+                                chat_id: self.chat_id.0,
+                                message_id: state.message_id,
+                                edit_in_place: true,
+                            };
+                            self.outbox.throttle().await;
+                            let _ = self.do_edit(&msg_ref, &text, None).await;
+                            if let Some(state) = self.progress_messages.get_mut(pane_id) {
+                                state.last_rendered = text;
+                                state.last_edit = std::time::Instant::now();
+                                state.last_steps = steps.clone();
+                                state.last_step_count = *step_count;
+                            }
+                        }
+                    }
                 }
             }
 
             CoreEvent::SessionStatusChanged { task_name, .. } => {
-                let tid = self.register_task(task_name);
-                let buttons = vec![vec![ActionButton {
-                    label: "Details".into(),
-                    callback_data: format!("td:{tid}"),
-                }]];
-                self.send_event_text(event, &buttons).await?;
+                let any_awaiting = self
+                    .awaiting_response
+                    .values()
+                    .any(|(tn, _, _)| tn == task_name);
+                if !any_awaiting {
+                    let tid = self.register_task(task_name);
+                    let buttons = vec![vec![ActionButton {
+                        label: "Details".into(),
+                        callback_data: format!("td:{tid}"),
+                    }]];
+                    self.send_event_text(event, &buttons).await?;
+                }
             }
 
             CoreEvent::DaemonStarted { .. } | CoreEvent::DaemonStopping => {
@@ -460,7 +648,7 @@ impl TelegramAdapter {
                             edit_in_place: false,
                         };
 
-                        if let Some(reply_msg) = msg.reply_to_message() {
+                        let reply_to_id = if let Some(reply_msg) = msg.reply_to_message() {
                             if !text.starts_with('/') {
                                 let lower = text.trim().to_lowercase();
                                 let reply_text = if matches!(lower.as_str(), "y" | "yes") {
@@ -479,10 +667,13 @@ impl TelegramAdapter {
                                 ));
                                 continue;
                             }
-                        }
+                            Some(reply_msg.id.0)
+                        } else {
+                            None
+                        };
 
                         if let Some(cmd) = parse_command(text) {
-                            inputs.push((TelegramInput::Command(cmd), msg_ref));
+                            inputs.push((TelegramInput::Command(cmd, reply_to_id), msg_ref));
                         }
                     }
                 }
@@ -655,11 +846,45 @@ impl TelegramAdapter {
                 (response, buttons)
             }
 
-            CoreCommand::Approve { task_name, .. } => {
+            CoreCommand::Approve { task_name, pane_name } => {
                 if task_name.is_empty() {
                     return self.smart_approve_with_buttons(core, terminal, tasks);
                 }
                 let response = core.execute(terminal, store, cmd, tasks);
+                // Set up awaiting_response for the approved pane
+                if matches!(&response, CoreResponse::Confirmation { .. }) {
+                    let session_name = session_name_for_task(task_name);
+                    let target = if let Some(name) = pane_name {
+                        tasks.iter().find(|t| t.name == *task_name)
+                            .and_then(|t| t.find_pane_by_name(name))
+                            .map(|tp| (tp.pane_id.clone(), tp.engine))
+                    } else {
+                        // Find the first waiting pane (matches resolve_pane logic)
+                        let panes = terminal
+                            .list_panes(&SessionHandle(session_name.clone()))
+                            .unwrap_or_default();
+                        panes.iter().find(|p| {
+                            core.status_engine
+                                .get_pane_status(&session_name, &p.0)
+                                .is_some_and(|s| s.is_waiting())
+                        }).and_then(|p| {
+                            let engine = tasks.iter().flat_map(|t| &t.panes)
+                                .find(|tp| tp.pane_id == p.0)
+                                .map(|tp| tp.engine)
+                                .unwrap_or(Engine::ClaudeCode);
+                            Some((p.0.clone(), engine))
+                        })
+                    };
+                    if let Some((pane_id, engine)) = target {
+                        let handle = PaneHandle(pane_id.clone(), String::new());
+                        let baseline = terminal
+                            .capture(&handle, 500)
+                            .map(|s: String| s.lines().count())
+                            .unwrap_or(0);
+                        self.reply_route_pending = Some((task_name.clone(), pane_id.clone()));
+                        self.awaiting_response.insert(pane_id, (task_name.clone(), baseline, engine));
+                    }
+                }
                 (response, vec![])
             }
 
@@ -673,7 +898,7 @@ impl TelegramAdapter {
                 (response, buttons)
             }
 
-            CoreCommand::RenamePane { task_name, .. } | CoreCommand::KillPane { task_name, .. } => {
+            CoreCommand::RenamePane { task_name, .. } => {
                 let response = core.execute(terminal, store, cmd, tasks);
                 let tid = self.register_task(task_name);
                 let buttons = vec![vec![ActionButton {
@@ -681,6 +906,72 @@ impl TelegramAdapter {
                     callback_data: format!("td:{tid}"),
                 }]];
                 (response, buttons)
+            }
+
+            CoreCommand::KillPane { task_name, pane_name } => {
+                // Clean up adapter state for the killed pane
+                if let Some(task) = tasks.iter().find(|t| t.name == *task_name) {
+                    if let Some(tp) = task.find_pane_by_name(pane_name) {
+                        self.pane_modes.remove(&tp.pane_id);
+                        self.progress_messages.remove(&tp.pane_id);
+                    }
+                }
+                let response = core.execute(terminal, store, cmd, tasks);
+                let tid = self.register_task(task_name);
+                let buttons = vec![vec![ActionButton {
+                    label: "Back to task".into(),
+                    callback_data: format!("td:{tid}"),
+                }]];
+                (response, buttons)
+            }
+
+            CoreCommand::SetPaneMode {
+                task_name,
+                pane_name,
+                mode,
+            } => {
+                // Infer task name if empty (from focus or single task)
+                let resolved_task = if task_name.is_empty() {
+                    if let Some(ref f) = self.focus {
+                        f.task_name.clone()
+                    } else if tasks.len() == 1 {
+                        tasks[0].name.clone()
+                    } else {
+                        return (
+                            CoreResponse::Error {
+                                message: "Multiple tasks — specify which: /mode <task> <alerts|stream>".into(),
+                            },
+                            vec![],
+                        );
+                    }
+                } else {
+                    task_name.clone()
+                };
+
+                let resolved_cmd = CoreCommand::SetPaneMode {
+                    task_name: resolved_task.clone(),
+                    pane_name: pane_name.clone(),
+                    mode: *mode,
+                };
+
+                // Store mode locally for all matching panes
+                let task = tasks.iter().find(|t| t.name == resolved_task);
+                if let Some(task) = task {
+                    match pane_name {
+                        Some(name) => {
+                            if let Some(tp) = task.find_pane_by_name(name) {
+                                self.pane_modes.insert(tp.pane_id.clone(), *mode);
+                            }
+                        }
+                        None => {
+                            for tp in &task.panes {
+                                self.pane_modes.insert(tp.pane_id.clone(), *mode);
+                            }
+                        }
+                    }
+                }
+                let response = core.execute(terminal, store, &resolved_cmd, tasks);
+                (response, vec![])
             }
 
             CoreCommand::SendMessage { .. }
@@ -694,6 +985,75 @@ impl TelegramAdapter {
                 (response, vec![])
             }
         }
+    }
+
+    fn handle_command_with_context(
+        &mut self,
+        cmd: &CoreCommand,
+        reply_to_id: Option<i32>,
+        core: &WagnerCore,
+        terminal: &dyn Terminal,
+        store: &Store,
+        tasks: &[Task],
+    ) -> (CoreResponse, Vec<Vec<ActionButton>>) {
+        // If the command was sent as a reply, inject pane context from message_to_pane
+        if let Some(reply_id) = reply_to_id {
+            if let Some((task_name, pane_id)) = self.message_to_pane.get(&reply_id).cloned() {
+                let pane_name = tasks
+                    .iter()
+                    .flat_map(|t| &t.panes)
+                    .find(|p| p.pane_id == pane_id)
+                    .map(|p| p.name.clone());
+
+                let enriched = match cmd {
+                    CoreCommand::CaptureOutput { lines, .. } => {
+                        Some(CoreCommand::CaptureOutput {
+                            task_name: task_name.clone(),
+                            pane_name,
+                            lines: *lines,
+                        })
+                    }
+                    CoreCommand::Approve { .. } => {
+                        Some(CoreCommand::Approve {
+                            task_name: task_name.clone(),
+                            pane_name,
+                        })
+                    }
+                    CoreCommand::Reject { .. } => {
+                        Some(CoreCommand::Reject {
+                            task_name: task_name.clone(),
+                            pane_name,
+                        })
+                    }
+                    CoreCommand::Resume { .. } => {
+                        Some(CoreCommand::Resume {
+                            task_name: task_name.clone(),
+                            pane_name,
+                        })
+                    }
+                    _ => None,
+                };
+
+                if let Some(enriched_cmd) = enriched {
+                    return self.handle_command(&enriched_cmd, core, terminal, store, tasks);
+                }
+            }
+        }
+
+        // If command has empty task_name and no reply context, return usage error
+        match cmd {
+            CoreCommand::CaptureOutput { task_name, .. } if task_name.is_empty() => {
+                return (
+                    CoreResponse::Error {
+                        message: "Usage: /output <task> [lines] — or reply to a pane message".into(),
+                    },
+                    vec![],
+                );
+            }
+            _ => {}
+        }
+
+        self.handle_command(cmd, core, terminal, store, tasks)
     }
 
     fn handle_reply(
@@ -735,7 +1095,11 @@ impl TelegramAdapter {
                 let task_name = task_name.clone();
                 let pane_id = pane_id.clone();
                 let pane = PaneHandle(pane_id.clone(), String::new());
-                if let Err(e) = terminal.send_literal(&pane, text) {
+                let baseline = terminal
+                    .capture(&pane, 500)
+                    .map(|s: String| s.lines().count())
+                    .unwrap_or(0);
+                if let Err(e) = terminal.send_keys(&pane, text) {
                     return (
                         CoreResponse::Error {
                             message: format!("Failed to send: {e}"),
@@ -743,18 +1107,23 @@ impl TelegramAdapter {
                         vec![],
                     );
                 }
-                if let Err(e) = terminal.send_key(&pane, "Enter") {
-                    return (
-                        CoreResponse::Error {
-                            message: format!("Failed to send Enter: {e}"),
-                        },
-                        vec![],
-                    );
-                }
-                self.reply_route_pending = Some((task_name.clone(), pane_id));
+                let engine = tasks
+                    .iter()
+                    .flat_map(|t| &t.panes)
+                    .find(|p| p.pane_id == pane_id)
+                    .map(|p| p.engine)
+                    .unwrap_or(Engine::ClaudeCode);
+                let pane_name = tasks
+                    .iter()
+                    .flat_map(|t| &t.panes)
+                    .find(|p| p.pane_id == pane_id)
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("?");
+                self.reply_route_pending = Some((task_name.clone(), pane_id.clone()));
+                self.awaiting_response.insert(pane_id, (task_name.clone(), baseline, engine));
                 (
                     CoreResponse::Confirmation {
-                        message: format!("Sent to {task_name}"),
+                        message: format!("Sent to {task_name} | {pane_name}"),
                     },
                     vec![],
                 )
@@ -781,7 +1150,7 @@ impl TelegramAdapter {
         });
         self.suppressed_count = 0;
         let target = match pane_name {
-            Some(p) => format!("{task_name}/{p}"),
+            Some(p) => format!("{task_name} | {p}"),
             None => task_name.to_string(),
         };
         let sticky_note = if sticky { " (sticky)" } else { "" };
@@ -837,10 +1206,10 @@ impl TelegramAdapter {
                     }
                 };
                 match self.resolve_entity(id) {
-                    Some((task, pane)) => {
+                    Some((task, pane_id)) => {
                         let task = task.to_string();
-                        let pane = pane.to_string();
-                        let handle = PaneHandle(pane, String::new());
+                        let pane_id = pane_id.to_string();
+                        let handle = PaneHandle(pane_id.clone(), String::new());
                         if let Err(e) = terminal.send_key(&handle, "y") {
                             return (
                                 CoreResponse::Error {
@@ -850,9 +1219,27 @@ impl TelegramAdapter {
                             );
                         }
                         let _ = terminal.send_key(&handle, "Enter");
+                        let display_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.as_str())
+                            .unwrap_or("?");
+                        let engine = tasks
+                            .iter()
+                            .flat_map(|t| &t.panes)
+                            .find(|p| p.pane_id == pane_id)
+                            .map(|p| p.engine)
+                            .unwrap_or(Engine::ClaudeCode);
+                        let baseline = terminal
+                            .capture(&handle, 500)
+                            .map(|s: String| s.lines().count())
+                            .unwrap_or(0);
+                        self.reply_route_pending = Some((task.clone(), pane_id.clone()));
+                        self.awaiting_response.insert(pane_id, (task.clone(), baseline, engine));
                         (
                             CoreResponse::Confirmation {
-                                message: format!("Approved {task}"),
+                                message: format!("Approved {task} | {display_name}"),
                             },
                             vec![],
                         )
@@ -879,10 +1266,10 @@ impl TelegramAdapter {
                     }
                 };
                 match self.resolve_entity(id) {
-                    Some((task, pane)) => {
+                    Some((task, pane_id)) => {
                         let task = task.to_string();
-                        let pane = pane.to_string();
-                        let handle = PaneHandle(pane, String::new());
+                        let pane_id = pane_id.to_string();
+                        let handle = PaneHandle(pane_id.clone(), String::new());
                         if let Err(e) = terminal.send_key(&handle, "n") {
                             return (
                                 CoreResponse::Error {
@@ -892,9 +1279,15 @@ impl TelegramAdapter {
                             );
                         }
                         let _ = terminal.send_key(&handle, "Enter");
+                        let display_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.as_str())
+                            .unwrap_or("?");
                         (
                             CoreResponse::Confirmation {
-                                message: format!("Rejected {task}"),
+                                message: format!("Rejected {task} | {display_name}"),
                             },
                             vec![],
                         )
@@ -1044,6 +1437,19 @@ impl TelegramAdapter {
                 match self.resolve_task(id) {
                     Some(task_name) => {
                         let task_name = task_name.to_string();
+                        // Register for reply routing: pick first waiting pane, or first pane
+                        if let Some(task) = tasks.iter().find(|t| t.name == task_name) {
+                            let session_name = session_name_for_task(&task_name);
+                            let target_pane = task.panes.iter().find(|tp| {
+                                core.status_engine
+                                    .get_pane_status(&session_name, &tp.pane_id)
+                                    .is_some_and(|s| s.is_waiting())
+                            }).or_else(|| task.panes.first());
+                            if let Some(tp) = target_pane {
+                                self.reply_route_pending =
+                                    Some((task_name.clone(), tp.pane_id.clone()));
+                            }
+                        }
                         self.handle_command(
                             &CoreCommand::TaskStatus { task_name },
                             core,
@@ -1138,6 +1544,8 @@ impl TelegramAdapter {
                             .cloned()
                             .unwrap_or(PaneStatus::Unknown);
 
+                        self.reply_route_pending =
+                            Some((task_name.clone(), pane_id.clone()));
                         let tid = self.register_task(&task_name);
                         let mut buttons = vec![];
 
@@ -1154,6 +1562,11 @@ impl TelegramAdapter {
                             ]);
                         }
 
+                        let current_mode = self.get_pane_mode(&pane_id);
+                        let mode_label = match current_mode {
+                            PaneOutputMode::Alerts => "Stream",
+                            PaneOutputMode::Stream => "Alerts",
+                        };
                         buttons.push(vec![
                             ActionButton {
                                 label: "Output".into(),
@@ -1173,6 +1586,10 @@ impl TelegramAdapter {
                                 label: "Kill".into(),
                                 callback_data: format!("kp:{id}"),
                             },
+                            ActionButton {
+                                label: format!("Mode: {mode_label}"),
+                                callback_data: format!("mt:{id}"),
+                            },
                         ]);
                         buttons.push(vec![ActionButton {
                             label: "Back to task".into(),
@@ -1184,7 +1601,7 @@ impl TelegramAdapter {
                         (
                             CoreResponse::Confirmation {
                                 message: format!(
-                                    "{task_name} / {display_name} — {icon} {label}"
+                                    "{task_name} | {display_name} — {icon} {label}"
                                 ),
                             },
                             buttons,
@@ -1423,6 +1840,39 @@ impl TelegramAdapter {
                 }
             }
 
+            "mt" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                match self.resolve_entity(id) {
+                    Some((_task_name, pane_id)) => {
+                        let pane_id = pane_id.to_string();
+                        let current = self.get_pane_mode(&pane_id);
+                        let new_mode = match current {
+                            PaneOutputMode::Alerts => PaneOutputMode::Stream,
+                            PaneOutputMode::Stream => PaneOutputMode::Alerts,
+                        };
+                        self.pane_modes.insert(pane_id.clone(), new_mode);
+                        // Re-render pane detail with updated mode button
+                        self.handle_callback(&format!("pd:{id}"), core, terminal, store, tasks)
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — entity no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
             _ => {
                 warn!(%data, "unknown callback action");
                 (
@@ -1474,7 +1924,7 @@ impl TelegramAdapter {
                 vec![],
             ),
             1 => {
-                let (task_name, pane_id, _) = &waiting_panes[0];
+                let (task_name, pane_id, pane_name) = &waiting_panes[0];
                 let handle = PaneHandle(pane_id.clone(), String::new());
                 if let Err(e) = terminal.send_key(&handle, "y") {
                     return (
@@ -1485,9 +1935,21 @@ impl TelegramAdapter {
                     );
                 }
                 let _ = terminal.send_key(&handle, "Enter");
+                let engine = tasks
+                    .iter()
+                    .flat_map(|t| &t.panes)
+                    .find(|p| p.pane_id == *pane_id)
+                    .map(|p| p.engine)
+                    .unwrap_or(Engine::ClaudeCode);
+                let baseline = terminal
+                    .capture(&handle, 500)
+                    .map(|s: String| s.lines().count())
+                    .unwrap_or(0);
+                self.reply_route_pending = Some((task_name.clone(), pane_id.clone()));
+                self.awaiting_response.insert(pane_id.clone(), (task_name.clone(), baseline, engine));
                 (
                     CoreResponse::Confirmation {
-                        message: format!("Approved {task_name}"),
+                        message: format!("Approved {task_name} | {pane_name}"),
                     },
                     vec![],
                 )
@@ -1498,7 +1960,7 @@ impl TelegramAdapter {
                     .map(|(task, pane_id, pane_name)| {
                         let eid = self.register_entity(task, pane_id);
                         vec![ActionButton {
-                            label: format!("Approve {task}/{pane_name}"),
+                            label: format!("Approve {task} | {pane_name}"),
                             callback_data: format!("a:{eid}"),
                         }]
                     })
@@ -1518,7 +1980,7 @@ impl TelegramAdapter {
 }
 
 enum TelegramInput {
-    Command(ParsedCommand),
+    Command(ParsedCommand, Option<i32>), // optional reply_to_message_id for context
     Reply {
         reply_to_message_id: i32,
         text: String,
@@ -1560,22 +2022,22 @@ impl Adapter for TelegramAdapter {
 
         for (input, msg_ref) in inputs {
             let (response, buttons) = match input {
-                TelegramInput::Command(ParsedCommand::Core(cmd)) => {
-                    self.handle_command(&cmd, core, terminal, store, tasks)
+                TelegramInput::Command(ParsedCommand::Core(cmd), reply_ctx) => {
+                    self.handle_command_with_context(&cmd, reply_ctx, core, terminal, store, tasks)
                 }
                 TelegramInput::Command(ParsedCommand::Focus {
                     task_name,
                     pane_name,
                     sticky,
-                }) => self.handle_focus(&task_name, pane_name.as_deref(), sticky),
-                TelegramInput::Command(ParsedCommand::Unfocus) => self.handle_unfocus(),
-                TelegramInput::Command(ParsedCommand::UsageError { usage }) => (
+                }, _) => self.handle_focus(&task_name, pane_name.as_deref(), sticky),
+                TelegramInput::Command(ParsedCommand::Unfocus, _) => self.handle_unfocus(),
+                TelegramInput::Command(ParsedCommand::UsageError { usage }, _) => (
                     CoreResponse::Error {
                         message: format!("Usage: {usage}"),
                     },
                     vec![],
                 ),
-                TelegramInput::Command(ParsedCommand::Unknown { text }) => (
+                TelegramInput::Command(ParsedCommand::Unknown { text }, _) => (
                     CoreResponse::Error {
                         message: format!("Unknown command: {text}. /help for available commands."),
                     },
@@ -1714,4 +2176,28 @@ fn capture_tail(terminal: &dyn Terminal, pane: &PaneHandle, lines: usize) -> Str
         .capture(pane, lines)
         .map(|s| strip_ansi(&s))
         .unwrap_or_default()
+}
+
+fn strip_tui_chrome(output: &str, engine: Engine) -> String {
+    match engine {
+        Engine::Codex => {
+            let lines: Vec<&str> = output.lines().collect();
+            let mut end = lines.len();
+            // Strip from bottom: empty lines, status bar, suggestion prompts
+            while end > 0 {
+                let trimmed = lines[end - 1].trim();
+                if trimmed.is_empty()
+                    || trimmed.contains("% left")
+                    || trimmed.starts_with('\u{203a}') // ›
+                    || trimmed.starts_with('>')
+                {
+                    end -= 1;
+                } else {
+                    break;
+                }
+            }
+            lines[..end].join("\n")
+        }
+        _ => output.to_string(),
+    }
 }

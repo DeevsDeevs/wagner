@@ -1108,7 +1108,7 @@ fn print_response(response: &wagner::transport::CoreResponse) {
                 );
             }
         }
-        CoreResponse::Status { task_name, panes } => {
+        CoreResponse::Status { task_name, panes, .. } => {
             println!("{}", task_name);
             if panes.is_empty() {
                 println!("  (no panes)");

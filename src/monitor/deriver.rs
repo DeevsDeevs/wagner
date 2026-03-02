@@ -7,6 +7,13 @@ use super::status::{
     PaneStatus, TerminalStatus, WaitReason,
 };
 
+#[derive(Debug, Clone)]
+pub struct CompletedStep {
+    pub tool_name: String,
+    pub context: Option<String>,
+    pub ok: bool,
+}
+
 pub struct StatusDeriver {
     engine: Engine,
     state: DerivedState,
@@ -15,6 +22,10 @@ pub struct StatusDeriver {
     last_context: Option<String>,
     approval_timeout: Duration,
     idle_threshold: Duration,
+    completed_steps: Vec<CompletedStep>,
+    response_text: Option<String>,
+    accumulated_text: Option<String>,
+    action_seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +38,7 @@ enum DerivedState {
 struct PendingTool {
     tool_id: String,
     tool_name: String,
+    context: Option<String>,
     proposed_at: Instant,
 }
 
@@ -40,6 +52,10 @@ impl StatusDeriver {
             last_context: None,
             approval_timeout: Duration::from_millis(1000),
             idle_threshold: Duration::from_millis(2000),
+            completed_steps: Vec::new(),
+            response_text: None,
+            accumulated_text: None,
+            action_seq: 0,
         }
     }
 
@@ -62,12 +78,19 @@ impl StatusDeriver {
             AgentEvent::UserMessage => {
                 self.state = DerivedState::Active;
                 self.pending_tool = None;
+                self.completed_steps.clear();
+                self.response_text = None;
+                self.accumulated_text = None;
+                self.action_seq = 0;
             }
             AgentEvent::Thinking { .. } => {
                 self.state = DerivedState::Active;
             }
-            AgentEvent::TextOutput { .. } => {
+            AgentEvent::TextOutput { text, .. } => {
                 self.state = DerivedState::Active;
+                if !text.is_empty() {
+                    self.accumulated_text = Some(text.clone());
+                }
             }
             AgentEvent::ToolProposed {
                 tool_id,
@@ -80,33 +103,51 @@ impl StatusDeriver {
                 self.pending_tool = Some(PendingTool {
                     tool_id: tool_id.clone(),
                     tool_name: tool_name.clone(),
+                    context: tool_context.clone(),
                     proposed_at: Instant::now(),
                 });
+                self.action_seq += 1;
             }
-            AgentEvent::ToolCompleted { tool_id, .. } => {
-                if self
-                    .pending_tool
-                    .as_ref()
-                    .is_some_and(|p| p.tool_id == *tool_id)
-                {
-                    self.pending_tool = None;
+            AgentEvent::ToolCompleted { tool_id, is_error, .. } => {
+                if let Some(pending) = self.pending_tool.take() {
+                    if pending.tool_id == *tool_id {
+                        self.completed_steps.push(CompletedStep {
+                            tool_name: pending.tool_name,
+                            context: pending.context,
+                            ok: !is_error,
+                        });
+                        self.action_seq += 1;
+                    } else {
+                        self.pending_tool = Some(pending);
+                    }
                 }
                 self.state = DerivedState::Active;
             }
             AgentEvent::ToolRejected { tool_id, .. } => {
-                if self
-                    .pending_tool
-                    .as_ref()
-                    .is_some_and(|p| p.tool_id == *tool_id)
-                {
-                    self.pending_tool = None;
+                if let Some(pending) = self.pending_tool.take() {
+                    if pending.tool_id == *tool_id {
+                        self.completed_steps.push(CompletedStep {
+                            tool_name: pending.tool_name,
+                            context: pending.context,
+                            ok: false,
+                        });
+                        self.action_seq += 1;
+                    } else {
+                        self.pending_tool = Some(pending);
+                    }
                 }
                 self.state = DerivedState::Active;
             }
-            AgentEvent::TurnComplete { .. } => {
+            AgentEvent::TurnComplete { response_text, .. } => {
                 self.state = DerivedState::Idle;
                 self.pending_tool = None;
                 self.last_context = None;
+                if let Some(text) = response_text {
+                    self.response_text = Some(text.clone());
+                } else if let Some(text) = self.accumulated_text.take() {
+                    self.response_text = Some(text);
+                }
+                self.accumulated_text = None;
             }
             AgentEvent::SessionStarted { .. } => {
                 self.state = DerivedState::Active;
@@ -134,6 +175,11 @@ impl StatusDeriver {
         {
             self.state = DerivedState::Idle;
             self.pending_tool = None;
+            if self.response_text.is_none() {
+                if let Some(text) = self.accumulated_text.take() {
+                    self.response_text = Some(text);
+                }
+            }
         }
 
         self.to_pane_status()
@@ -145,6 +191,33 @@ impl StatusDeriver {
 
     pub fn last_context(&self) -> Option<&str> {
         self.last_context.as_deref()
+    }
+
+    pub fn completed_steps(&self) -> &[CompletedStep] {
+        &self.completed_steps
+    }
+
+    pub fn pending_tool_info(&self) -> Option<(&str, Option<&str>)> {
+        self.pending_tool
+            .as_ref()
+            .map(|p| (p.tool_name.as_str(), p.context.as_deref()))
+    }
+
+    pub fn action_seq(&self) -> u64 {
+        self.action_seq
+    }
+
+    pub fn response_text(&self) -> Option<&str> {
+        self.response_text.as_deref()
+    }
+
+    pub fn take_response_text(&mut self) -> Option<String> {
+        self.response_text.take()
+    }
+
+    pub fn clear_steps(&mut self) {
+        self.completed_steps.clear();
+        self.action_seq = 0;
     }
 
     fn to_pane_status(&self) -> PaneStatus {
@@ -250,6 +323,7 @@ mod tests {
         d.process(&AgentEvent::UserMessage);
         let status = d.process(&AgentEvent::TurnComplete {
             engine: Engine::ClaudeCode,
+            response_text: None,
         });
         assert!(status.is_idle());
     }
@@ -367,6 +441,7 @@ mod tests {
         d.process(&AgentEvent::UserMessage);
         let status = d.process(&AgentEvent::TurnComplete {
             engine: Engine::Codex,
+            response_text: None,
         });
         assert!(status.is_idle());
     }
@@ -425,6 +500,7 @@ mod tests {
         assert!(d.last_context().is_some());
         d.process(&AgentEvent::TurnComplete {
             engine: Engine::ClaudeCode,
+            response_text: None,
         });
         assert_eq!(d.last_context(), None);
     }
@@ -456,5 +532,63 @@ mod tests {
             model: None,
         });
         assert!(status.is_active());
+    }
+
+    #[test]
+    fn text_output_captured_on_idle_timeout() {
+        let mut d = claude_deriver();
+        d.process(&AgentEvent::TextOutput {
+            engine: Engine::ClaudeCode,
+            text: "**10 * 10 = 100**".into(),
+        });
+        assert!(d.response_text().is_none());
+
+        std::thread::sleep(Duration::from_millis(110));
+        d.tick();
+        assert!(d.to_pane_status().is_idle());
+        assert_eq!(d.response_text(), Some("**10 * 10 = 100**"));
+    }
+
+    #[test]
+    fn text_output_captured_on_turn_complete_without_response() {
+        let mut d = claude_deriver();
+        d.process(&AgentEvent::TextOutput {
+            engine: Engine::ClaudeCode,
+            text: "Here is the answer".into(),
+        });
+        d.process(&AgentEvent::TurnComplete {
+            engine: Engine::ClaudeCode,
+            response_text: None,
+        });
+        assert_eq!(d.response_text(), Some("Here is the answer"));
+    }
+
+    #[test]
+    fn turn_complete_response_takes_priority_over_accumulated() {
+        let mut d = claude_deriver();
+        d.process(&AgentEvent::TextOutput {
+            engine: Engine::ClaudeCode,
+            text: "streaming chunk".into(),
+        });
+        d.process(&AgentEvent::TurnComplete {
+            engine: Engine::ClaudeCode,
+            response_text: Some("final response".into()),
+        });
+        assert_eq!(d.response_text(), Some("final response"));
+    }
+
+    #[test]
+    fn accumulated_text_cleared_on_user_message() {
+        let mut d = claude_deriver();
+        d.process(&AgentEvent::TextOutput {
+            engine: Engine::ClaudeCode,
+            text: "old response".into(),
+        });
+        d.process(&AgentEvent::UserMessage);
+        d.process(&AgentEvent::TurnComplete {
+            engine: Engine::ClaudeCode,
+            response_text: None,
+        });
+        assert_eq!(d.response_text(), None);
     }
 }
