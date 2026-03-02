@@ -183,8 +183,8 @@ fn test_create_multi_repo_task() {
     let sent_keys = terminal.get_sent_keys();
     assert_eq!(
         sent_keys.len(),
-        2,
-        "Should have pre-written agent command to 2 repo panes"
+        4,
+        "Should have sent launch command + Enter to 2 repo panes"
     );
 
     assert_eq!(task.panes.len(), 2, "Should have 2 tracked panes");

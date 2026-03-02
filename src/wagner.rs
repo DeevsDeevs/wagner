@@ -423,6 +423,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let cmd = self.agent.launch_command(&session_id);
         self.terminal.send_literal(pane, &cmd)?;
+        self.terminal.send_key(pane, "Enter")?;
 
         let jsonl_path = self
             .agent
@@ -441,10 +442,6 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         task.panes.push(tracked.clone());
         Ok(tracked)
-    }
-
-    pub fn launch_agent_in_pane(&self, pane: &PaneHandle) -> Result<()> {
-        self.terminal.send_key(pane, "Enter")
     }
 
     pub fn resume_dead_agents(&self, task_name: &str) -> Result<usize> {

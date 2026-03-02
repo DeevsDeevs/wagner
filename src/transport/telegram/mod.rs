@@ -66,6 +66,8 @@ pub struct TelegramAdapter {
     // Focus mode
     focus: Option<FocusTarget>,
     suppressed_count: u32,
+    // Pending reply-route: set by handlers so the response message gets tracked for replies
+    reply_route_pending: Option<(String, String)>,
     // Authorization
     allowed_users: Vec<i64>,
 }
@@ -110,6 +112,7 @@ impl TelegramAdapter {
             next_task_id: 1,
             focus: None,
             suppressed_count: 0,
+            reply_route_pending: None,
             allowed_users: config.allowed_users.clone(),
         })
     }
@@ -370,7 +373,11 @@ impl TelegramAdapter {
                         pane_id: pane_id.clone(),
                         output_tail,
                     };
-                    self.send_event_text(&enriched, &[]).await?;
+                    let msg_ref = self.send_event_text(&enriched, &[]).await?;
+                    if let Some(r) = msg_ref {
+                        self.message_to_pane
+                            .insert(r.message_id, (task_name.clone(), pane_id.clone()));
+                    }
                 }
             }
 
@@ -539,7 +546,24 @@ impl TelegramAdapter {
         match cmd {
             CoreCommand::ListTasks => {
                 let response = core.execute(terminal, store, cmd, tasks);
-                (response, vec![])
+
+                let mut buttons: Vec<Vec<ActionButton>> = vec![];
+                let mut detail_row = vec![];
+                for t in tasks {
+                    let tid = self.register_task(&t.name);
+                    detail_row.push(ActionButton {
+                        label: format!("{} Details", t.name),
+                        callback_data: format!("td:{tid}"),
+                    });
+                    if detail_row.len() >= 2 {
+                        buttons.push(std::mem::take(&mut detail_row));
+                    }
+                }
+                if !detail_row.is_empty() {
+                    buttons.push(detail_row);
+                }
+
+                (response, buttons)
             }
 
             CoreCommand::TaskStatus { task_name } => {
@@ -644,13 +668,15 @@ impl TelegramAdapter {
     }
 
     fn handle_reply(
-        &self,
+        &mut self,
         reply_to_message_id: i32,
         text: &str,
         terminal: &dyn Terminal,
     ) -> (CoreResponse, Vec<Vec<ActionButton>>) {
         match self.message_to_pane.get(&reply_to_message_id) {
             Some((task_name, pane_id)) => {
+                let task_name = task_name.clone();
+                let pane_id = pane_id.clone();
                 let pane = PaneHandle(pane_id.clone(), String::new());
                 if let Err(e) = terminal.send_literal(&pane, text) {
                     return (
@@ -668,6 +694,7 @@ impl TelegramAdapter {
                         vec![],
                     );
                 }
+                self.reply_route_pending = Some((task_name.clone(), pane_id));
                 (
                     CoreResponse::Confirmation {
                         message: format!("Sent to {task_name}"),
@@ -837,19 +864,45 @@ impl TelegramAdapter {
                     }
                 };
                 match self.resolve_entity(id) {
-                    Some((task, pane)) => {
+                    Some((task, pane_id)) => {
                         let task = task.to_string();
-                        let pane = pane.to_string();
-                        let handle = PaneHandle(pane.clone(), String::new());
+                        let pane_id = pane_id.to_string();
+                        let handle = PaneHandle(pane_id.clone(), String::new());
                         let lines = core.config.daemon.default_output_lines;
                         let content = capture_tail(terminal, &handle, lines);
+                        let display_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.clone())
+                            .unwrap_or_else(|| pane_id.clone());
+
+                        let tid = self.register_task(&task);
+                        let buttons = vec![
+                            vec![
+                                ActionButton {
+                                    label: "Refresh".into(),
+                                    callback_data: format!("o:{id}"),
+                                },
+                                ActionButton {
+                                    label: "Resume".into(),
+                                    callback_data: format!("rs:{id}"),
+                                },
+                            ],
+                            vec![ActionButton {
+                                label: "Back".into(),
+                                callback_data: format!("td:{tid}"),
+                            }],
+                        ];
+
+                        self.reply_route_pending = Some((task.clone(), pane_id.clone()));
                         (
                             CoreResponse::Output {
                                 task_name: task,
-                                pane_name: pane,
+                                pane_name: display_name,
                                 content,
                             },
-                            vec![],
+                            buttons,
                         )
                     }
                     None => (
@@ -1003,6 +1056,47 @@ impl TelegramAdapter {
             "sr" => self.handle_command(&CoreCommand::FullStatus, core, terminal, store, tasks),
             "bk" => self.handle_command(&CoreCommand::FullStatus, core, terminal, store, tasks),
             "uf" => self.handle_unfocus(),
+
+            "rs" => {
+                let id: u16 = match id_str.parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        )
+                    }
+                };
+                match self.resolve_entity(id) {
+                    Some((task, pane_id)) => {
+                        let task = task.to_string();
+                        let pane_id = pane_id.to_string();
+                        let pane_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.clone());
+                        self.handle_command(
+                            &CoreCommand::Resume {
+                                task_name: task,
+                                pane_name,
+                            },
+                            core,
+                            terminal,
+                            store,
+                            tasks,
+                        )
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — entity no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
 
             _ => {
                 warn!(%data, "unknown callback action");
@@ -1171,11 +1265,21 @@ impl Adapter for TelegramAdapter {
                 }
             };
 
-            if let Err(e) = self
+            let pane_assoc = self.reply_route_pending.take();
+            match self
                 .send_response_text(&response, &buttons, Some(&msg_ref))
                 .await
             {
-                warn!(%e, "telegram response send error");
+                Ok(Some(sent)) => {
+                    if let Some((task, pane_id)) = pane_assoc {
+                        self.message_to_pane
+                            .insert(sent.message_id, (task, pane_id));
+                    }
+                }
+                Err(e) => {
+                    warn!(%e, "telegram response send error");
+                }
+                _ => {}
             }
         }
 

@@ -236,6 +236,10 @@ pub fn execute(
                 };
             }
 
+            // Clear any existing typed input before sending the resume command.
+            let _ = terminal.send_key(&target_pane, "C-c");
+            let _ = terminal.send_key(&target_pane, "C-u");
+
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
             if let Err(e) = terminal.send_literal(&target_pane, &resume_cmd) {
                 return CoreResponse::Error {
