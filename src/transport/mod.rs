@@ -58,6 +58,11 @@ pub enum CoreEvent {
         task_name: String,
         status: SessionAggregateStatus,
     },
+    AgentResumed {
+        task_name: String,
+        pane_name: String,
+        pane_id: String,
+    },
     DaemonStarted {
         tasks: Vec<TaskSummary>,
     },
@@ -114,6 +119,8 @@ pub enum CoreCommand {
         pane_name: Option<String>,
         #[serde(default)]
         agent: Option<String>,
+        #[serde(default)]
+        repo_name: Option<String>,
     },
     RenamePane {
         task_name: String,
@@ -255,16 +262,19 @@ mod tests {
                 task_name: "t".into(),
                 pane_name: Some("api".into()),
                 agent: None,
+                repo_name: None,
             },
             CoreCommand::AddPane {
                 task_name: "t".into(),
                 pane_name: None,
                 agent: Some("codex".into()),
+                repo_name: None,
             },
             CoreCommand::AddPane {
                 task_name: "t".into(),
                 pane_name: None,
                 agent: Some("terminal".into()),
+                repo_name: Some("backend".into()),
             },
             CoreCommand::RenamePane {
                 task_name: "t".into(),
@@ -434,6 +444,11 @@ mod tests {
                     ok: true,
                 }),
                 step_count: 2,
+            },
+            CoreEvent::AgentResumed {
+                task_name: "t".into(),
+                pane_name: "api".into(),
+                pane_id: "%5".into(),
             },
             CoreEvent::DaemonStopping,
         ];

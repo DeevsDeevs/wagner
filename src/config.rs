@@ -130,8 +130,8 @@ pub struct Keybindings {
     pub delete: String,
     #[serde(default = "default_send_message")]
     pub send_message: String,
-    #[serde(default = "default_toggle_sidebar")]
-    pub toggle_sidebar: String,
+    #[serde(default = "default_next_tab", alias = "toggle_sidebar")]
+    pub next_tab: String,
     #[serde(default = "default_switch_section")]
     pub switch_section: String,
     #[serde(default = "default_settings")]
@@ -188,7 +188,7 @@ fn default_delete() -> String {
 fn default_send_message() -> String {
     "s".to_string()
 }
-fn default_toggle_sidebar() -> String {
+fn default_next_tab() -> String {
     "Tab".to_string()
 }
 fn default_switch_section() -> String {
@@ -233,7 +233,7 @@ impl Default for Keybindings {
             add_pane: default_add_pane(),
             delete: default_delete(),
             send_message: default_send_message(),
-            toggle_sidebar: default_toggle_sidebar(),
+            next_tab: default_next_tab(),
             switch_section: default_switch_section(),
             settings: default_settings(),
             nav_down: default_nav_down(),

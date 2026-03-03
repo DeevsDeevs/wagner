@@ -86,6 +86,16 @@ pub fn render_event(event: &CoreEvent) -> String {
             String::new()
         }
 
+        CoreEvent::AgentResumed {
+            task_name,
+            pane_name,
+            pane_id: _,
+        } => {
+            let task = escape(task_name);
+            let pane = escape(pane_name);
+            format!("\u{1F504} *{task}* \\| {pane} — Agent resumed \\(was dead\\)")
+        }
+
         CoreEvent::DaemonStopping => String::from("*Wagner Daemon Stopping*"),
     }
 }
@@ -544,6 +554,18 @@ mod tests {
         });
         assert!(text.contains("Reply to this message"));
         assert!(!text.contains("/approve"));
+    }
+
+    #[test]
+    fn render_agent_resumed() {
+        let text = render_event(&CoreEvent::AgentResumed {
+            task_name: "my-task".into(),
+            pane_name: "api".into(),
+            pane_id: "%5".into(),
+        });
+        assert!(text.contains("my\\-task"));
+        assert!(text.contains("api"));
+        assert!(text.contains("resumed"));
     }
 
     #[test]

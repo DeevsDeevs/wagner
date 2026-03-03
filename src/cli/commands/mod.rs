@@ -47,9 +47,7 @@ pub fn run(cli: Cli) -> Result<()> {
         ),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
-        Some(Commands::Add { task, repo, name }) => {
-            cmd_add(&wagner, task, repo.as_deref(), name.as_deref())
-        }
+        Some(Commands::Add { .. }) => unreachable!(),
         Some(Commands::RenamePane {
             task,
             old_name,
@@ -261,29 +259,6 @@ fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: b
     wagner.delete_task(name, force)?;
     info!(task = %name, "Task deleted");
     println!("Deleted task: {}", name);
-
-    Ok(())
-}
-
-fn cmd_add<T: Terminal, A: Agent>(
-    wagner: &Wagner<T, A>,
-    task: Option<String>,
-    repo: Option<&str>,
-    name: Option<&str>,
-) -> Result<()> {
-    let task_name = task
-        .or_else(|| detect_task_from_cwd(&wagner.config))
-        .unwrap_or_else(|| {
-            eprintln!("Error: Not inside a task directory");
-            eprintln!("Either cd into a task, or specify: wagner add <task>");
-            std::process::exit(1);
-        });
-
-    debug!(task = %task_name, repo = ?repo, name = ?name, "Adding pane");
-
-    let pane = wagner.add_pane(&task_name, repo, name)?;
-    info!(task = %task_name, pane = %pane.0, "Pane created");
-    println!("Created pane: {}", pane.0);
 
     Ok(())
 }
@@ -1001,6 +976,12 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
 
 fn try_ipc_command(cmd: &Commands) -> Option<Result<()>> {
     match cmd {
+        Commands::Add {
+            task,
+            repo,
+            name,
+            agent,
+        } => Some(cmd_ipc_add(task.clone(), repo.clone(), name.clone(), agent.clone())),
         Commands::Status { task } => Some(cmd_ipc_status(task.clone())),
         Commands::Send {
             task,
@@ -1015,6 +996,32 @@ fn try_ipc_command(cmd: &Commands) -> Option<Result<()>> {
         Commands::Resume { task, pane } => Some(cmd_ipc_resume(task.clone(), pane.clone())),
         _ => None,
     }
+}
+
+fn cmd_ipc_add(
+    task: Option<String>,
+    repo: Option<String>,
+    name: Option<String>,
+    agent: Option<String>,
+) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let config = Config::load()?;
+    let task_name = task
+        .or_else(|| detect_task_from_cwd(&config))
+        .unwrap_or_else(|| {
+            eprintln!("Error: Not inside a task directory");
+            eprintln!("Either cd into a task, or specify: wagner add <task>");
+            std::process::exit(1);
+        });
+    let cmd = CoreCommand::AddPane {
+        task_name,
+        pane_name: name,
+        agent,
+        repo_name: repo,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
 }
 
 fn cmd_ipc_status(task: Option<String>) -> Result<()> {

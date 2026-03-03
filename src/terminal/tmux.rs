@@ -305,6 +305,15 @@ impl Terminal for Tmux {
         ])?;
         Ok(())
     }
+
+    fn send_text_enter(&self, pane: &PaneHandle, text: &str, delay_ms: u64) -> Result<()> {
+        self.run(&["send-keys", "-t", &pane.0, "-l", text])?;
+        if delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+        self.run(&["send-keys", "-t", &pane.0, "Enter"])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

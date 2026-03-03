@@ -142,6 +142,7 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
                 task_name,
                 pane_name,
                 agent: None,
+                repo_name: None,
             }))
         }
 
@@ -491,10 +492,12 @@ mod tests {
                 task_name,
                 pane_name,
                 agent,
+                repo_name,
             })) => {
                 assert_eq!(task_name, "my-task");
                 assert_eq!(pane_name, None);
                 assert_eq!(agent, None);
+                assert_eq!(repo_name, None);
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -504,10 +507,12 @@ mod tests {
                 task_name,
                 pane_name,
                 agent,
+                repo_name,
             })) => {
                 assert_eq!(task_name, "my-task");
                 assert_eq!(pane_name, Some("custom-name".into()));
                 assert_eq!(agent, None);
+                assert_eq!(repo_name, None);
             }
             other => panic!("unexpected: {other:?}"),
         }

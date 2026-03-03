@@ -67,6 +67,10 @@ pub enum Commands {
         /// Custom pane name (defaults to repo name)
         #[arg(long)]
         name: Option<String>,
+
+        /// Agent engine (claude, codex, or terminal)
+        #[arg(long)]
+        agent: Option<String>,
     },
 
     /// Add a repo to an existing task

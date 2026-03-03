@@ -1,9 +1,11 @@
 mod commands;
 mod outbox;
 mod render;
+mod state;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::time::Instant;
 
 use teloxide::prelude::*;
 use teloxide::types::{
@@ -90,6 +92,8 @@ pub struct TelegramAdapter {
     progress_messages: HashMap<String, ProgressMsgState>,
     // Panes that received user input — stores (task_name, baseline_line_count, engine)
     awaiting_response: HashMap<String, (String, usize, Engine)>,
+    // State persistence
+    last_state_save: Instant,
 }
 
 impl TelegramAdapter {
@@ -121,28 +125,40 @@ impl TelegramAdapter {
             }
         });
 
+        let saved = state::AdapterState::load();
+        let entity_reverse = saved.rebuild_entity_reverse();
+        let task_reverse = saved.rebuild_task_reverse();
+        let focus = saved.focus.map(|f| FocusTarget {
+            task_name: f.task_name,
+            pane_name: f.pane_name,
+            _sticky: false,
+        });
+        let message_to_pane: HashMap<i32, (String, String)> =
+            saved.message_to_pane.into_iter().collect();
+
         Ok(Self {
             bot,
             chat_id,
             outbox,
-            offset: AtomicI32::new(0),
+            offset: AtomicI32::new(saved.telegram_offset),
             live_messages: HashMap::new(),
-            message_to_pane: HashMap::new(),
-            entity_registry: HashMap::new(),
-            entity_reverse: HashMap::new(),
-            task_registry: HashMap::new(),
-            task_reverse: HashMap::new(),
-            next_entity_id: 1,
-            next_task_id: 1,
-            focus: None,
+            message_to_pane,
+            entity_registry: saved.entity_registry,
+            entity_reverse,
+            task_registry: saved.task_registry,
+            task_reverse,
+            next_entity_id: saved.next_entity_id.max(1),
+            next_task_id: saved.next_task_id.max(1),
+            focus,
             suppressed_count: 0,
             reply_route_pending: None,
             rename_route_pending: None,
             pending_rename: HashMap::new(),
             allowed_users: config.allowed_users.clone(),
-            pane_modes: HashMap::new(),
+            pane_modes: saved.pane_modes,
             progress_messages: HashMap::new(),
             awaiting_response: HashMap::new(),
+            last_state_save: Instant::now(),
         })
     }
 
@@ -179,6 +195,38 @@ impl TelegramAdapter {
 
     fn resolve_task(&self, id: u16) -> Option<&str> {
         self.task_registry.get(&id).map(|s| s.as_str())
+    }
+
+    fn save_state(&mut self) {
+        let focus = self.focus.as_ref().map(|f| state::SerializableFocus {
+            task_name: f.task_name.clone(),
+            pane_name: f.pane_name.clone(),
+        });
+        let mut message_entries: Vec<(i32, (String, String))> =
+            self.message_to_pane.iter().map(|(&k, v)| (k, v.clone())).collect();
+        message_entries.sort_by_key(|(k, _)| *k);
+        if message_entries.len() > 500 {
+            let start = message_entries.len() - 500;
+            message_entries = message_entries.split_off(start);
+        }
+        let adapter_state = state::AdapterState {
+            telegram_offset: self.offset.load(Ordering::Relaxed),
+            pane_modes: self.pane_modes.clone(),
+            focus,
+            entity_registry: self.entity_registry.clone(),
+            task_registry: self.task_registry.clone(),
+            next_entity_id: self.next_entity_id,
+            next_task_id: self.next_task_id,
+            message_to_pane: message_entries,
+        };
+        adapter_state.save();
+        self.last_state_save = Instant::now();
+    }
+
+    fn maybe_save_state(&mut self) {
+        if self.last_state_save.elapsed() >= std::time::Duration::from_secs(60) {
+            self.save_state();
+        }
     }
 
     fn matches_focus(&self, task_name: &str, pane_name: &str) -> bool {
@@ -588,8 +636,22 @@ impl TelegramAdapter {
                 }
             }
 
-            CoreEvent::DaemonStarted { .. } | CoreEvent::DaemonStopping => {
+            CoreEvent::AgentResumed { task_name, .. } => {
+                let tid = self.register_task(task_name);
+                let buttons = vec![vec![ActionButton {
+                    label: "Details".into(),
+                    callback_data: format!("td:{tid}"),
+                }]];
+                self.send_event_text(event, &buttons).await?;
+            }
+
+            CoreEvent::DaemonStarted { .. } => {
                 self.send_event_text(event, &[]).await?;
+            }
+
+            CoreEvent::DaemonStopping => {
+                self.send_event_text(event, &[]).await?;
+                self.save_state();
             }
         }
 
@@ -1679,6 +1741,7 @@ impl TelegramAdapter {
                                 task_name,
                                 pane_name: None,
                                 agent,
+                                repo_name: None,
                             },
                             core,
                             terminal,
@@ -2053,6 +2116,7 @@ impl Adapter for TelegramAdapter {
             }
         }
 
+        self.maybe_save_state();
         Ok(())
     }
 }

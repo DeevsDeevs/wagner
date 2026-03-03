@@ -137,7 +137,10 @@ pub fn execute(
                 None,
             ) {
                 Some(pane) => {
-                    if let Err(e) = terminal.send_keys(&pane, message) {
+                    let delay = resolve_pane_engine(tasks, task_name, &pane.0)
+                        .map(|e| e.enter_delay_ms())
+                        .unwrap_or(100);
+                    if let Err(e) = terminal.send_text_enter(&pane, message, delay) {
                         return CoreResponse::Error {
                             message: format!("Failed to send: {e}"),
                         };
@@ -172,15 +175,8 @@ pub fn execute(
                 Some(true),
             ) {
                 Some(pane) => {
-                    if let Err(e) = terminal.send_key(&pane, "y") {
-                        return CoreResponse::Error {
-                            message: format!("Failed to approve: {e}"),
-                        };
-                    }
-                    if let Err(e) = terminal.send_key(&pane, "Enter") {
-                        return CoreResponse::Error {
-                            message: format!("Failed to send Enter: {e}"),
-                        };
+                    if let Err(e) = send_confirm_to_pane(terminal, &pane, "y") {
+                        return CoreResponse::Error { message: e };
                     }
                     let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
                     CoreResponse::Confirmation {
@@ -208,15 +204,8 @@ pub fn execute(
                 Some(true),
             ) {
                 Some(pane) => {
-                    if let Err(e) = terminal.send_key(&pane, "n") {
-                        return CoreResponse::Error {
-                            message: format!("Failed to reject: {e}"),
-                        };
-                    }
-                    if let Err(e) = terminal.send_key(&pane, "Enter") {
-                        return CoreResponse::Error {
-                            message: format!("Failed to send Enter: {e}"),
-                        };
+                    if let Err(e) = send_confirm_to_pane(terminal, &pane, "n") {
+                        return CoreResponse::Error { message: e };
                     }
                     let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
                     CoreResponse::Confirmation {
@@ -284,7 +273,7 @@ pub fn execute(
             let _ = terminal.send_key(&target_pane, "C-u");
 
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            if let Err(e) = terminal.send_keys(&target_pane, &resume_cmd) {
+            if let Err(e) = terminal.send_text_enter(&target_pane, &resume_cmd, tracked.engine.enter_delay_ms()) {
                 return CoreResponse::Error {
                     message: format!("Failed to send resume command: {e}"),
                 };
@@ -379,6 +368,7 @@ pub fn execute(
             task_name,
             pane_name,
             agent,
+            repo_name,
         } => {
             let engine_type = match agent.as_deref() {
                 Some("codex") => Engine::Codex,
@@ -402,13 +392,23 @@ pub fn execute(
                 }
             };
 
-            let repo = match task.repos.first() {
-                Some(r) => r.clone(),
-                None => {
-                    return CoreResponse::Error {
-                        message: format!("Task '{task_name}' has no repos"),
-                    };
-                }
+            let repo = match repo_name {
+                Some(name) => match task.repos.iter().find(|r| r.name == *name).cloned() {
+                    Some(r) => r,
+                    None => {
+                        return CoreResponse::Error {
+                            message: format!("Repo '{}' not found in task '{}'", name, task_name),
+                        };
+                    }
+                },
+                None => match task.repos.first().cloned() {
+                    Some(r) => r,
+                    None => {
+                        return CoreResponse::Error {
+                            message: format!("Task '{task_name}' has no repos"),
+                        };
+                    }
+                },
             };
 
             let session_alive = terminal.session_exists(task_name).unwrap_or(false);
@@ -467,7 +467,7 @@ pub fn execute(
 
             if engine_type != Engine::Terminal {
                 let launch_cmd = engine_type.launch_command(&session_id);
-                if let Err(e) = terminal.send_keys(&pane, &launch_cmd) {
+                if let Err(e) = terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms()) {
                     return CoreResponse::Error {
                         message: format!("Failed to launch agent: {e}"),
                     };
@@ -614,6 +614,16 @@ pub fn execute(
     }
 }
 
+fn send_confirm_to_pane(
+    terminal: &dyn Terminal,
+    pane: &PaneHandle,
+    response: &str,
+) -> Result<(), String> {
+    terminal
+        .send_confirm(pane, response)
+        .map_err(|e| format!("Failed to send '{}': {}", response, e))
+}
+
 fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task]) -> CoreResponse {
     let mut waiting_panes: Vec<(String, String, String)> = vec![];
 
@@ -640,12 +650,9 @@ fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task])
         1 => {
             let (task_name, pane_id, _) = &waiting_panes[0];
             let handle = PaneHandle(pane_id.clone(), String::new());
-            if let Err(e) = terminal.send_key(&handle, "y") {
-                return CoreResponse::Error {
-                    message: format!("Failed to approve: {e}"),
-                };
+            if let Err(e) = send_confirm_to_pane(terminal, &handle, "y") {
+                return CoreResponse::Error { message: e };
             }
-            let _ = terminal.send_key(&handle, "Enter");
             let display_pane = resolve_pane_display_name(tasks, task_name, pane_id);
             CoreResponse::Confirmation {
                 message: format!("Approved {task_name} | {display_pane}"),
@@ -662,6 +669,14 @@ fn capture_tail(terminal: &dyn Terminal, pane: &PaneHandle, lines: usize) -> Str
         .capture(pane, lines)
         .map(|s| strip_ansi(&s))
         .unwrap_or_default()
+}
+
+fn resolve_pane_engine(tasks: &[Task], task_name: &str, pane_id: &str) -> Option<Engine> {
+    tasks
+        .iter()
+        .find(|t| t.name == task_name)
+        .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+        .map(|tp| tp.engine)
 }
 
 fn resolve_pane_display_name(tasks: &[Task], task_name: &str, pane_id: &str) -> String {

@@ -57,10 +57,10 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
         ]),
         Line::from(vec![
             Span::styled(
-                format!("  {}", fmt_key(&keybindings.toggle_sidebar)),
+                format!("  {}", fmt_key(&keybindings.next_tab)),
                 key_style,
             ),
-            Span::raw("Toggle sidebar"),
+            Span::raw("Switch tab"),
         ]),
         Line::from(vec![
             Span::styled(format!("  {}", fmt_key("Enter")), key_style),

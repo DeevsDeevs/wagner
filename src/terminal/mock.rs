@@ -10,6 +10,7 @@ pub struct MockTerminal {
     pub sent_keys: Arc<Mutex<Vec<(String, String)>>>,
     pub resize_calls: Arc<Mutex<Vec<(String, u16, u16)>>>,
     pub capture_output: Arc<Mutex<HashMap<String, String>>>,
+    pub pane_commands: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl MockTerminal {
@@ -39,6 +40,13 @@ impl MockTerminal {
             .lock()
             .unwrap()
             .insert(pane_id.to_string(), output.to_string());
+    }
+
+    pub fn set_pane_command(&self, pane_id: &str, command: &str) {
+        self.pane_commands
+            .lock()
+            .unwrap()
+            .insert(pane_id.to_string(), command.to_string());
     }
 }
 
@@ -127,8 +135,14 @@ impl Terminal for MockTerminal {
             .contains_key(&session_name_for_task(name)))
     }
 
-    fn get_pane_command(&self, _pane: &PaneHandle) -> Result<String> {
-        Ok("bash".to_string())
+    fn get_pane_command(&self, pane: &PaneHandle) -> Result<String> {
+        Ok(self
+            .pane_commands
+            .lock()
+            .unwrap()
+            .get(&pane.0)
+            .cloned()
+            .unwrap_or_else(|| "bash".to_string()))
     }
 
     fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()> {

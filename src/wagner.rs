@@ -355,6 +355,63 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         }
     }
 
+    pub fn add_pane_with_engine(
+        &self,
+        task_name: &str,
+        repo_name: Option<&str>,
+        pane_name: Option<&str>,
+        engine: Option<crate::model::Engine>,
+    ) -> Result<PaneHandle> {
+        let mut task = self.store.load_task(task_name)?;
+        let session = SessionHandle(session_name_for_task(task_name));
+
+        let created_session = if !self.terminal.session_exists(task_name)? {
+            self.terminal.create_session(task_name, &task.path)?;
+            true
+        } else {
+            false
+        };
+
+        let repo = match repo_name {
+            Some(name) => task
+                .repos
+                .iter()
+                .find(|r| r.name == name)
+                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
+                .clone(),
+            None => {
+                if task.repos.len() == 1 {
+                    task.repos[0].clone()
+                } else {
+                    TaskRepo {
+                        name: task_name.to_string(),
+                        source: RepoSource::Local(task.path.clone()),
+                        worktree: task.path.clone(),
+                        branch: String::new(),
+                    }
+                }
+            }
+        };
+
+        let pane = if created_session {
+            let panes = self.terminal.list_panes(&session)?;
+            panes
+                .into_iter()
+                .next()
+                .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
+        } else {
+            self.terminal.create_pane(&session, &repo.worktree)?
+        };
+
+        if let Some(engine_type) = engine {
+            self.prepare_agent_in_pane_with_engine(&mut task, &pane, &repo, pane_name, engine_type)?;
+        } else {
+            self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
+        }
+        self.store.save_task(&task)?;
+        Ok(pane)
+    }
+
     pub fn add_pane(
         &self,
         task_name: &str,
@@ -405,6 +462,64 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
         self.store.save_task(&task)?;
         Ok(pane)
+    }
+
+    fn prepare_agent_in_pane_with_engine(
+        &self,
+        task: &mut Task,
+        pane: &PaneHandle,
+        repo: &TaskRepo,
+        name_override: Option<&str>,
+        engine_type: crate::model::Engine,
+    ) -> Result<TrackedPane> {
+        use crate::model::{Engine, PENDING_DISCOVERY};
+        let session_id = Uuid::new_v4().to_string();
+
+        let pane_name = match name_override {
+            Some(n) => n.to_string(),
+            None => {
+                let base = match engine_type {
+                    Engine::ClaudeCode => format!("claude-{}", repo.name),
+                    Engine::Codex => format!("codex-{}", repo.name),
+                    Engine::Terminal => repo.name.clone(),
+                };
+                task.next_pane_name(&base)
+            }
+        };
+
+        if engine_type != Engine::Terminal {
+            let cmd = engine_type.launch_command(&session_id);
+            self.terminal.send_text_enter(pane, &cmd, engine_type.enter_delay_ms())?;
+        }
+
+        let jsonl_path = match engine_type {
+            Engine::ClaudeCode => {
+                let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
+                if let Ok(home) = std::env::var("HOME") {
+                    std::path::PathBuf::from(home)
+                        .join(".claude")
+                        .join("projects")
+                        .join(project_id)
+                        .join(format!("{session_id}.jsonl"))
+                } else {
+                    PathBuf::from(PENDING_DISCOVERY)
+                }
+            }
+            _ => PathBuf::from(PENDING_DISCOVERY),
+        };
+
+        let tracked = TrackedPane {
+            name: pane_name,
+            repo_name: repo.name.clone(),
+            engine: engine_type,
+            session_id,
+            pane_id: pane.0.clone(),
+            jsonl_path,
+            launched_at: Utc::now(),
+        };
+
+        task.panes.push(tracked.clone());
+        Ok(tracked)
     }
 
     fn prepare_agent_in_pane(

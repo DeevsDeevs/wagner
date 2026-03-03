@@ -44,6 +44,14 @@ impl Engine {
             Engine::Terminal => "",
         }
     }
+
+    pub fn enter_delay_ms(&self) -> u64 {
+        match self {
+            Engine::ClaudeCode => 5,
+            Engine::Codex => 100,
+            Engine::Terminal => 10,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

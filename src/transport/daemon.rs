@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::net::UnixListener;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::core::WagnerCore;
+use crate::model::Engine;
 use crate::store::Store;
-use crate::terminal::{Tmux, session_name_for_task};
+use crate::terminal::{PaneHandle, Tmux, Terminal, session_name_for_task};
 use crate::transport::{CoreCommand, CoreResponse};
 
 use super::adapter::{Adapter, DaemonAdapter, LogAdapter};
@@ -20,6 +21,7 @@ struct DaemonState {
     core: WagnerCore,
     terminal: Tmux,
     store: Store,
+    last_health_check: Instant,
 }
 
 pub fn pid_path() -> PathBuf {
@@ -100,6 +102,7 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
         core,
         terminal,
         store,
+        last_health_check: Instant::now(),
     };
 
     let tasks = state.store.list_tasks()?;
@@ -190,13 +193,79 @@ async fn daemon_tick(state: &mut DaemonState, adapter: &mut DaemonAdapter) -> cr
 
     let events = state.core.tick(&state.terminal, &tasks);
 
-    adapter
-        .handle_events(&events, &state.core, &state.terminal, &state.store, &tasks)
-        .await?;
+    if tokio::time::timeout(
+        Duration::from_secs(30),
+        adapter.handle_events(&events, &state.core, &state.terminal, &state.store, &tasks),
+    )
+    .await
+    .is_err()
+    {
+        error!("adapter handle_events timed out (30s)");
+    }
 
-    adapter
-        .poll_and_handle(&state.core, &state.terminal, &state.store, &tasks)
-        .await?;
+    if tokio::time::timeout(
+        Duration::from_secs(10),
+        adapter.poll_and_handle(&state.core, &state.terminal, &state.store, &tasks),
+    )
+    .await
+    .is_err()
+    {
+        error!("adapter poll_and_handle timed out (10s)");
+    }
+
+    if state.last_health_check.elapsed() >= Duration::from_secs(30) {
+        let health_events = check_agent_health(&state.terminal, &tasks);
+        if !health_events.is_empty() {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(10),
+                adapter.handle_events(
+                    &health_events,
+                    &state.core,
+                    &state.terminal,
+                    &state.store,
+                    &tasks,
+                ),
+            )
+            .await;
+        }
+        state.last_health_check = Instant::now();
+    }
 
     Ok(())
+}
+
+fn check_agent_health(terminal: &Tmux, tasks: &[crate::model::Task]) -> Vec<CoreEvent> {
+    let mut events = Vec::new();
+    for task in tasks {
+        if !terminal.session_exists(&task.name).unwrap_or(false) {
+            continue;
+        }
+        for tracked in &task.panes {
+            if tracked.engine == Engine::Terminal {
+                continue;
+            }
+            let pane = PaneHandle(tracked.pane_id.clone(), tracked.name.clone());
+            if let Ok(cmd) = terminal.get_pane_command(&pane) {
+                let expected = tracked.engine.process_name();
+                if !expected.is_empty() && !cmd.contains(expected) {
+                    let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
+                    if !resume_cmd.is_empty() {
+                        if let Err(e) = terminal.send_keys(&pane, &resume_cmd) {
+                            warn!(
+                                task = %task.name, pane = %tracked.name,
+                                error = %e, "failed to resume dead agent"
+                            );
+                            continue;
+                        }
+                        events.push(CoreEvent::AgentResumed {
+                            task_name: task.name.clone(),
+                            pane_name: tracked.name.clone(),
+                            pane_id: tracked.pane_id.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    events
 }

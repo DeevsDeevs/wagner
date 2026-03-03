@@ -46,6 +46,14 @@ pub enum InputMode {
     DiffContent,
     ChainSearch,
     VisualSelect,
+    AddPaneAgent,
+    AddPaneName,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PendingAddPane {
+    pub repo_name: Option<String>,
+    pub agent: Option<String>,
 }
 
 pub struct App<T: Terminal, A: Agent> {
@@ -84,6 +92,9 @@ pub struct App<T: Terminal, A: Agent> {
     pub input_cursor: usize,
     pub input_label: String,
     pub confirm_action: Option<String>,
+    pub pending_add_pane: PendingAddPane,
+    pub add_pane_options: Vec<String>,
+    pub add_pane_index: usize,
     pub status_message: Option<(String, Instant)>,
 
     pub settings_items: Vec<(String, String)>,
@@ -160,6 +171,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             input_cursor: 0,
             input_label: String::new(),
             confirm_action: None,
+            pending_add_pane: PendingAddPane::default(),
+            add_pane_options: Vec::new(),
+            add_pane_index: 0,
             status_message: None,
 
             settings_items: Vec::new(),
@@ -921,18 +935,80 @@ impl<T: Terminal, A: Agent> App<T, A> {
     }
 
     pub fn add_pane(&mut self) {
-        if let Some(task_name) = &self.selected_task.clone() {
-            match self.wagner.add_pane(task_name, None, None) {
-                Ok(pane) => {
-                    self.set_status(&format!("Added pane: {}", pane.0));
-                    let _ = self.refresh_data();
-                }
-                Err(e) => {
-                    self.set_status(&format!("Error: {}", e));
-                }
-            }
-        } else {
+        let Some(task_name) = &self.selected_task.clone() else {
             self.set_status("No task selected");
+            return;
+        };
+        let task = match self.wagner.get_task(task_name) {
+            Ok(t) => t,
+            Err(e) => {
+                self.set_status(&format!("Error: {}", e));
+                return;
+            }
+        };
+        self.pending_add_pane = PendingAddPane::default();
+        if task.repos.len() <= 1 {
+            self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
+            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Terminal".into()];
+            self.add_pane_index = 0;
+            self.input_mode = InputMode::AddPaneAgent;
+            self.input_label = "Select agent".to_string();
+        } else {
+            self.add_pane_options = task.repos.iter().map(|r| r.name.clone()).collect();
+            self.add_pane_index = 0;
+            self.input_mode = InputMode::AddPaneAgent;
+            self.input_label = "Select agent (repo auto-selected)".to_string();
+            self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
+            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Terminal".into()];
+        }
+    }
+
+    pub fn submit_add_pane_agent(&mut self) {
+        let agent = match self.add_pane_index {
+            0 => Some("claude".to_string()),
+            1 => Some("codex".to_string()),
+            2 => Some("terminal".to_string()),
+            _ => Some("claude".to_string()),
+        };
+        self.pending_add_pane.agent = agent;
+        self.input_mode = InputMode::AddPaneName;
+        self.input_buffer.clear();
+        self.input_cursor = 0;
+        self.input_label = "Pane name (Enter to auto)".to_string();
+    }
+
+    pub fn submit_add_pane_name(&mut self) {
+        let Some(task_name) = &self.selected_task.clone() else {
+            self.cancel_input();
+            return;
+        };
+        let pane_name = if self.input_buffer.is_empty() {
+            None
+        } else {
+            Some(self.input_buffer.clone())
+        };
+        let pending = std::mem::take(&mut self.pending_add_pane);
+        self.input_mode = InputMode::Normal;
+        self.input_buffer.clear();
+
+        let engine = match pending.agent.as_deref() {
+            Some("codex") => Some(crate::model::Engine::Codex),
+            Some("terminal") => Some(crate::model::Engine::Terminal),
+            _ => None,
+        };
+        match self.wagner.add_pane_with_engine(
+            task_name,
+            pending.repo_name.as_deref(),
+            pane_name.as_deref(),
+            engine,
+        ) {
+            Ok(pane) => {
+                self.set_status(&format!("Added pane: {}", pane.1));
+                let _ = self.refresh_data();
+            }
+            Err(e) => {
+                self.set_status(&format!("Error: {}", e));
+            }
         }
     }
 
@@ -963,7 +1039,9 @@ impl<T: Terminal, A: Agent> App<T, A> {
             | InputMode::DiffFileList
             | InputMode::DiffContent
             | InputMode::ChainSearch
-            | InputMode::VisualSelect => {}
+            | InputMode::VisualSelect
+            | InputMode::AddPaneAgent
+            | InputMode::AddPaneName => {}
         }
         self.input_mode = InputMode::Normal;
         self.input_buffer.clear();
@@ -1223,7 +1301,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             ("key.add_pane".to_string(), kb.add_pane.clone()),
             ("key.delete".to_string(), kb.delete.clone()),
             ("key.send_message".to_string(), kb.send_message.clone()),
-            ("key.toggle_sidebar".to_string(), kb.toggle_sidebar.clone()),
+            ("key.next_tab".to_string(), kb.next_tab.clone()),
             ("key.switch_section".to_string(), kb.switch_section.clone()),
             ("key.settings".to_string(), kb.settings.clone()),
             ("key.nav_down".to_string(), kb.nav_down.clone()),
@@ -1280,7 +1358,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             "key.add_pane" => cfg.keybindings.add_pane = value.to_string(),
             "key.delete" => cfg.keybindings.delete = value.to_string(),
             "key.send_message" => cfg.keybindings.send_message = value.to_string(),
-            "key.toggle_sidebar" => cfg.keybindings.toggle_sidebar = value.to_string(),
+            "key.next_tab" => cfg.keybindings.next_tab = value.to_string(),
             "key.switch_section" => cfg.keybindings.switch_section = value.to_string(),
             "key.settings" => cfg.keybindings.settings = value.to_string(),
             "key.nav_down" => cfg.keybindings.nav_down = value.to_string(),

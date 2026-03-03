@@ -39,6 +39,21 @@ pub trait Terminal: Send + Sync {
     fn session_exists(&self, name: &str) -> Result<bool>;
     fn get_pane_command(&self, pane: &PaneHandle) -> Result<String>;
     fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()>;
+
+    fn send_confirm(&self, pane: &PaneHandle, response: &str) -> Result<()> {
+        self.send_key(pane, response)?;
+        self.send_key(pane, "Enter")?;
+        Ok(())
+    }
+
+    fn send_text_enter(&self, pane: &PaneHandle, text: &str, delay_ms: u64) -> Result<()> {
+        self.send_literal(pane, text)?;
+        if delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+        self.send_key(pane, "Enter")?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
