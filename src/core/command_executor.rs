@@ -273,7 +273,9 @@ pub fn execute(
             let _ = terminal.send_key(&target_pane, "C-u");
 
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            if let Err(e) = terminal.send_text_enter(&target_pane, &resume_cmd, tracked.engine.enter_delay_ms()) {
+            if let Err(e) =
+                terminal.send_text_enter(&target_pane, &resume_cmd, tracked.engine.enter_delay_ms())
+            {
                 return CoreResponse::Error {
                     message: format!("Failed to send resume command: {e}"),
                 };
@@ -467,7 +469,9 @@ pub fn execute(
 
             if engine_type != Engine::Terminal {
                 let launch_cmd = engine_type.launch_command(&session_id);
-                if let Err(e) = terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms()) {
+                if let Err(e) =
+                    terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms())
+                {
                     return CoreResponse::Error {
                         message: format!("Failed to launch agent: {e}"),
                     };

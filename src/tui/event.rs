@@ -115,13 +115,11 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
 
             match app.input_mode {
                 InputMode::Normal => handle_normal_mode(app, key.code, key.modifiers),
-                InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm
-                | InputMode::AddPaneName => {
-                    handle_input_mode(app, key.code, key.modifiers)
-                }
-                InputMode::AddPaneAgent => {
-                    handle_add_pane_agent_mode(app, key.code)
-                }
+                InputMode::NewTask
+                | InputMode::SendMessage
+                | InputMode::Confirm
+                | InputMode::AddPaneName => handle_input_mode(app, key.code, key.modifiers),
+                InputMode::AddPaneAgent => handle_add_pane_agent_mode(app, key.code),
                 InputMode::SelectWorkspace => handle_workspace_select_mode(app, key.code),
                 InputMode::Settings => handle_settings_mode(app, key.code),
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
@@ -170,8 +168,11 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             InputMode::Settings | InputMode::EditSetting => {
                 app.close_settings();
             }
-            InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm
-            | InputMode::AddPaneAgent | InputMode::AddPaneName => {
+            InputMode::NewTask
+            | InputMode::SendMessage
+            | InputMode::Confirm
+            | InputMode::AddPaneAgent
+            | InputMode::AddPaneName => {
                 app.cancel_input();
             }
             InputMode::SelectWorkspace => {

@@ -981,7 +981,12 @@ fn try_ipc_command(cmd: &Commands) -> Option<Result<()>> {
             repo,
             name,
             agent,
-        } => Some(cmd_ipc_add(task.clone(), repo.clone(), name.clone(), agent.clone())),
+        } => Some(cmd_ipc_add(
+            task.clone(),
+            repo.clone(),
+            name.clone(),
+            agent.clone(),
+        )),
         Commands::Status { task } => Some(cmd_ipc_status(task.clone())),
         Commands::Send {
             task,

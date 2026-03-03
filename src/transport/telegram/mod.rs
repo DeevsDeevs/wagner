@@ -202,8 +202,11 @@ impl TelegramAdapter {
             task_name: f.task_name.clone(),
             pane_name: f.pane_name.clone(),
         });
-        let mut message_entries: Vec<(i32, (String, String))> =
-            self.message_to_pane.iter().map(|(&k, v)| (k, v.clone())).collect();
+        let mut message_entries: Vec<(i32, (String, String))> = self
+            .message_to_pane
+            .iter()
+            .map(|(&k, v)| (k, v.clone()))
+            .collect();
         message_entries.sort_by_key(|(k, _)| *k);
         if message_entries.len() > 500 {
             let start = message_entries.len() - 500;

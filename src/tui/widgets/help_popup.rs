@@ -56,10 +56,7 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::raw("Switch Tasks/Panes section"),
         ]),
         Line::from(vec![
-            Span::styled(
-                format!("  {}", fmt_key(&keybindings.next_tab)),
-                key_style,
-            ),
+            Span::styled(format!("  {}", fmt_key(&keybindings.next_tab)), key_style),
             Span::raw("Switch tab"),
         ]),
         Line::from(vec![

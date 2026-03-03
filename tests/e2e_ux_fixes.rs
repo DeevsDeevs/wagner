@@ -114,11 +114,7 @@ impl E2eContext {
         repo2_path
     }
 
-    fn create_task_with_panes(
-        &self,
-        terminal: &MockTerminal,
-        task_name: &str,
-    ) -> wagner::Task {
+    fn create_task_with_panes(&self, terminal: &MockTerminal, task_name: &str) -> wagner::Task {
         let wagner = Wagner::new(terminal.clone(), TestAgent::echo(), self.config());
         let spec = RepoSpec {
             name: "main".to_string(),
@@ -129,11 +125,7 @@ impl E2eContext {
         wagner.get_task(task_name).unwrap()
     }
 
-    fn execute_cmd(
-        &self,
-        terminal: &MockTerminal,
-        cmd: &CoreCommand,
-    ) -> CoreResponse {
+    fn execute_cmd(&self, terminal: &MockTerminal, cmd: &CoreCommand) -> CoreResponse {
         let config = self.config();
         let store = Store::new(config.clone());
         let core = WagnerCore::new(config);
@@ -162,7 +154,10 @@ fn add_pane_default_agent() {
 
     match resp {
         CoreResponse::Confirmation { message } => {
-            assert!(message.contains("Claude"), "Expected 'Claude' in: {message}");
+            assert!(
+                message.contains("Claude"),
+                "Expected 'Claude' in: {message}"
+            );
         }
         other => panic!("Expected Confirmation, got: {other:?}"),
     }
@@ -171,7 +166,10 @@ fn add_pane_default_agent() {
     let launch = keys.iter().find(|(_, k)| k.contains("claude"));
     assert!(launch.is_some(), "Should have sent claude launch command");
     let (_, cmd) = launch.unwrap();
-    assert!(cmd.contains("--session-id"), "Launch should contain --session-id: {cmd}");
+    assert!(
+        cmd.contains("--session-id"),
+        "Launch should contain --session-id: {cmd}"
+    );
 }
 
 #[test]
@@ -235,8 +233,13 @@ fn add_pane_terminal() {
     // Specifically, no send_literal (text) + "Enter" pair for launch.
     let keys_after = terminal.get_sent_keys();
     let new_keys: Vec<_> = keys_after[keys_before..].to_vec();
-    let has_launch = new_keys.iter().any(|(_, k)| k == "codex" || k.contains("claude"));
-    assert!(!has_launch, "Terminal pane should not launch an agent: {new_keys:?}");
+    let has_launch = new_keys
+        .iter()
+        .any(|(_, k)| k == "codex" || k.contains("claude"));
+    assert!(
+        !has_launch,
+        "Terminal pane should not launch an agent: {new_keys:?}"
+    );
 }
 
 #[test]
@@ -299,7 +302,10 @@ fn add_pane_with_repo_name() {
 
     match resp {
         CoreResponse::Confirmation { message } => {
-            assert!(message.contains("Claude"), "Expected 'Claude' in: {message}");
+            assert!(
+                message.contains("Claude"),
+                "Expected 'Claude' in: {message}"
+            );
         }
         other => panic!("Expected Confirmation, got: {other:?}"),
     }
@@ -404,7 +410,10 @@ fn add_pane_name_dedup() {
     );
     match &resp1 {
         CoreResponse::Confirmation { message } => {
-            assert!(message.contains("api"), "First pane should be 'api': {message}");
+            assert!(
+                message.contains("api"),
+                "First pane should be 'api': {message}"
+            );
         }
         other => panic!("Expected Confirmation, got: {other:?}"),
     }
@@ -598,7 +607,10 @@ fn resume_sends_command() {
 
     match &resp {
         CoreResponse::Confirmation { message } => {
-            assert!(message.contains("Resuming"), "Expected 'Resuming' in: {message}");
+            assert!(
+                message.contains("Resuming"),
+                "Expected 'Resuming' in: {message}"
+            );
         }
         other => panic!("Expected Confirmation, got: {other:?}"),
     }

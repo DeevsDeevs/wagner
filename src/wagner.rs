@@ -404,7 +404,13 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         };
 
         if let Some(engine_type) = engine {
-            self.prepare_agent_in_pane_with_engine(&mut task, &pane, &repo, pane_name, engine_type)?;
+            self.prepare_agent_in_pane_with_engine(
+                &mut task,
+                &pane,
+                &repo,
+                pane_name,
+                engine_type,
+            )?;
         } else {
             self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
         }
@@ -489,7 +495,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         if engine_type != Engine::Terminal {
             let cmd = engine_type.launch_command(&session_id);
-            self.terminal.send_text_enter(pane, &cmd, engine_type.enter_delay_ms())?;
+            self.terminal
+                .send_text_enter(pane, &cmd, engine_type.enter_delay_ms())?;
         }
 
         let jsonl_path = match engine_type {

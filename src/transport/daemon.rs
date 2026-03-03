@@ -10,7 +10,7 @@ use crate::config::Config;
 use crate::core::WagnerCore;
 use crate::model::Engine;
 use crate::store::Store;
-use crate::terminal::{PaneHandle, Tmux, Terminal, session_name_for_task};
+use crate::terminal::{PaneHandle, Terminal, Tmux, session_name_for_task};
 use crate::transport::{CoreCommand, CoreResponse};
 
 use super::adapter::{Adapter, DaemonAdapter, LogAdapter};
