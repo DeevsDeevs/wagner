@@ -1,64 +1,54 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Contributor/agent guide for this repository.
 
-## Build & Development Commands
+## Fast Commands
 
-Use `devbox run` for all cargo commands:
+Use `devbox run` for local development commands:
 
 ```bash
-devbox run cargo build                  # Build debug
-devbox run cargo build --release        # Build release
-devbox run cargo run                    # Run TUI (no subcommand)
-devbox run cargo run -- new my-task     # Run with CLI args
-devbox run cargo test                   # Run all tests
-devbox run cargo test --test integration # Run integration tests only
-devbox run cargo test test_name         # Run specific test
-RUST_LOG=debug devbox run cargo run     # Enable debug logging
-WAGNER_LOG=/tmp/wagner.log devbox run cargo run  # Log to file
+devbox run cargo build
+devbox run cargo run -- --help
+devbox run cargo run -- claude
+RUST_LOG=debug devbox run cargo run -- daemon start
 ```
 
-## Architecture
+## Architecture Map
 
-Wagner is a multi-repo task manager that orchestrates AI agent sessions across git worktrees with tmux. It uses a layered architecture with dependency injection for testing.
+High-level architecture is documented in `docs/architecture.md`.
 
-### Core Components
+Primary implementation files:
 
-**`Wagner<T: Terminal, A: Agent>`** (`src/wagner.rs`) - Main orchestrator generic over terminal and agent implementations. Manages task lifecycle: creating worktrees, spawning tmux sessions, launching agents.
+- Orchestration: `src/wagner.rs`
+- Task model: `src/model/task.rs`
+- Persistence/config: `src/store.rs`, `src/config.rs`
+- Terminal abstraction + tmux: `src/terminal/mod.rs`, `src/terminal/tmux.rs`
+- Core runtime: `src/core/mod.rs`
+- Command semantics: `src/core/command_executor.rs`
+- Status derivation: `src/core/status_engine.rs`, `src/monitor/*`
+- Transport contracts: `src/transport/mod.rs`
+- Daemon loop + IPC integration: `src/transport/daemon.rs`, `src/transport/ipc.rs`
+- Telegram adapter: `src/transport/telegram/*`
+- CLI surface: `src/cli/mod.rs`, `src/cli/commands/mod.rs`
+- TUI app/event/rendering: `src/tui/app.rs`, `src/tui/event.rs`, `src/tui/ui.rs`
 
-**Terminal trait** (`src/terminal/mod.rs`) - Abstraction over tmux operations. Two implementations:
-- `Tmux` - Real tmux interaction
-- `MockTerminal` - In-memory for testing
+## Runtime Paths
 
-**Agent trait** (`src/agent/mod.rs`) - AI agent abstraction with detection capabilities:
-- `ClaudeCode` - Claude Code agent with status detection
-- `TestAgent` - For testing
+- Local path: CLI/TUI -> `Wagner<Terminal, Agent>` -> tmux/store
+- Remote path: CLI IPC -> daemon -> `WagnerCore` -> adapter(s)
+- Monitoring path: agent JSONL -> watcher/status engine -> `CoreEvent`
 
-**StatusMonitor** (`src/monitor/mod.rs`) - Polls tmux panes, detects agent types, and determines activity status (working/idle/waiting). Uses content hashing to detect output changes.
+## Editing Rules for This Repo
 
-### Data Flow
+- Keep `CoreCommand`, `CoreResponse`, `CoreEvent` transport-agnostic.
+- Keep adapter-specific state inside adapter modules (e.g. Telegram state registry).
+- Put command behavior in `command_executor`; avoid duplicating logic in adapters.
+- Keep README user-focused (install + quick start), and keep architecture detail in docs.
 
-1. CLI (`src/cli/`) parses commands via clap
-2. Commands instantiate `Wagner` with real `Tmux` and `ClaudeCode`
-3. `Wagner` uses `Store` (`src/store.rs`) for task persistence
-4. Tasks stored as JSON in `~/.config/wagner/` and task directories
+## When You Need X, Start Here
 
-### TUI
-
-`src/tui/app.rs` is the main TUI application using ratatui. Event handling in `src/tui/event.rs`, rendering in `src/tui/ui.rs`.
-
-### Key Types
-
-- `Task` - Represents a task with repos, worktrees, branches
-- `TaskRepo` - Single repo within a task (name, source, worktree path, branch)
-- `RepoSource` - Either `Local(PathBuf)` or `Remote(String)` for git URLs
-- `RepoSpec` - Parsed from CLI as `name:source:branch`
-- `Workspace` - Named collection of repos with base branch
-
-## Testing Strategy
-
-Integration tests use `MockTerminal` and `TestAgent` to verify task/worktree management without real tmux. Tests create temporary git repos with `tempfile`.
-
-## Configuration
-
-Config at `~/.config/wagner/config.json`. Key settings: `tasks_root`, `default_agent`, `workspaces`, `keybindings`.
+- Add/modify CLI command: `src/cli/mod.rs` + `src/cli/commands/mod.rs`
+- Add remote action: `src/transport/mod.rs` + `src/core/command_executor.rs`
+- Change status behavior: `src/core/status_engine.rs` + `src/monitor/*`
+- Change daemon lifecycle: `src/transport/daemon.rs`
+- Change Telegram UX/callbacks: `src/transport/telegram/{commands,mod,render,state}.rs`

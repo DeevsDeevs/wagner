@@ -71,7 +71,7 @@ pub fn draw_sidebar_tree<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, a
             };
 
             let link_count = chain.link_count();
-            let chain_display_name = chain.name.split('/').last().unwrap_or(&chain.name);
+            let chain_display_name = chain.name.split('/').next_back().unwrap_or(&chain.name);
 
             items.push(ListItem::new(Line::from(vec![
                 Span::raw("  ├─ "),
@@ -125,7 +125,7 @@ fn draw_link_list<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
         ChainSource::TaskLocal(_) => "local",
     };
 
-    let chain_display_name = chain.name.split('/').last().unwrap_or(&chain.name);
+    let chain_display_name = chain.name.split('/').next_back().unwrap_or(&chain.name);
     let block = Block::default()
         .title(format!(
             " {} ({}) - {} links ",

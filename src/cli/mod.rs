@@ -63,6 +63,14 @@ pub enum Commands {
 
         /// Repo name within task
         repo: Option<String>,
+
+        /// Custom pane name (defaults to repo name)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Agent engine (claude, codex, or terminal)
+        #[arg(long)]
+        agent: Option<String>,
     },
 
     /// Add a repo to an existing task
@@ -147,6 +155,34 @@ pub enum Commands {
         command: ChainsCommands,
     },
 
+    /// View and manage configuration
+    #[command(visible_alias = "cfg")]
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommands>,
+    },
+
+    /// Launch Claude Code in the current directory
+    Claude {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Launch Codex in the current directory
+    Codex {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Launch a terminal pane in the current directory
+    Terminal {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
     /// Start agent sessions on existing repos (no worktrees)
     ///
     /// Lightweight mode: manages tmux/agents without creating worktrees or branches.
@@ -166,6 +202,103 @@ pub enum Commands {
         /// Task name (auto-detected if inside task dir)
         task: Option<String>,
     },
+
+    /// Rename a pane within a task
+    RenamePane {
+        /// Task name
+        task: String,
+
+        /// Current pane name
+        old_name: String,
+
+        /// New pane name
+        new_name: String,
+    },
+
+    /// Show task/pane status via daemon
+    Status {
+        /// Task name (shows all tasks if omitted)
+        task: Option<String>,
+    },
+
+    /// Send message to a pane
+    Send {
+        /// Task name
+        task: String,
+        /// Message to send
+        #[arg(trailing_var_arg = true, required = true)]
+        message: Vec<String>,
+        /// Target specific pane by name
+        #[arg(short, long)]
+        pane: Option<String>,
+    },
+
+    /// Approve tool use
+    #[command(visible_alias = "y")]
+    Approve {
+        /// Task name (smart-pick if omitted)
+        task: Option<String>,
+        /// Pane name
+        pane: Option<String>,
+    },
+
+    /// Reject tool use
+    #[command(visible_alias = "n")]
+    Reject {
+        /// Task name
+        task: String,
+        /// Pane name
+        pane: Option<String>,
+    },
+
+    /// Capture pane output
+    Output {
+        /// Task name
+        task: String,
+        /// Pane name
+        pane: Option<String>,
+        /// Number of lines
+        #[arg(short, long)]
+        lines: Option<usize>,
+    },
+
+    /// Resume a dead agent
+    Resume {
+        /// Task name
+        task: String,
+        /// Pane name
+        pane: Option<String>,
+    },
+
+    /// Run the daemon for remote monitoring
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommands {
+    /// Set up Telegram notifications
+    Telegram,
+    /// Set the default agent engine
+    Agent,
+    /// Show current configuration
+    Show,
+    /// Print config file path
+    Path,
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCommands {
+    /// Start the daemon (foreground)
+    Start,
+    /// Stop a running daemon
+    Stop,
+    /// Stop and restart the daemon
+    Restart,
+    /// Check if daemon is running
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -337,9 +470,23 @@ _wagner() {{
         'repair:Clean up orphaned worktrees'
         'plugin:Manage plugins'
         'chains:Manage chains (requires chains plugin)'
+        'claude:Launch Claude Code in the current directory'
+        'codex:Launch Codex in the current directory'
+        'terminal:Launch a terminal pane in the current directory'
         'start:Start agent sessions on existing repos'
         's:Start agent sessions on existing repos'
         'detach:Stop tracking an attached task'
+        'status:Show task/pane status via daemon'
+        'send:Send message to a pane'
+        'approve:Approve tool use'
+        'y:Approve tool use'
+        'reject:Reject tool use'
+        'n:Reject tool use'
+        'output:Capture pane output'
+        'resume:Resume a dead agent'
+        'config:View and manage configuration'
+        'cfg:View and manage configuration'
+        'daemon:Run the daemon for remote monitoring'
     )
 
     _arguments -C \
@@ -493,6 +640,11 @@ _wagner() {{
                             ;;
                     esac
                     ;;
+                claude|codex|terminal)
+                    _arguments \
+                        '-n[Task name]:name:' \
+                        '--name=[Task name]:name:'
+                    ;;
                 start|s)
                     _arguments \
                         '*:repo path:_files -/' \
@@ -501,6 +653,52 @@ _wagner() {{
                     ;;
                 detach)
                     _arguments '1:task:_wagner_tasks'
+                    ;;
+                status)
+                    _arguments '1:task:_wagner_tasks'
+                    ;;
+                send)
+                    _arguments \
+                        '1:task:_wagner_tasks' \
+                        '-p[Pane name]:pane:' \
+                        '--pane=[Pane name]:pane:' \
+                        '*:message:'
+                    ;;
+                approve|y)
+                    _arguments '1:task:_wagner_tasks' '2:pane:'
+                    ;;
+                reject|n)
+                    _arguments '1:task:_wagner_tasks' '2:pane:'
+                    ;;
+                output)
+                    _arguments \
+                        '1:task:_wagner_tasks' \
+                        '2:pane:' \
+                        '-l[Number of lines]:lines:' \
+                        '--lines=[Number of lines]:lines:'
+                    ;;
+                resume)
+                    _arguments '1:task:_wagner_tasks' '2:pane:'
+                    ;;
+                config|cfg)
+                    local -a config_commands
+                    config_commands=(
+                        'telegram:Set up Telegram notifications'
+                        'agent:Set the default agent engine'
+                        'show:Show current configuration'
+                        'path:Print config file path'
+                    )
+                    _describe 'config command' config_commands
+                    ;;
+                daemon)
+                    local -a daemon_commands
+                    daemon_commands=(
+                        'start:Start the daemon (foreground)'
+                        'stop:Stop a running daemon'
+                        'restart:Stop and restart the daemon'
+                        'status:Check if daemon is running'
+                    )
+                    _describe 'daemon command' daemon_commands
                     ;;
             esac
             ;;

@@ -3,6 +3,78 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorConfig {
+    #[serde(default = "default_active_poll_ms")]
+    pub active_poll_ms: u64,
+    #[serde(default = "default_monitor_background_poll_ms")]
+    pub background_poll_ms: u64,
+    #[serde(default = "default_idle_threshold_ms")]
+    pub idle_threshold_ms: u64,
+    #[serde(default = "default_approval_timeout_ms")]
+    pub approval_timeout_ms: u64,
+    #[serde(default = "default_session_end_threshold_ms")]
+    pub session_end_threshold_ms: u64,
+    #[serde(default = "default_discovery_fast_poll_ms")]
+    pub discovery_fast_poll_ms: u64,
+    #[serde(default = "default_discovery_fast_timeout_ms")]
+    pub discovery_fast_timeout_ms: u64,
+    #[serde(default = "default_discovery_slow_poll_ms")]
+    pub discovery_slow_poll_ms: u64,
+    #[serde(default = "default_max_lines_per_poll")]
+    pub max_lines_per_poll: usize,
+    #[serde(default = "default_daemon_seed_lines")]
+    pub daemon_seed_lines: usize,
+}
+
+fn default_active_poll_ms() -> u64 {
+    100
+}
+fn default_monitor_background_poll_ms() -> u64 {
+    2000
+}
+fn default_idle_threshold_ms() -> u64 {
+    2000
+}
+fn default_approval_timeout_ms() -> u64 {
+    1000
+}
+fn default_session_end_threshold_ms() -> u64 {
+    5000
+}
+fn default_discovery_fast_poll_ms() -> u64 {
+    500
+}
+fn default_discovery_fast_timeout_ms() -> u64 {
+    30000
+}
+fn default_discovery_slow_poll_ms() -> u64 {
+    5000
+}
+fn default_max_lines_per_poll() -> usize {
+    1000
+}
+fn default_daemon_seed_lines() -> usize {
+    50
+}
+
+impl Default for MonitorConfig {
+    fn default() -> Self {
+        Self {
+            active_poll_ms: default_active_poll_ms(),
+            background_poll_ms: default_monitor_background_poll_ms(),
+            idle_threshold_ms: default_idle_threshold_ms(),
+            approval_timeout_ms: default_approval_timeout_ms(),
+            session_end_threshold_ms: default_session_end_threshold_ms(),
+            discovery_fast_poll_ms: default_discovery_fast_poll_ms(),
+            discovery_fast_timeout_ms: default_discovery_fast_timeout_ms(),
+            discovery_slow_poll_ms: default_discovery_slow_poll_ms(),
+            max_lines_per_poll: default_max_lines_per_poll(),
+            daemon_seed_lines: default_daemon_seed_lines(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PluginConfig {
     #[serde(default)]
@@ -58,8 +130,8 @@ pub struct Keybindings {
     pub delete: String,
     #[serde(default = "default_send_message")]
     pub send_message: String,
-    #[serde(default = "default_toggle_sidebar")]
-    pub toggle_sidebar: String,
+    #[serde(default = "default_next_tab", alias = "toggle_sidebar")]
+    pub next_tab: String,
     #[serde(default = "default_switch_section")]
     pub switch_section: String,
     #[serde(default = "default_settings")]
@@ -116,7 +188,7 @@ fn default_delete() -> String {
 fn default_send_message() -> String {
     "s".to_string()
 }
-fn default_toggle_sidebar() -> String {
+fn default_next_tab() -> String {
     "Tab".to_string()
 }
 fn default_switch_section() -> String {
@@ -161,7 +233,7 @@ impl Default for Keybindings {
             add_pane: default_add_pane(),
             delete: default_delete(),
             send_message: default_send_message(),
-            toggle_sidebar: default_toggle_sidebar(),
+            next_tab: default_next_tab(),
             switch_section: default_switch_section(),
             settings: default_settings(),
             nav_down: default_nav_down(),
@@ -227,6 +299,61 @@ pub struct Config {
     pub plugins: PluginsConfig,
     #[serde(default)]
     pub terminal: TerminalConfig,
+    #[serde(default)]
+    pub monitor: MonitorConfig,
+    #[serde(default)]
+    pub daemon: DaemonConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonConfig {
+    #[serde(default = "default_daemon_poll_ms")]
+    pub poll_interval_ms: u64,
+    #[serde(default)]
+    pub notify_idle: bool,
+    #[serde(default = "default_output_lines")]
+    pub default_output_lines: usize,
+    #[serde(default)]
+    pub telegram: Option<TelegramConfig>,
+}
+
+fn default_daemon_poll_ms() -> u64 {
+    100
+}
+
+impl Default for DaemonConfig {
+    fn default() -> Self {
+        Self {
+            poll_interval_ms: default_daemon_poll_ms(),
+            notify_idle: false,
+            default_output_lines: default_output_lines(),
+            telegram: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TelegramConfig {
+    pub bot_token: String,
+    pub chat_id: i64,
+    #[serde(default = "default_true")]
+    pub notify_waiting: bool,
+    #[serde(default = "default_rate_limit_ms")]
+    pub rate_limit_ms: u64,
+    #[serde(default)]
+    pub allowed_users: Vec<i64>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_rate_limit_ms() -> u64 {
+    50
+}
+
+fn default_output_lines() -> usize {
+    30
 }
 
 fn default_diff_base() -> String {
@@ -268,6 +395,8 @@ impl Default for Config {
             workspaces: HashMap::new(),
             plugins: PluginsConfig::default(),
             terminal: TerminalConfig::default(),
+            monitor: MonitorConfig::default(),
+            daemon: DaemonConfig::default(),
         }
     }
 }

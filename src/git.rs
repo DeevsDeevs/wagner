@@ -105,10 +105,10 @@ fn parse_shortstat(s: &str) -> RepoStats {
             if let Some(n) = part.split_whitespace().next() {
                 stats.additions = n.parse().unwrap_or(0);
             }
-        } else if part.contains("deletion") {
-            if let Some(n) = part.split_whitespace().next() {
-                stats.deletions = n.parse().unwrap_or(0);
-            }
+        } else if part.contains("deletion")
+            && let Some(n) = part.split_whitespace().next()
+        {
+            stats.deletions = n.parse().unwrap_or(0);
         }
     }
 

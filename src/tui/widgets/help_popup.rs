@@ -56,11 +56,8 @@ pub fn draw(frame: &mut Frame, area: Rect, keybindings: &Keybindings) {
             Span::raw("Switch Tasks/Panes section"),
         ]),
         Line::from(vec![
-            Span::styled(
-                format!("  {}", fmt_key(&keybindings.toggle_sidebar)),
-                key_style,
-            ),
-            Span::raw("Toggle sidebar"),
+            Span::styled(format!("  {}", fmt_key(&keybindings.next_tab)), key_style),
+            Span::raw("Switch tab"),
         ]),
         Line::from(vec![
             Span::styled(format!("  {}", fmt_key("Enter")), key_style),

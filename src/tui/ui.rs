@@ -239,16 +239,16 @@ fn draw_workspace_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app:
 }
 
 fn draw_status_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
-    if let Some((msg, time)) = &app.status_message {
-        if time.elapsed() < Duration::from_secs(5) {
-            let style = if msg.starts_with("Error") {
-                Style::default().fg(Color::Red)
-            } else {
-                Style::default().fg(Color::Green)
-            };
-            let paragraph = Paragraph::new(Span::styled(format!(" {} ", msg), style));
-            frame.render_widget(paragraph, area);
-        }
+    if let Some((msg, time)) = &app.status_message
+        && time.elapsed() < Duration::from_secs(5)
+    {
+        let style = if msg.starts_with("Error") {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        let paragraph = Paragraph::new(Span::styled(format!(" {} ", msg), style));
+        frame.render_widget(paragraph, area);
     }
 }
 

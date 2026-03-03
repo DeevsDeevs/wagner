@@ -108,6 +108,12 @@ pub struct ScrollableList<'a> {
     scroll_offset: usize,
 }
 
+impl<'a> Default for ScrollableList<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'a> ScrollableList<'a> {
     pub fn new() -> Self {
         Self {
@@ -269,6 +275,12 @@ impl<'a> ScrollableList<'a> {
 
 pub struct Footer<'a> {
     items: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> Default for Footer<'a> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> Footer<'a> {

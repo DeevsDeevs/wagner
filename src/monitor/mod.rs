@@ -1,14 +1,18 @@
 mod ansi;
+pub mod claude_events;
+pub mod codex_events;
+pub mod deriver;
 mod detector;
 mod detectors;
+pub mod events;
 pub mod status;
+pub mod watcher;
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 const STATUS_HYSTERESIS: Duration = Duration::from_millis(500);
 
-use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 use crate::terminal::{PaneHandle, Terminal};
@@ -16,10 +20,12 @@ use crate::terminal::{PaneHandle, Terminal};
 pub use ansi::strip_ansi;
 pub use detector::{AgentDetector, IDLE_THRESHOLD};
 pub use detectors::TerminalDetector;
+pub use events::{QuestionData, QuestionOption};
 pub use status::{
     Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, PaneStatus,
     STUCK_THRESHOLD, SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
 };
+pub use watcher::SessionWatcher;
 
 struct TrackedSession {
     panes: HashMap<String, TrackedPane>,
@@ -66,18 +72,18 @@ impl StatusMonitor {
         self
     }
 
-    pub fn poll_active<T: Terminal>(
+    pub fn poll_active(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         session_name: &str,
         panes: &[PaneHandle],
     ) -> Vec<StatusUpdate> {
         self.poll_session(terminal, session_name, panes)
     }
 
-    pub fn poll_background<T: Terminal>(
+    pub fn poll_background(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         sessions: &[(String, Vec<PaneHandle>)],
         active_session: Option<&str>,
     ) {
@@ -88,14 +94,14 @@ impl StatusMonitor {
         let now = Instant::now();
         let background: Vec<_> = sessions
             .iter()
-            .filter(|(name, _)| active_session.map_or(true, |a| a != name))
+            .filter(|(name, _)| active_session.is_none_or(|a| a != name))
             .collect();
 
         if background.is_empty() {
             return;
         }
 
-        self.background_index = self.background_index % background.len();
+        self.background_index %= background.len();
         let (session_name, panes) = &background[self.background_index];
 
         let session = self
@@ -108,9 +114,9 @@ impl StatusMonitor {
         self.background_index = (self.background_index + 1) % background.len();
     }
 
-    fn poll_session<T: Terminal>(
+    fn poll_session(
         &mut self,
-        terminal: &T,
+        terminal: &dyn Terminal,
         session_name: &str,
         panes: &[PaneHandle],
     ) -> Vec<StatusUpdate> {
@@ -121,7 +127,7 @@ impl StatusMonitor {
             .or_insert_with(TrackedSession::new);
 
         let captures: Vec<_> = panes
-            .par_iter()
+            .iter()
             .filter_map(|pane| {
                 let output = terminal.capture(pane, 100).ok()?;
                 let command = terminal.get_pane_command(pane).unwrap_or_default();
@@ -155,7 +161,7 @@ impl StatusMonitor {
                 (
                     output_changed && !is_first_poll,
                     tracked.last_change.elapsed(),
-                    tracked.agent_type.clone(),
+                    tracked.agent_type,
                     tracked.status.clone(),
                 )
             };
@@ -177,12 +183,12 @@ impl StatusMonitor {
 
             let session = self.sessions.get_mut(session_name).unwrap();
             let tracked = session.panes.get_mut(&pane_id).unwrap();
-            tracked.agent_type = agent_type.clone();
+            tracked.agent_type = agent_type;
 
             if new_status.is_active() && since_change > STUCK_THRESHOLD {
                 new_status = match &agent_type {
                     Some(at) => PaneStatus::Agent {
-                        agent_type: at.clone(),
+                        agent_type: *at,
                         status: AgentStatus::Idle,
                     },
                     None => PaneStatus::Terminal(TerminalStatus::Idle),
@@ -251,7 +257,7 @@ impl StatusMonitor {
                 let detector = self.detectors.iter().find(|d| &d.agent_type() == at);
                 match detector {
                     Some(d) => PaneStatus::Agent {
-                        agent_type: at.clone(),
+                        agent_type: *at,
                         status: d.detect_status(
                             raw_output,
                             clean_output,

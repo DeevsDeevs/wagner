@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use super::Agent;
-use crate::monitor::{AgentDetector, AgentStatus, AgentType};
+use crate::model::Engine;
 
 pub struct TestAgent {
     command: String,
@@ -30,33 +30,19 @@ impl Agent for TestAgent {
         "test-agent"
     }
 
-    fn launch_command(&self) -> &str {
-        &self.command
+    fn engine(&self) -> Engine {
+        Engine::ClaudeCode
     }
 
-    fn detector(&self) -> Box<dyn AgentDetector> {
-        Box::new(TestAgentDetector)
-    }
-}
-
-pub struct TestAgentDetector;
-
-impl AgentDetector for TestAgentDetector {
-    fn agent_type(&self) -> AgentType {
-        AgentType::ClaudeCode
+    fn launch_command(&self, _session_id: &str) -> String {
+        self.command.clone()
     }
 
-    fn detect_agent(&self, _pane_command: &str, _output: &str) -> bool {
-        true
+    fn predict_jsonl_path(&self, _session_id: &str, _cwd: &Path) -> Option<PathBuf> {
+        None
     }
 
-    fn detect_status(
-        &self,
-        _raw_output: &str,
-        _clean_output: &str,
-        _output_changed: bool,
-        _since_change: Duration,
-    ) -> AgentStatus {
-        AgentStatus::Idle
+    fn resume_command(&self, _session_id: &str) -> String {
+        self.command.clone()
     }
 }

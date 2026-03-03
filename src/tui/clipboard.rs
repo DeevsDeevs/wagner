@@ -9,7 +9,7 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        return copy_with_command("pbcopy", &[], text);
+        copy_with_command("pbcopy", &[], text)
     }
 
     #[cfg(target_os = "linux")]

@@ -1,11 +1,12 @@
 use crate::cli::{
-    ChainsCommands, Cli, Commands, PluginCommands, WorkspaceCommands, print_completions,
+    ChainsCommands, Cli, Commands, ConfigCommands, DaemonCommands, PluginCommands,
+    WorkspaceCommands, print_completions,
 };
 use std::path::PathBuf;
 use tracing::{debug, info};
 use wagner::{
-    Agent, AgentChoice, AttachDetection, Config, RepoSource, RepoSpec, Result, Terminal, Tmux,
-    Wagner, default_branch_for_task, derive_task_name, detect_attach_mode, plugins,
+    Agent, AgentChoice, AttachDetection, Config, Engine, RepoSource, RepoSpec, Result, Terminal,
+    Tmux, Wagner, default_branch_for_task, derive_task_name, detect_attach_mode, plugins,
 };
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -16,6 +17,18 @@ pub fn run(cli: Cli) -> Result<()> {
 
     let config = Config::load()?;
     debug!("Loaded config from {:?}", Config::config_path());
+
+    if let Some(Commands::Daemon { command }) = cli.command {
+        return cmd_daemon(command, config);
+    }
+    if let Some(Commands::Config { command }) = cli.command {
+        return cmd_config(command);
+    }
+    if let Some(ref cmd) = cli.command
+        && let Some(result) = try_ipc_command(cmd)
+    {
+        return result;
+    }
 
     let terminal = Tmux::with_config(config.terminal.clone());
     let agent_key = cli.agent.as_deref().unwrap_or(&config.default_agent);
@@ -37,7 +50,12 @@ pub fn run(cli: Cli) -> Result<()> {
         ),
         Some(Commands::List) => cmd_list(&wagner),
         Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
-        Some(Commands::Add { task, repo }) => cmd_add(&wagner, task, repo.as_deref()),
+        Some(Commands::Add { .. }) => unreachable!(),
+        Some(Commands::RenamePane {
+            task,
+            old_name,
+            new_name,
+        }) => cmd_rename_pane(&wagner, &task, &old_name, &new_name),
         Some(Commands::AddRepo { task, repo }) => cmd_add_repo(&wagner, &task, &repo),
         Some(Commands::RmRepo { task, repo }) => cmd_rm_repo(&wagner, &task, &repo),
         Some(Commands::Attach { task }) => cmd_attach(&wagner, task),
@@ -50,8 +68,19 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
+        Some(Commands::Claude { name }) => cmd_quick_launch(&wagner, Engine::ClaudeCode, name),
+        Some(Commands::Codex { name }) => cmd_quick_launch(&wagner, Engine::Codex, name),
+        Some(Commands::Terminal { name }) => cmd_quick_launch(&wagner, Engine::Terminal, name),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
+        Some(Commands::Config { .. }) => unreachable!(),
+        Some(Commands::Daemon { .. }) => unreachable!(),
+        Some(Commands::Status { .. })
+        | Some(Commands::Send { .. })
+        | Some(Commands::Approve { .. })
+        | Some(Commands::Reject { .. })
+        | Some(Commands::Output { .. })
+        | Some(Commands::Resume { .. }) => unreachable!(),
         None => cmd_tui(wagner),
     }
 }
@@ -241,26 +270,26 @@ fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: b
     Ok(())
 }
 
-fn cmd_add<T: Terminal, A: Agent>(
+fn cmd_rename_pane<T: Terminal, A: Agent>(
     wagner: &Wagner<T, A>,
-    task: Option<String>,
-    repo: Option<&str>,
+    task_name: &str,
+    old_name: &str,
+    new_name: &str,
 ) -> Result<()> {
-    let task_name = task
-        .or_else(|| detect_task_from_cwd(&wagner.config))
-        .unwrap_or_else(|| {
-            eprintln!("Error: Not inside a task directory");
-            eprintln!("Either cd into a task, or specify: wagner add <task>");
-            std::process::exit(1);
-        });
-
-    debug!(task = %task_name, repo = ?repo, "Adding pane");
-
-    let pane = wagner.add_pane(&task_name, repo)?;
-    info!(task = %task_name, pane = %pane.0, "Pane created");
-    println!("Created pane: {}", pane.0);
-
-    Ok(())
+    let mut task = wagner.store.load_task(task_name)?;
+    if task.rename_pane(old_name, new_name) {
+        wagner.store.save_task(&task)?;
+        println!(
+            "Renamed pane '{}' to '{}' in task '{}'",
+            old_name, new_name, task_name
+        );
+        Ok(())
+    } else {
+        Err(wagner::WagnerError::Terminal(format!(
+            "Cannot rename: pane '{}' not found or '{}' already exists",
+            old_name, new_name
+        )))
+    }
 }
 
 fn cmd_add_repo<T: Terminal, A: Agent>(
@@ -305,7 +334,20 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
         });
 
     debug!(task = %task_name, "Attaching to session");
+    match wagner.resume_dead_agents(&task_name) {
+        Ok(n) if n > 0 => info!(count = n, "Resumed dead agents"),
+        Err(e) => debug!(%e, "Resume check skipped"),
+        _ => {}
+    }
     wagner.attach(&task_name, None)
+}
+
+fn cmd_quick_launch<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    engine: Engine,
+    name: Option<String>,
+) -> Result<()> {
+    wagner.quick_launch(engine, name.as_deref())
 }
 
 fn cmd_start<T: Terminal, A: Agent>(
@@ -460,49 +502,49 @@ fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
                 ])
                 .output();
 
-            if let Ok(output) = output {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines() {
-                        if let Some(wt_path) = line.strip_prefix("worktree ") {
-                            let wt_path = std::path::PathBuf::from(wt_path);
+            if let Ok(output) = output
+                && output.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if let Some(wt_path) = line.strip_prefix("worktree ") {
+                        let wt_path = std::path::PathBuf::from(wt_path);
 
-                            if wt_path.starts_with(&config.tasks_root) {
-                                if let Some(task_dir) = wt_path.parent() {
-                                    let task_json = task_dir.join(".wagner").join("task.json");
-                                    if !task_json.exists() && task_dir != config.tasks_root {
-                                        found_issues = true;
-                                        println!(
-                                            "  Orphaned worktree in {}/{}: {}",
-                                            ws_name,
-                                            repo_name,
-                                            wt_path.display()
-                                        );
+                        if wt_path.starts_with(&config.tasks_root)
+                            && let Some(task_dir) = wt_path.parent()
+                        {
+                            let task_json = task_dir.join(".wagner").join("task.json");
+                            if !task_json.exists() && task_dir != config.tasks_root {
+                                found_issues = true;
+                                println!(
+                                    "  Orphaned worktree in {}/{}: {}",
+                                    ws_name,
+                                    repo_name,
+                                    wt_path.display()
+                                );
 
-                                        if !dry_run {
-                                            let _ = std::process::Command::new("git")
-                                                .args([
-                                                    "-C",
-                                                    &repo_path.to_string_lossy(),
-                                                    "worktree",
-                                                    "remove",
-                                                    "--force",
-                                                    &wt_path.to_string_lossy(),
-                                                ])
-                                                .output();
-                                            println!("    -> Removed");
-                                        }
-                                    }
+                                if !dry_run {
+                                    let _ = std::process::Command::new("git")
+                                        .args([
+                                            "-C",
+                                            &repo_path.to_string_lossy(),
+                                            "worktree",
+                                            "remove",
+                                            "--force",
+                                            &wt_path.to_string_lossy(),
+                                        ])
+                                        .output();
+                                    println!("    -> Removed");
                                 }
                             }
                         }
                     }
+                }
 
-                    if !dry_run {
-                        let _ = std::process::Command::new("git")
-                            .args(["-C", &repo_path.to_string_lossy(), "worktree", "prune"])
-                            .output();
-                    }
+                if !dry_run {
+                    let _ = std::process::Command::new("git")
+                        .args(["-C", &repo_path.to_string_lossy(), "worktree", "prune"])
+                        .output();
                 }
             }
         }
@@ -520,44 +562,41 @@ fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {
 }
 
 fn cleanup_orphaned_dir(path: &std::path::Path) {
-    for entry in std::fs::read_dir(path).into_iter().flatten() {
-        if let Ok(entry) = entry {
-            let subpath = entry.path();
-            let git_file = subpath.join(".git");
-            if subpath.is_dir() && git_file.exists() && git_file.is_file() {
-                if let Ok(content) = std::fs::read_to_string(&git_file) {
-                    if let Some(gitdir) = content.strip_prefix("gitdir: ") {
-                        let gitdir = gitdir.trim();
-                        let gitdir_path = std::path::PathBuf::from(gitdir);
-                        // gitdir: /path/to/repo/.git/worktrees/name (regular)
-                        // gitdir: /path/to/bare-repo/worktrees/name (bare)
-                        if let Some(worktrees_dir) = gitdir_path.parent() {
-                            if let Some(git_or_repo) = worktrees_dir.parent() {
-                                let main_repo = if git_or_repo
-                                    .file_name()
-                                    .map(|n| n == ".git")
-                                    .unwrap_or(false)
-                                {
-                                    git_or_repo.parent().map(|p| p.to_path_buf())
-                                } else {
-                                    Some(git_or_repo.to_path_buf())
-                                };
+    for entry in std::fs::read_dir(path).into_iter().flatten().flatten() {
+        let subpath = entry.path();
+        let git_file = subpath.join(".git");
+        if subpath.is_dir()
+            && git_file.exists()
+            && git_file.is_file()
+            && let Ok(content) = std::fs::read_to_string(&git_file)
+            && let Some(gitdir) = content.strip_prefix("gitdir: ")
+        {
+            let gitdir = gitdir.trim();
+            let gitdir_path = std::path::PathBuf::from(gitdir);
+            if let Some(worktrees_dir) = gitdir_path.parent()
+                && let Some(git_or_repo) = worktrees_dir.parent()
+            {
+                let main_repo = if git_or_repo
+                    .file_name()
+                    .map(|n| n == ".git")
+                    .unwrap_or(false)
+                {
+                    git_or_repo.parent().map(|p| p.to_path_buf())
+                } else {
+                    Some(git_or_repo.to_path_buf())
+                };
 
-                                if let Some(main_repo) = main_repo {
-                                    let _ = std::process::Command::new("git")
-                                        .args([
-                                            "-C",
-                                            &main_repo.to_string_lossy(),
-                                            "worktree",
-                                            "remove",
-                                            "--force",
-                                            &subpath.to_string_lossy(),
-                                        ])
-                                        .output();
-                                }
-                            }
-                        }
-                    }
+                if let Some(main_repo) = main_repo {
+                    let _ = std::process::Command::new("git")
+                        .args([
+                            "-C",
+                            &main_repo.to_string_lossy(),
+                            "worktree",
+                            "remove",
+                            "--force",
+                            &subpath.to_string_lossy(),
+                        ])
+                        .output();
                 }
             }
         }
@@ -950,6 +989,290 @@ fn cmd_chains<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, command: ChainsComma
     Ok(())
 }
 
+fn try_ipc_command(cmd: &Commands) -> Option<Result<()>> {
+    match cmd {
+        Commands::Add {
+            task,
+            repo,
+            name,
+            agent,
+        } => Some(cmd_ipc_add(
+            task.clone(),
+            repo.clone(),
+            name.clone(),
+            agent.clone(),
+        )),
+        Commands::Status { task } => Some(cmd_ipc_status(task.clone())),
+        Commands::Send {
+            task,
+            message,
+            pane,
+        } => Some(cmd_ipc_send(task.clone(), pane.clone(), message.clone())),
+        Commands::Approve { task, pane } => Some(cmd_ipc_approve(task.clone(), pane.clone())),
+        Commands::Reject { task, pane } => Some(cmd_ipc_reject(task.clone(), pane.clone())),
+        Commands::Output { task, pane, lines } => {
+            Some(cmd_ipc_output(task.clone(), pane.clone(), *lines))
+        }
+        Commands::Resume { task, pane } => Some(cmd_ipc_resume(task.clone(), pane.clone())),
+        _ => None,
+    }
+}
+
+fn cmd_ipc_add(
+    task: Option<String>,
+    repo: Option<String>,
+    name: Option<String>,
+    agent: Option<String>,
+) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let config = Config::load()?;
+    let task_name = task
+        .or_else(|| detect_task_from_cwd(&config))
+        .unwrap_or_else(|| {
+            eprintln!("Error: Not inside a task directory");
+            eprintln!("Either cd into a task, or specify: wagner add <task>");
+            std::process::exit(1);
+        });
+    let cmd = CoreCommand::AddPane {
+        task_name,
+        pane_name: name,
+        agent,
+        repo_name: repo,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_status(task: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = match task {
+        Some(name) => CoreCommand::TaskStatus { task_name: name },
+        None => CoreCommand::FullStatus,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_send(task: String, pane: Option<String>, message_parts: Vec<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::SendMessage {
+        task_name: task,
+        pane_name: pane,
+        message: message_parts.join(" "),
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_approve(task: Option<String>, pane: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::Approve {
+        task_name: task.unwrap_or_default(),
+        pane_name: pane,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_reject(task: String, pane: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::Reject {
+        task_name: task,
+        pane_name: pane,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_output(task: String, pane: Option<String>, lines: Option<usize>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::CaptureOutput {
+        task_name: task,
+        pane_name: pane,
+        lines,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn cmd_ipc_resume(task: String, pane: Option<String>) -> Result<()> {
+    use wagner::transport::{CoreCommand, ipc};
+    let cmd = CoreCommand::Resume {
+        task_name: task,
+        pane_name: pane,
+    };
+    let response = ipc::daemon_execute(cmd)?;
+    print_response(&response);
+    Ok(())
+}
+
+fn print_response(response: &wagner::transport::CoreResponse) {
+    use wagner::transport::CoreResponse;
+
+    match response {
+        CoreResponse::TaskList { tasks } => {
+            if tasks.is_empty() {
+                println!("No tasks");
+                return;
+            }
+            for (summary, status) in tasks {
+                println!(
+                    "{} {:<20} {} repos, {} panes  [{}]",
+                    status.icon(),
+                    summary.name,
+                    summary.repo_count,
+                    summary.pane_count,
+                    status.label(),
+                );
+            }
+        }
+        CoreResponse::Status {
+            task_name, panes, ..
+        } => {
+            println!("{}", task_name);
+            if panes.is_empty() {
+                println!("  (no panes)");
+                return;
+            }
+            for (name, status) in panes {
+                println!("  {} {} [{}]", status.icon(), name, status.label());
+            }
+        }
+        CoreResponse::FullStatus { tasks } => {
+            if tasks.is_empty() {
+                println!("No tasks");
+                return;
+            }
+            for (summary, agg_status, panes) in tasks {
+                println!(
+                    "{} {}  [{}]",
+                    agg_status.icon(),
+                    summary.name,
+                    agg_status.label(),
+                );
+                for (name, status) in panes {
+                    println!("    {} {} [{}]", status.icon(), name, status.label());
+                }
+            }
+        }
+        CoreResponse::Output {
+            task_name,
+            pane_name,
+            content,
+        } => {
+            println!("--- {} / {} ---", task_name, pane_name);
+            println!("{}", content);
+        }
+        CoreResponse::Confirmation { message } => println!("{}", message),
+        CoreResponse::Error { message } => eprintln!("Error: {}", message),
+        CoreResponse::HelpText => println!("Wagner CLI - use --help for available commands"),
+        _ => {}
+    }
+}
+
+fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
+    match command {
+        DaemonCommands::Start => {
+            if config.daemon.telegram.is_none() {
+                info!("No Telegram configured, running with log transport");
+            }
+            info!("Starting daemon");
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(wagner::transport::daemon::run_daemon(config))
+        }
+        DaemonCommands::Stop => stop_daemon(),
+        DaemonCommands::Restart => {
+            stop_daemon_and_wait();
+            if config.daemon.telegram.is_none() {
+                info!("No Telegram configured, running with log transport");
+            }
+            info!("Starting daemon");
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(wagner::transport::daemon::run_daemon(config))
+        }
+        DaemonCommands::Status => {
+            match read_daemon_pid() {
+                Some(pid_str) if daemon_alive(&pid_str) => {
+                    println!("Daemon running (PID {pid_str})");
+                }
+                _ => println!("Daemon not running"),
+            }
+            Ok(())
+        }
+    }
+}
+
+fn stop_daemon() -> Result<()> {
+    let Some(pid_str) = read_daemon_pid() else {
+        println!("Daemon not running (no PID file)");
+        return Ok(());
+    };
+    if !daemon_alive(&pid_str) {
+        println!("Daemon not running (stale PID file, removing)");
+        let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
+        return Ok(());
+    }
+    let sent = std::process::Command::new("kill")
+        .args(["-TERM", &pid_str])
+        .status()
+        .is_ok_and(|s| s.success());
+    if sent {
+        println!("Sent SIGTERM to daemon (PID {pid_str})");
+    } else {
+        println!("Failed to send SIGTERM to daemon (PID {pid_str})");
+    }
+    Ok(())
+}
+
+fn stop_daemon_and_wait() {
+    let Some(pid_str) = read_daemon_pid() else {
+        println!("Daemon not running, starting fresh");
+        return;
+    };
+    if !daemon_alive(&pid_str) {
+        println!("Daemon not running (stale PID file, removing)");
+        let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
+        return;
+    }
+    let sent = std::process::Command::new("kill")
+        .args(["-TERM", &pid_str])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !sent {
+        println!("Failed to send SIGTERM to daemon (PID {pid_str})");
+        return;
+    }
+    println!("Sent SIGTERM to daemon (PID {pid_str}), waiting...");
+    for _ in 0..50 {
+        if !daemon_alive(&pid_str) {
+            println!("Daemon stopped");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    println!("Daemon did not stop within 5s, proceeding anyway");
+}
+
+fn read_daemon_pid() -> Option<String> {
+    let path = wagner::transport::daemon::pid_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+}
+
+fn daemon_alive(pid_str: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid_str])
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn cmd_plugin(command: PluginCommands) -> Result<()> {
     let mut config = Config::load()?;
 
@@ -1053,5 +1376,162 @@ fn cmd_plugin(command: PluginCommands) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn prompt_line(prompt: &str) -> Result<String> {
+    use std::io::{self, Write};
+    print!("{}", prompt);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
+}
+
+fn cmd_config(command: Option<ConfigCommands>) -> Result<()> {
+    match command.unwrap_or(ConfigCommands::Show) {
+        ConfigCommands::Show => cmd_config_show(),
+        ConfigCommands::Telegram => cmd_config_telegram(),
+        ConfigCommands::Agent => cmd_config_agent(),
+        ConfigCommands::Path => cmd_config_path(),
+    }
+}
+
+fn cmd_config_show() -> Result<()> {
+    let config = Config::load()?;
+
+    println!("Wagner Configuration");
+    println!("────────────────────");
+    println!("  Default agent:  {}", config.default_agent);
+    println!("  Tasks root:     {}", config.tasks_root.display());
+
+    match &config.daemon.telegram {
+        Some(tg) => {
+            let masked = if tg.bot_token.len() > 8 {
+                format!(
+                    "{}…{}",
+                    &tg.bot_token[..4],
+                    &tg.bot_token[tg.bot_token.len() - 4..]
+                )
+            } else {
+                "****".to_string()
+            };
+            println!("  Telegram:       {} (chat {})", masked, tg.chat_id);
+        }
+        None => println!("  Telegram:       not configured"),
+    }
+
+    println!(
+        "  Chains plugin:  {}",
+        if config.plugins.chains.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    println!("  Config file:    {}", Config::config_path().display());
+
+    Ok(())
+}
+
+fn cmd_config_telegram() -> Result<()> {
+    use wagner::TelegramConfig;
+
+    let mut config = Config::load()?;
+
+    if let Some(existing) = &config.daemon.telegram {
+        let masked = if existing.bot_token.len() > 8 {
+            format!(
+                "{}…{}",
+                &existing.bot_token[..4],
+                &existing.bot_token[existing.bot_token.len() - 4..]
+            )
+        } else {
+            "****".to_string()
+        };
+        println!("Telegram is already configured:");
+        println!("  Bot token: {}", masked);
+        println!("  Chat ID:   {}", existing.chat_id);
+        println!();
+        let answer = prompt_line("Reconfigure? [y/N] ")?;
+        if !answer.eq_ignore_ascii_case("y") {
+            return Ok(());
+        }
+        println!();
+    }
+
+    println!("Telegram Bot Setup");
+    println!("──────────────────");
+    println!("1. Create a bot via @BotFather on Telegram");
+    println!("2. Send /start to your bot");
+    println!("3. Get your chat ID via @userinfobot");
+    println!();
+
+    let bot_token = loop {
+        let token = prompt_line("Bot token: ")?;
+        if !token.is_empty() {
+            break token;
+        }
+        println!("Bot token is required.");
+    };
+
+    let chat_id: i64 = loop {
+        let input = prompt_line("Chat ID: ")?;
+        match input.parse() {
+            Ok(id) => break id,
+            Err(_) => println!("Enter a valid integer chat ID."),
+        }
+    };
+
+    let notify_input = prompt_line("Notify on waiting? [Y/n] ")?;
+    let notify_waiting = !notify_input.eq_ignore_ascii_case("n");
+
+    config.daemon.telegram = Some(TelegramConfig {
+        bot_token,
+        chat_id,
+        notify_waiting,
+        rate_limit_ms: 50,
+        allowed_users: vec![],
+    });
+    config.save()?;
+
+    println!();
+    println!("Telegram configured.");
+    println!("Restart the daemon to apply: wagner daemon restart");
+
+    Ok(())
+}
+
+fn cmd_config_agent() -> Result<()> {
+    let mut config = Config::load()?;
+    let agents = ["claude", "codex"];
+
+    println!("Default agent: {}", config.default_agent);
+    println!("Options: {}", agents.join(", "));
+    println!();
+
+    let input = prompt_line(&format!(
+        "Select default agent [{}]: ",
+        config.default_agent
+    ))?;
+
+    let choice = if input.is_empty() {
+        config.default_agent.clone()
+    } else if agents.contains(&input.as_str()) {
+        input
+    } else {
+        println!("Unknown agent '{}'. Options: {}", input, agents.join(", "));
+        return Ok(());
+    };
+
+    config.default_agent = choice.clone();
+    config.save()?;
+    println!("Default agent set to: {}", choice);
+
+    Ok(())
+}
+
+fn cmd_config_path() -> Result<()> {
+    println!("{}", Config::config_path().display());
     Ok(())
 }

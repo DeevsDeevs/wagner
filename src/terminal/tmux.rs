@@ -212,6 +212,8 @@ impl Terminal for Tmux {
 
     fn send_keys(&self, pane: &PaneHandle, keys: &str) -> Result<()> {
         self.run(&["send-keys", "-t", &pane.0, "-l", keys])?;
+        // TUI agents (e.g. Codex) need time to render input before accepting Enter.
+        std::thread::sleep(std::time::Duration::from_millis(100));
         self.run(&["send-keys", "-t", &pane.0, "Enter"])?;
         Ok(())
     }
@@ -301,6 +303,15 @@ impl Terminal for Tmux {
             "-y",
             &height.to_string(),
         ])?;
+        Ok(())
+    }
+
+    fn send_text_enter(&self, pane: &PaneHandle, text: &str, delay_ms: u64) -> Result<()> {
+        self.run(&["send-keys", "-t", &pane.0, "-l", text])?;
+        if delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+        self.run(&["send-keys", "-t", &pane.0, "Enter"])?;
         Ok(())
     }
 }

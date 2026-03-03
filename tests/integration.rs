@@ -181,10 +181,18 @@ fn test_create_multi_repo_task() {
 
     let terminal = &wagner.terminal;
     let sent_keys = terminal.get_sent_keys();
-    assert!(
-        sent_keys.len() >= 3,
-        "Should have sent keys to central pane + 2 repo panes"
+    assert_eq!(
+        sent_keys.len(),
+        2,
+        "Should have sent launch command + Enter to 2 repo panes"
     );
+
+    assert_eq!(task.panes.len(), 2, "Should have 2 tracked panes");
+    assert_eq!(task.panes[0].repo_name, "repo1");
+    assert_eq!(task.panes[1].repo_name, "repo2");
+    assert!(!task.panes[0].session_id.is_empty());
+    assert!(!task.panes[1].session_id.is_empty());
+    assert_ne!(task.panes[0].session_id, task.panes[1].session_id);
 }
 
 #[test]
@@ -352,7 +360,7 @@ fn test_add_pane_defaults() {
         .create_task("single-pane-task", &[spec], None)
         .unwrap();
 
-    wagner.add_pane("single-pane-task", None).unwrap();
+    wagner.add_pane("single-pane-task", None, None).unwrap();
 
     let specs = vec![
         RepoSpec {
@@ -368,8 +376,10 @@ fn test_add_pane_defaults() {
     ];
     wagner.create_task("multi-pane-task", &specs, None).unwrap();
 
-    wagner.add_pane("multi-pane-task", None).unwrap();
-    wagner.add_pane("multi-pane-task", Some("repo1")).unwrap();
+    wagner.add_pane("multi-pane-task", None, None).unwrap();
+    wagner
+        .add_pane("multi-pane-task", Some("repo1"), None)
+        .unwrap();
 }
 
 #[test]

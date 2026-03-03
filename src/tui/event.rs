@@ -22,7 +22,7 @@ fn matches_key_with_modifiers(code: KeyCode, modifiers: KeyModifiers, binding: &
             return false;
         }
         if let KeyCode::Char(c) = code {
-            return key.len() == 1 && key.chars().next() == Some(c);
+            return key.len() == 1 && key.starts_with(c);
         }
         return false;
     }
@@ -33,7 +33,7 @@ fn matches_key_with_modifiers(code: KeyCode, modifiers: KeyModifiers, binding: &
         KeyCode::Enter => binding == "Enter",
         KeyCode::Char(c) => {
             if binding.len() == 1 {
-                binding.chars().next() == Some(c)
+                binding.starts_with(c)
             } else {
                 false
             }
@@ -53,7 +53,7 @@ enum TextInputAction {
 enum Action {
     Quit,
     Help,
-    ToggleSidebar,
+    NextTab,
     Refresh,
     Attach,
     NewTask,
@@ -115,9 +115,11 @@ pub fn handle_events<T: Terminal, A: Agent>(app: &mut App<T, A>, area: Rect) -> 
 
             match app.input_mode {
                 InputMode::Normal => handle_normal_mode(app, key.code, key.modifiers),
-                InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
-                    handle_input_mode(app, key.code, key.modifiers)
-                }
+                InputMode::NewTask
+                | InputMode::SendMessage
+                | InputMode::Confirm
+                | InputMode::AddPaneName => handle_input_mode(app, key.code, key.modifiers),
+                InputMode::AddPaneAgent => handle_add_pane_agent_mode(app, key.code),
                 InputMode::SelectWorkspace => handle_workspace_select_mode(app, key.code),
                 InputMode::Settings => handle_settings_mode(app, key.code),
                 InputMode::EditSetting => handle_edit_setting_mode(app, key.code, key.modifiers),
@@ -166,7 +168,11 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             InputMode::Settings | InputMode::EditSetting => {
                 app.close_settings();
             }
-            InputMode::NewTask | InputMode::SendMessage | InputMode::Confirm => {
+            InputMode::NewTask
+            | InputMode::SendMessage
+            | InputMode::Confirm
+            | InputMode::AddPaneAgent
+            | InputMode::AddPaneName => {
                 app.cancel_input();
             }
             InputMode::SelectWorkspace => {
@@ -183,10 +189,10 @@ fn handle_mouse_event<T: Terminal, A: Agent>(
             }
         },
         MouseEventKind::Up(MouseButton::Left) => {
-            if let Some(row) = app.pending_select_row.take() {
-                if app.input_mode != InputMode::VisualSelect {
-                    app.handle_click(mouse.column, row, area);
-                }
+            if let Some(row) = app.pending_select_row.take()
+                && app.input_mode != InputMode::VisualSelect
+            {
+                app.handle_click(mouse.column, row, area);
             }
             app.dragging_sidebar = false;
         }
@@ -265,7 +271,7 @@ fn get_action(code: KeyCode, kb: &Keybindings) -> Option<Action> {
     let bindings: &[(&str, Action)] = &[
         (&kb.quit, Action::Quit),
         (&kb.help, Action::Help),
-        (&kb.toggle_sidebar, Action::ToggleSidebar),
+        (&kb.next_tab, Action::NextTab),
         (&kb.refresh, Action::Refresh),
         (&kb.attach, Action::Attach),
         (&kb.new_task, Action::NewTask),
@@ -312,20 +318,21 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
     }
 
     // Ctrl+E sends Escape to pane, Ctrl+T sends Tab to pane (when in terminal focus)
-    if app.focus == Focus::Terminal && modifiers.contains(KeyModifiers::CONTROL) {
-        if let KeyCode::Char(c) = code {
-            let key_to_send = match c {
-                'e' => Some("Escape"),
-                't' => Some("Tab"),
-                _ => None,
-            };
-            if let Some(key) = key_to_send {
-                if let Some(pane) = app.current_pane() {
-                    let _ = app.wagner.terminal.send_key(&pane, key);
-                    let _ = app.refresh_terminal_output();
-                }
-                return;
+    if app.focus == Focus::Terminal
+        && modifiers.contains(KeyModifiers::CONTROL)
+        && let KeyCode::Char(c) = code
+    {
+        let key_to_send = match c {
+            'e' => Some("Escape"),
+            't' => Some("Tab"),
+            _ => None,
+        };
+        if let Some(key) = key_to_send {
+            if let Some(pane) = app.current_pane() {
+                let _ = app.wagner.terminal.send_key(&pane, key);
+                let _ = app.refresh_terminal_output();
             }
+            return;
         }
     }
 
@@ -338,34 +345,23 @@ fn handle_normal_mode<T: Terminal, A: Agent>(
         return;
     }
 
-    if matches_key(code, &kb.toggle_sidebar) {
-        app.next_tab();
-        return;
-    }
-
     if app.focus == Focus::Terminal {
         send_key_to_pane(app, code, modifiers);
         return;
     }
 
-    if let KeyCode::Char(c) = code {
-        if let Some(n) = c.to_digit(10) {
-            if n >= 1 && n <= 9 {
-                app.select_pane((n - 1) as usize);
-                return;
-            }
-        }
-    }
-
-    if matches_key(code, &kb.toggle_sidebar) {
-        app.next_tab();
+    if let KeyCode::Char(c) = code
+        && let Some(n) = c.to_digit(10)
+        && (1..=9).contains(&n)
+    {
+        app.select_pane((n - 1) as usize);
         return;
     }
 
     match get_action(code, kb) {
         Some(Action::Quit) => app.should_quit = true,
         Some(Action::Help) => app.toggle_help(),
-        Some(Action::ToggleSidebar) => app.next_tab(),
+        Some(Action::NextTab) => app.next_tab(),
         Some(Action::Refresh) => {
             let _ = app.refresh_data();
         }
@@ -520,8 +516,30 @@ fn handle_input_mode<T: Terminal, A: Agent>(
 ) {
     match handle_text_editing(app, code, modifiers) {
         TextInputAction::Cancel => app.cancel_input(),
-        TextInputAction::Submit => app.submit_input(),
+        TextInputAction::Submit => {
+            if app.input_mode == InputMode::AddPaneName {
+                app.submit_add_pane_name();
+            } else {
+                app.submit_input();
+            }
+        }
         TextInputAction::Edit | TextInputAction::None => {}
+    }
+}
+
+fn handle_add_pane_agent_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
+    let kb = &app.wagner.config.keybindings;
+
+    if code == KeyCode::Esc {
+        app.cancel_input();
+    } else if code == KeyCode::Enter {
+        app.submit_add_pane_agent();
+    } else if matches_key(code, &kb.nav_down) || code == KeyCode::Down {
+        if app.add_pane_index + 1 < app.add_pane_options.len() {
+            app.add_pane_index += 1;
+        }
+    } else if matches_key(code, &kb.nav_up) || code == KeyCode::Up {
+        app.add_pane_index = app.add_pane_index.saturating_sub(1);
     }
 }
 
@@ -564,10 +582,10 @@ fn handle_diff_file_list_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: 
         app.diff_prev_file();
     } else if matches_key(code, &kb.scroll_top) || code == KeyCode::Home {
         app.diff_file_index = 0;
-    } else if matches_key(code, &kb.scroll_bottom) || code == KeyCode::End {
-        if !app.diff_files.is_empty() {
-            app.diff_file_index = app.diff_files.len() - 1;
-        }
+    } else if (matches_key(code, &kb.scroll_bottom) || code == KeyCode::End)
+        && !app.diff_files.is_empty()
+    {
+        app.diff_file_index = app.diff_files.len() - 1;
     }
 }
 
@@ -625,7 +643,7 @@ fn handle_workspace_select_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code
 fn handle_chains_mode<T: Terminal, A: Agent>(app: &mut App<T, A>, code: KeyCode) {
     let kb = &app.wagner.config.keybindings;
 
-    if code == KeyCode::Tab || matches_key(code, &kb.toggle_sidebar) {
+    if code == KeyCode::Tab || matches_key(code, &kb.next_tab) {
         app.next_tab();
         return;
     }
@@ -789,7 +807,7 @@ mod tests {
             get_action(KeyCode::Char('s'), &kb),
             Some(Action::SendMessage)
         );
-        assert_eq!(get_action(KeyCode::Tab, &kb), Some(Action::ToggleSidebar));
+        assert_eq!(get_action(KeyCode::Tab, &kb), Some(Action::NextTab));
         assert_eq!(
             get_action(KeyCode::Char('o'), &kb),
             Some(Action::SwitchSection)

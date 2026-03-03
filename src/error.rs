@@ -37,4 +37,10 @@ pub enum WagnerError {
 
     #[error("Cannot delete attached task '{0}' - use `wagner detach` instead")]
     CannotDeleteAttached(String),
+
+    #[error("Session discovery error: {0}")]
+    SessionDiscovery(String),
+
+    #[error("Transport error: {0}")]
+    Transport(String),
 }

@@ -119,9 +119,9 @@ fn parse_chain_link_content(file_path: &Path) -> (Option<String>, Option<String>
 }
 
 fn extract_section(content: &str, section_name: &str) -> Option<String> {
-    let marker = format!("## ");
+    let marker = "## ";
     let section_header = content.lines().find(|line| {
-        line.starts_with(&marker) && line.to_lowercase().contains(&section_name.to_lowercase())
+        line.starts_with(marker) && line.to_lowercase().contains(&section_name.to_lowercase())
     })?;
 
     let start_idx = content.find(section_header)? + section_header.len();
@@ -208,10 +208,10 @@ pub fn load_all_chains(tasks_root: &Path, task_name: Option<&str>) -> Result<Cha
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        if let Some(filter_task) = task_name {
-            if current_task_name != filter_task {
-                continue;
-            }
+        if let Some(filter_task) = task_name
+            && current_task_name != filter_task
+        {
+            continue;
         }
 
         let task_json = task_path.join(".wagner").join("task.json");
@@ -222,39 +222,37 @@ pub fn load_all_chains(tasks_root: &Path, task_name: Option<&str>) -> Result<Cha
         migrate_task_plugins_symlink(&task_path);
 
         let plugins_link = task_path.join(".wagner").join("plugins");
-        if plugins_link.is_symlink() {
-            if let Ok(target) = std::fs::read_link(&plugins_link) {
-                let chains_dir = if target.is_absolute() {
-                    target.join("chains")
-                } else {
-                    plugins_link.parent().unwrap().join(&target).join("chains")
-                };
+        if plugins_link.is_symlink()
+            && let Ok(target) = std::fs::read_link(&plugins_link)
+        {
+            let chains_dir = if target.is_absolute() {
+                target.join("chains")
+            } else {
+                plugins_link.parent().unwrap().join(&target).join("chains")
+            };
 
-                if chains_dir.exists() {
-                    let repo_path = chains_dir
-                        .parent()
-                        .and_then(|p| p.parent())
-                        .unwrap_or(&chains_dir)
-                        .to_path_buf();
+            if chains_dir.exists() {
+                let repo_path = chains_dir
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .unwrap_or(&chains_dir)
+                    .to_path_buf();
 
-                    if !seen_repos.contains_key(&repo_path) {
-                        let repo_name = repo_path
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "unknown".to_string());
+                if !seen_repos.contains_key(&repo_path) {
+                    let repo_name = repo_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unknown".to_string());
 
-                        let chains = load_chains_from_path(
-                            &chains_dir,
-                            ChainSource::Repo(repo_path.clone()),
-                        )?;
+                    let chains =
+                        load_chains_from_path(&chains_dir, ChainSource::Repo(repo_path.clone()))?;
 
-                        seen_repos.insert(repo_path.clone(), data.repos.len());
-                        data.repos.push(RepoChains {
-                            repo_name,
-                            repo_path,
-                            chains,
-                        });
-                    }
+                    seen_repos.insert(repo_path.clone(), data.repos.len());
+                    data.repos.push(RepoChains {
+                        repo_name,
+                        repo_path,
+                        chains,
+                    });
                 }
             }
         }

@@ -1,8 +1,8 @@
 [package]
 name = "wagner"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.93"
 description = "AI agent monitoring CLI tool with TUI"
 authors = ["Aleks Shteinman <deevsgt15@gmail.com>"]
 license = "MIT"
@@ -14,24 +14,30 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 ansi-to-tui = "8.0.0"
-anyhow = "1.0.100"
-chrono = { version = "0.4.42", features = ["serde"] }
-clap = { version = "4.5.54", features = ["derive"] }
-clap_complete = "4.5"
+anyhow = "1.0.102"
+base64 = "0.22.1"
+chrono = { version = "0.4.44", features = ["serde"] }
+clap = { version = "4.5.60", features = ["derive"] }
+clap_complete = "4.5.66"
 crossterm = "0.29.0"
 directories = "6.0.0"
+libc = "0.2.182"
+pulldown-cmark = "0.13.1"
 ratatui = "0.30.0"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.148"
-shellexpand = "3.1.1"
-thiserror = "2.0.17"
+serde_json = "1.0.149"
+sha2 = "0.10.9"
+shellexpand = "3.1.2"
+teloxide = { version = "0.17.0", features = ["macros"], optional = true }
+thiserror = "2.0.18"
 tokio = { version = "1.49.0", features = ["full"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-uuid = { version = "1.19.0", features = ["v4", "serde"] }
-sha2 = "0.10"
-rayon = "1.11.0"
-base64 = "0.22.1"
+uuid = { version = "1.21.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = "3.26.0"
+
+[features]
+default = ["telegram"]
+telegram = ["dep:teloxide"]
