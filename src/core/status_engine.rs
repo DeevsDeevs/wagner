@@ -102,9 +102,20 @@ impl StatusEngine {
                     self.last_session_statuses
                         .insert(task.name.clone(), session_status);
                     self.session_stable_since.remove(&task.name);
+                    let panes: Vec<(String, String)> = task
+                        .panes
+                        .iter()
+                        .filter_map(|tp| {
+                            let status = self
+                                .watcher
+                                .get_pane_status(session_name, &tp.pane_id)?;
+                            Some((tp.name.clone(), status.label()))
+                        })
+                        .collect();
                     Some(CoreEvent::SessionStatusChanged {
                         task_name: task.name.clone(),
                         status: session_status,
+                        panes,
                     })
                 } else {
                     None

@@ -8,7 +8,7 @@ use wagner::model::Engine;
 use wagner::store::Store;
 use wagner::terminal::MockTerminal;
 use wagner::transport::{CoreCommand, CoreResponse};
-use wagner::{RepoSource, RepoSpec, TestAgent, Wagner};
+use wagner::{PaneHandle, RepoSource, RepoSpec, Terminal, TestAgent, Wagner};
 
 struct E2eContext {
     _temp_dir: TempDir,
@@ -518,69 +518,71 @@ fn send_message_key_sequence() {
 }
 
 #[test]
-fn approve_key_sequence() {
+fn approve_no_waiting_pane_errors() {
     let ctx = E2eContext::new();
     let terminal = ctx.terminal();
-    ctx.create_task_with_panes(&terminal, "approve");
+    ctx.create_task_with_panes(&terminal, "approve-nw");
 
     let keys_before = terminal.get_sent_keys().len();
 
     let resp = ctx.execute_cmd(
         &terminal,
         &CoreCommand::Approve {
-            task_name: "approve".into(),
+            task_name: "approve-nw".into(),
             pane_name: None,
         },
     );
 
     match &resp {
-        CoreResponse::Confirmation { .. } | CoreResponse::Error { .. } => {}
-        other => panic!("Unexpected response: {other:?}"),
+        CoreResponse::Error { message } => {
+            assert!(
+                message.contains("No waiting pane"),
+                "Expected 'No waiting pane' in: {message}"
+            );
+        }
+        other => panic!("Expected Error when no pane is waiting, got: {other:?}"),
     }
 
+    // No keys should have been sent to the terminal
     let keys = terminal.get_sent_keys();
     let new_keys: Vec<_> = keys[keys_before..].to_vec();
-    // send_confirm sends: send_key("y") then send_key("Enter")
     assert!(
-        new_keys.iter().any(|(_, k)| k == "y"),
-        "Should send 'y': {new_keys:?}"
-    );
-    assert!(
-        new_keys.iter().any(|(_, k)| k == "Enter"),
-        "Should send Enter: {new_keys:?}"
+        !new_keys.iter().any(|(_, k)| k == "y"),
+        "Should NOT send 'y' to non-waiting pane: {new_keys:?}"
     );
 }
 
 #[test]
-fn reject_key_sequence() {
+fn reject_no_waiting_pane_errors() {
     let ctx = E2eContext::new();
     let terminal = ctx.terminal();
-    ctx.create_task_with_panes(&terminal, "reject");
+    ctx.create_task_with_panes(&terminal, "reject-nw");
 
     let keys_before = terminal.get_sent_keys().len();
 
     let resp = ctx.execute_cmd(
         &terminal,
         &CoreCommand::Reject {
-            task_name: "reject".into(),
+            task_name: "reject-nw".into(),
             pane_name: None,
         },
     );
 
     match &resp {
-        CoreResponse::Confirmation { .. } | CoreResponse::Error { .. } => {}
-        other => panic!("Unexpected response: {other:?}"),
+        CoreResponse::Error { message } => {
+            assert!(
+                message.contains("No waiting pane"),
+                "Expected 'No waiting pane' in: {message}"
+            );
+        }
+        other => panic!("Expected Error when no pane is waiting, got: {other:?}"),
     }
 
     let keys = terminal.get_sent_keys();
     let new_keys: Vec<_> = keys[keys_before..].to_vec();
     assert!(
-        new_keys.iter().any(|(_, k)| k == "n"),
-        "Should send 'n': {new_keys:?}"
-    );
-    assert!(
-        new_keys.iter().any(|(_, k)| k == "Enter"),
-        "Should send Enter: {new_keys:?}"
+        !new_keys.iter().any(|(_, k)| k == "n"),
+        "Should NOT send 'n' to non-waiting pane: {new_keys:?}"
     );
 }
 
@@ -675,4 +677,33 @@ fn engine_enter_delays() {
     assert_eq!(Engine::ClaudeCode.enter_delay_ms(), 5);
     assert_eq!(Engine::Codex.enter_delay_ms(), 100);
     assert_eq!(Engine::Terminal.enter_delay_ms(), 10);
+}
+
+// ─── 6. Pane Count Reflects Live State ──────────────────────────────────────
+
+#[test]
+fn pane_count_matches_live_tmux() {
+    let ctx = E2eContext::new();
+    let terminal = ctx.terminal();
+    ctx.create_task_with_panes(&terminal, "pane-count");
+
+    // Kill the tmux pane so tracked count (1) diverges from live count (0)
+    let task = {
+        let store = Store::new(ctx.config());
+        store.list_tasks().unwrap().into_iter().find(|t| t.name == "pane-count").unwrap()
+    };
+    let pane_id = &task.panes[0].pane_id;
+    terminal.kill_pane(&PaneHandle(pane_id.clone(), String::new())).unwrap();
+
+    // ListTasks should report 0 panes (live), not 1 (tracked)
+    let resp = ctx.execute_cmd(&terminal, &CoreCommand::ListTasks);
+    match resp {
+        CoreResponse::TaskList { tasks } => {
+            let summary = tasks.iter().find(|(_s, _)| _s.name == "pane-count");
+            assert!(summary.is_some(), "Task should appear in list");
+            let (s, _) = summary.unwrap();
+            assert_eq!(s.pane_count, 0, "pane_count should reflect live tmux state, not stale tracking");
+        }
+        other => panic!("Expected TaskList, got: {other:?}"),
+    }
 }

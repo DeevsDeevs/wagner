@@ -58,11 +58,25 @@ pub fn render_event(event: &CoreEvent) -> String {
             format!("\u{1F7E2} *{task}* \\| {title} — {act}")
         }
 
-        CoreEvent::SessionStatusChanged { task_name, status } => {
+        CoreEvent::SessionStatusChanged {
+            task_name,
+            status,
+            panes,
+        } => {
             let icon = status_icon(status);
             let task = escape(task_name);
             let label = escape(status.label());
-            format!("{icon} *{task}* — {label}")
+            if panes.is_empty() {
+                format!("{icon} *{task}* — {label}")
+            } else {
+                let mut lines = vec![format!("{icon} *{task}* — {label}\n")];
+                for (pane_name, pane_label) in panes {
+                    let name = escape(pane_name);
+                    let plabel = escape(pane_label);
+                    lines.push(format!("  {name} — {plabel}"));
+                }
+                lines.join("\n")
+            }
         }
 
         CoreEvent::DaemonStarted { tasks } => {
@@ -566,6 +580,36 @@ mod tests {
         assert!(text.contains("my\\-task"));
         assert!(text.contains("api"));
         assert!(text.contains("resumed"));
+    }
+
+    #[test]
+    fn render_session_status_with_panes() {
+        let text = render_event(&CoreEvent::SessionStatusChanged {
+            task_name: "my-task".into(),
+            status: SessionAggregateStatus::Working,
+            panes: vec![
+                ("api".into(), "Thinking".into()),
+                ("web".into(), "Idle".into()),
+            ],
+        });
+        assert!(text.contains("my\\-task"));
+        assert!(text.contains("Working"));
+        assert!(text.contains("api"));
+        assert!(text.contains("Thinking"));
+        assert!(text.contains("web"));
+        assert!(text.contains("Idle"));
+    }
+
+    #[test]
+    fn render_session_status_no_panes() {
+        let text = render_event(&CoreEvent::SessionStatusChanged {
+            task_name: "my-task".into(),
+            status: SessionAggregateStatus::Idle,
+            panes: vec![],
+        });
+        assert!(text.contains("my\\-task"));
+        assert!(text.contains("Idle"));
+        assert!(!text.contains("\n"));
     }
 
     #[test]

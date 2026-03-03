@@ -33,7 +33,7 @@ pub fn execute(
                         TaskSummary {
                             name: t.name.clone(),
                             repo_count: t.repos.len(),
-                            pane_count: t.panes.len(),
+                            pane_count: live_pane_count(terminal, &t.name),
                         },
                         status,
                     )
@@ -68,7 +68,7 @@ pub fn execute(
             let summary = TaskSummary {
                 name: task_name.clone(),
                 repo_count: task.map(|t| t.repos.len()).unwrap_or(0),
-                pane_count: task.map(|t| t.panes.len()).unwrap_or(0),
+                pane_count: session_panes.len(),
             };
 
             CoreResponse::Status {
@@ -110,7 +110,7 @@ pub fn execute(
                         TaskSummary {
                             name: t.name.clone(),
                             repo_count: t.repos.len(),
-                            pane_count: t.panes.len(),
+                            pane_count: pane_statuses.len(),
                         },
                         status,
                         pane_statuses,
@@ -675,6 +675,14 @@ fn capture_tail(terminal: &dyn Terminal, pane: &PaneHandle, lines: usize) -> Str
         .unwrap_or_default()
 }
 
+fn live_pane_count(terminal: &dyn Terminal, task_name: &str) -> usize {
+    let session_name = session_name_for_task(task_name);
+    terminal
+        .list_panes(&SessionHandle(session_name))
+        .map(|p| p.len())
+        .unwrap_or(0)
+}
+
 fn resolve_pane_engine(tasks: &[Task], task_name: &str, pane_id: &str) -> Option<Engine> {
     tasks
         .iter()
@@ -727,6 +735,7 @@ fn resolve_pane(
                 return Some(pane.clone());
             }
         }
+        return None;
     }
 
     panes.into_iter().next()

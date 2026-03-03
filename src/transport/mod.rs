@@ -57,6 +57,8 @@ pub enum CoreEvent {
     SessionStatusChanged {
         task_name: String,
         status: SessionAggregateStatus,
+        #[serde(default)]
+        panes: Vec<(String, String)>,
     },
     AgentResumed {
         task_name: String,
@@ -419,6 +421,7 @@ mod tests {
             CoreEvent::SessionStatusChanged {
                 task_name: "t".into(),
                 status: SessionAggregateStatus::Idle,
+                panes: vec![],
             },
             CoreEvent::DaemonStarted {
                 tasks: vec![TaskSummary {

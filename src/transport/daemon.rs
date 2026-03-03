@@ -10,7 +10,7 @@ use crate::config::Config;
 use crate::core::WagnerCore;
 use crate::model::Engine;
 use crate::store::Store;
-use crate::terminal::{PaneHandle, Terminal, Tmux, session_name_for_task};
+use crate::terminal::{PaneHandle, SessionHandle, Terminal, Tmux, session_name_for_task};
 use crate::transport::{CoreCommand, CoreResponse};
 
 use super::adapter::{Adapter, DaemonAdapter, LogAdapter};
@@ -108,10 +108,18 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
     let tasks = state.store.list_tasks()?;
     let summaries: Vec<TaskSummary> = tasks
         .iter()
-        .map(|t| TaskSummary {
-            name: t.name.clone(),
-            repo_count: t.repos.len(),
-            pane_count: t.panes.len(),
+        .map(|t| {
+            let session_name = session_name_for_task(&t.name);
+            let live_count = state
+                .terminal
+                .list_panes(&SessionHandle(session_name))
+                .map(|p| p.len())
+                .unwrap_or(0);
+            TaskSummary {
+                name: t.name.clone(),
+                repo_count: t.repos.len(),
+                pane_count: live_count,
+            }
         })
         .collect();
 
