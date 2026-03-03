@@ -6,6 +6,7 @@ pub mod telegram;
 
 use serde::{Deserialize, Serialize};
 
+use crate::monitor::QuestionData;
 use crate::monitor::status::{PaneStatus, SessionAggregateStatus, WaitReason};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,8 @@ pub enum CoreEvent {
         pane_id: String,
         reason: WaitReason,
         output_tail: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        question_data: Option<Vec<QuestionData>>,
     },
     AgentIdle {
         task_name: String,
@@ -404,6 +407,7 @@ mod tests {
                 pane_id: "%1".into(),
                 reason: WaitReason::Question,
                 output_tail: "tail".into(),
+                question_data: None,
             },
             CoreEvent::AgentIdle {
                 task_name: "t".into(),
@@ -458,6 +462,48 @@ mod tests {
         for event in &variants {
             roundtrip_event(event);
         }
+    }
+
+    #[test]
+    fn serde_needs_attention_with_question_data() {
+        use crate::monitor::{QuestionData, QuestionOption};
+
+        let event = CoreEvent::NeedsAttention {
+            task_name: "t".into(),
+            pane_name: "api".into(),
+            pane_id: "%1".into(),
+            reason: WaitReason::Question,
+            output_tail: "Which DB?".into(),
+            question_data: Some(vec![QuestionData {
+                question: "Which DB?".into(),
+                options: vec![
+                    QuestionOption {
+                        label: "Postgres".into(),
+                        description: Some("SQL".into()),
+                    },
+                    QuestionOption {
+                        label: "Mongo".into(),
+                        description: None,
+                    },
+                ],
+                multi_select: false,
+            }]),
+        };
+        roundtrip_event(&event);
+
+        // Also verify backward compat: None should not appear in JSON
+        let event_none = CoreEvent::NeedsAttention {
+            task_name: "t".into(),
+            pane_name: "api".into(),
+            pane_id: "%1".into(),
+            reason: WaitReason::Question,
+            output_tail: "tail".into(),
+            question_data: None,
+        };
+        let json = serde_json::to_string(&event_none).unwrap();
+        assert!(!json.contains("question_data"));
+        let back: CoreEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(format!("{:?}", event_none), format!("{:?}", back));
     }
 
     #[test]

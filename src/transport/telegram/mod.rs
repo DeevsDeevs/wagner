@@ -18,6 +18,7 @@ use crate::config::TelegramConfig;
 use crate::core::WagnerCore;
 use crate::error::WagnerError;
 use crate::model::{Engine, Task};
+use crate::monitor::QuestionData;
 use crate::monitor::status::PaneStatus;
 use crate::monitor::strip_ansi;
 use crate::store::Store;
@@ -28,7 +29,8 @@ use crate::transport::{CoreCommand, CoreEvent, CoreResponse, PaneOutputMode};
 use self::commands::{ParsedCommand, parse_command};
 use self::outbox::Outbox;
 use self::render::{
-    render_agent_response, render_event, render_progress, render_progress_done, render_response,
+    render_agent_response, render_event, render_progress, render_progress_done,
+    render_question_message, render_response,
 };
 
 const MAX_MESSAGE_LEN: usize = 4000;
@@ -92,6 +94,12 @@ pub struct TelegramAdapter {
     progress_messages: HashMap<String, ProgressMsgState>,
     // Panes that received user input — stores (task_name, baseline_line_count, engine)
     awaiting_response: HashMap<String, (String, usize, Engine)>,
+    // Question data for AskUserQuestion inline buttons, keyed by entity_id
+    question_data: HashMap<u16, Vec<QuestionData>>,
+    // Current question index per entity (for multi-question flows)
+    question_index: HashMap<u16, usize>,
+    // Deferred message edit for multi-question flow (pane_id, text, buttons)
+    next_question_edit: Option<(String, String, Vec<Vec<ActionButton>>)>,
     // State persistence
     last_state_save: Instant,
 }
@@ -158,6 +166,9 @@ impl TelegramAdapter {
             pane_modes: saved.pane_modes,
             progress_messages: HashMap::new(),
             awaiting_response: HashMap::new(),
+            question_data: HashMap::new(),
+            question_index: HashMap::new(),
+            next_question_edit: None,
             last_state_save: Instant::now(),
         })
     }
@@ -417,6 +428,7 @@ impl TelegramAdapter {
                 pane_id,
                 reason,
                 output_tail,
+                question_data,
             } => {
                 if !self.matches_focus(task_name, pane_name) {
                     self.suppressed_count += 1;
@@ -436,14 +448,23 @@ impl TelegramAdapter {
                     pane_id: pane_id.clone(),
                     reason: *reason,
                     output_tail,
+                    question_data: question_data.clone(),
                 };
 
                 let eid = self.register_entity(task_name, pane_id);
+
+                // Store question data for callback handling
+                if let Some(qd) = question_data {
+                    self.question_data.insert(eid, qd.clone());
+                }
+
+                let first_question = question_data.as_ref().and_then(|qs| qs.first());
                 let buttons = build_attention_actions(
                     eid,
                     reason,
                     self.suppressed_count,
                     self.focus.is_some(),
+                    first_question,
                 );
 
                 let msg_ref = self.send_event_text(&enriched, &buttons).await?;
@@ -461,6 +482,14 @@ impl TelegramAdapter {
                 response_text,
                 ..
             } => {
+                // Clean up stored question data for this entity
+                if let Some(&eid) =
+                    self.entity_reverse.get(&(task_name.clone(), pane_id.clone()))
+                {
+                    self.question_data.remove(&eid);
+                    self.question_index.remove(&eid);
+                }
+
                 if !self.matches_focus(task_name, pane_name) {
                     self.suppressed_count += 1;
                     return Ok(());
@@ -552,7 +581,19 @@ impl TelegramAdapter {
                 }
             }
 
-            CoreEvent::AgentWorking { pane_id, .. } => {
+            CoreEvent::AgentWorking {
+                task_name,
+                pane_id,
+                ..
+            } => {
+                // Clean up stored question data for this entity
+                if let Some(&eid) =
+                    self.entity_reverse.get(&(task_name.clone(), pane_id.clone()))
+                {
+                    self.question_data.remove(&eid);
+                    self.question_index.remove(&eid);
+                }
+
                 if self.awaiting_response.contains_key(pane_id) {
                     // Suppress — response message provides the feedback
                 } else {
@@ -1148,13 +1189,41 @@ impl TelegramAdapter {
                     .capture(&pane, 500)
                     .map(|s: String| s.lines().count())
                     .unwrap_or(0);
-                let send_result = if text == "y" {
+
+                // Check if this reply is to a question with stored options —
+                // if so, navigate to "Other" and type the free-text answer
+                let question_ctx = self
+                    .entity_reverse
+                    .get(&(task_name.clone(), pane_id.clone()))
+                    .copied()
+                    .and_then(|eid| {
+                        let idx = self.question_index.get(&eid).copied().unwrap_or(0);
+                        let qd = self.question_data.get(&eid)?.get(idx)?;
+                        let total = self.question_data.get(&eid)?.len();
+                        Some((eid, idx, qd.options.len(), total))
+                    });
+
+                let send_result = if let Some((_, _, option_count, _)) = question_ctx {
+                    // Navigate past all options to select "Other"
+                    (|| -> crate::Result<()> {
+                        for _ in 0..option_count {
+                            terminal.send_key(&pane, "Down")?;
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                        }
+                        terminal.send_key(&pane, "Enter")?;
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        terminal.send_literal(&pane, text)?;
+                        terminal.send_key(&pane, "Enter")?;
+                        Ok(())
+                    })()
+                } else if text == "y" {
                     terminal.send_approve(&pane)
                 } else if text == "n" {
                     terminal.send_reject(&pane)
                 } else {
                     terminal.send_keys(&pane, text)
                 };
+
                 if let Err(e) = send_result {
                     return (
                         CoreResponse::Error {
@@ -1163,23 +1232,58 @@ impl TelegramAdapter {
                         vec![],
                     );
                 }
+
+                let display_name = tasks
+                    .iter()
+                    .flat_map(|t| &t.panes)
+                    .find(|p| p.pane_id == pane_id)
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("?");
+
+                // Multi-question: advance to next question or submit
+                if let Some((eid, current_idx, _, total)) = question_ctx {
+                    let next_idx = current_idx + 1;
+                    if next_idx < total {
+                        self.question_index.insert(eid, next_idx);
+                        if let Some(next_qd) =
+                            self.question_data.get(&eid).and_then(|qs| qs.get(next_idx))
+                        {
+                            let msg_text =
+                                render_question_message(&task_name, display_name, next_qd);
+                            let btns = build_question_buttons(eid, next_qd);
+                            self.next_question_edit =
+                                Some((pane_id.clone(), msg_text, btns));
+                        }
+                        return (
+                            CoreResponse::Confirmation {
+                                message: format!("Sent to {task_name} | {display_name}"),
+                            },
+                            vec![],
+                        );
+                    }
+                    // Last question — submit
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    let _ = terminal.send_key(&pane, "Enter");
+                    self.question_data.remove(&eid);
+                    self.question_index.remove(&eid);
+                } else if let Some(&eid) =
+                    self.entity_reverse.get(&(task_name.clone(), pane_id.clone()))
+                {
+                    self.question_data.remove(&eid);
+                    self.question_index.remove(&eid);
+                }
+
                 let engine = tasks
                     .iter()
                     .flat_map(|t| &t.panes)
                     .find(|p| p.pane_id == pane_id)
                     .map(|p| p.engine)
                     .unwrap_or(Engine::ClaudeCode);
-                let pane_name = tasks
-                    .iter()
-                    .flat_map(|t| &t.panes)
-                    .find(|p| p.pane_id == pane_id)
-                    .map(|p| p.name.as_str())
-                    .unwrap_or("?");
                 self.reply_route_pending = Some((task_name.clone(), pane_id.clone()));
                 self.awaiting_response.insert(pane_id, (task_name.clone(), baseline, engine));
                 (
                     CoreResponse::Confirmation {
-                        message: format!("Sent to {task_name} | {pane_name}"),
+                        message: format!("Sent to {task_name} | {display_name}"),
                     },
                     vec![],
                 )
@@ -1920,6 +2024,141 @@ impl TelegramAdapter {
                 }
             }
 
+            "q" => {
+                // Question option callback: q:<entity_id>:<option_index>
+                let parts: Vec<&str> = id_str.splitn(2, ':').collect();
+                if parts.len() != 2 {
+                    return (
+                        CoreResponse::Error {
+                            message: "Invalid question callback data.".into(),
+                        },
+                        vec![],
+                    );
+                }
+                let entity_id: u16 = match parts[0].parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid callback data.".into(),
+                            },
+                            vec![],
+                        );
+                    }
+                };
+                let option_index: usize = match parts[1].parse() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return (
+                            CoreResponse::Error {
+                                message: "Invalid option index.".into(),
+                            },
+                            vec![],
+                        );
+                    }
+                };
+
+                match self.resolve_entity(entity_id) {
+                    Some((task, pane_id)) => {
+                        let task = task.to_string();
+                        let pane_id = pane_id.to_string();
+                        let handle = PaneHandle(pane_id.clone(), String::new());
+
+                        // Navigate Down * option_index times, then Enter
+                        for _ in 0..option_index {
+                            if let Err(e) = terminal.send_key(&handle, "Down") {
+                                return (
+                                    CoreResponse::Error {
+                                        message: format!("Failed to send key: {e}"),
+                                    },
+                                    vec![],
+                                );
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                        }
+                        if let Err(e) = terminal.send_key(&handle, "Enter") {
+                            return (
+                                CoreResponse::Error {
+                                    message: format!("Failed to send Enter: {e}"),
+                                },
+                                vec![],
+                            );
+                        }
+
+                        let current_idx = self.question_index.get(&entity_id).copied().unwrap_or(0);
+                        let questions = self.question_data.get(&entity_id);
+                        let total_questions = questions.map(|qs| qs.len()).unwrap_or(0);
+
+                        let selected_label = questions
+                            .and_then(|qs| qs.get(current_idx))
+                            .and_then(|qd| qd.options.get(option_index))
+                            .map(|o| o.label.clone())
+                            .unwrap_or_else(|| "?".into());
+
+                        let display_name = tasks
+                            .iter()
+                            .find(|t| t.name == task)
+                            .and_then(|t| t.panes.iter().find(|tp| tp.pane_id == pane_id))
+                            .map(|tp| tp.name.as_str())
+                            .unwrap_or("?");
+
+                        let next_idx = current_idx + 1;
+                        if next_idx < total_questions {
+                            // More questions remain — show the next one
+                            self.question_index.insert(entity_id, next_idx);
+                            if let Some(next_qd) = questions.and_then(|qs| qs.get(next_idx)) {
+                                let text = render_question_message(&task, display_name, next_qd);
+                                let buttons = build_question_buttons(entity_id, next_qd);
+                                self.next_question_edit =
+                                    Some((pane_id.clone(), text, buttons));
+                            }
+                            (
+                                CoreResponse::Confirmation {
+                                    message: format!("Selected \"{selected_label}\""),
+                                },
+                                vec![],
+                            )
+                        } else {
+                            // Last question — submit and set up response tracking
+                            std::thread::sleep(std::time::Duration::from_millis(200));
+                            let _ = terminal.send_key(&handle, "Enter");
+
+                            let engine = tasks
+                                .iter()
+                                .flat_map(|t| &t.panes)
+                                .find(|p| p.pane_id == pane_id)
+                                .map(|p| p.engine)
+                                .unwrap_or(Engine::ClaudeCode);
+                            let baseline = terminal
+                                .capture(&handle, 500)
+                                .map(|s: String| s.lines().count())
+                                .unwrap_or(0);
+
+                            self.question_data.remove(&entity_id);
+                            self.question_index.remove(&entity_id);
+                            self.reply_route_pending = Some((task.clone(), pane_id.clone()));
+                            self.awaiting_response
+                                .insert(pane_id, (task.clone(), baseline, engine));
+
+                            (
+                                CoreResponse::Confirmation {
+                                    message: format!(
+                                        "Selected \"{selected_label}\" for {task} | {display_name}"
+                                    ),
+                                },
+                                vec![],
+                            )
+                        }
+                    }
+                    None => (
+                        CoreResponse::Error {
+                            message: "Stale button — entity no longer tracked.".into(),
+                        },
+                        vec![],
+                    ),
+                }
+            }
+
             _ => {
                 warn!(%data, "unknown callback action");
                 (
@@ -2099,6 +2338,21 @@ impl Adapter for TelegramAdapter {
                 }
             };
 
+            // Multi-question flow: edit the original NeedsAttention message with the next question
+            if let Some((edit_pane_id, text, edit_buttons)) = self.next_question_edit.take() {
+                let target = if msg_ref.edit_in_place {
+                    Some(msg_ref.clone())
+                } else {
+                    self.live_messages.get(&edit_pane_id).cloned()
+                };
+                if let Some(target_ref) = target {
+                    let keyboard = build_keyboard(&edit_buttons);
+                    self.outbox.throttle().await;
+                    let _ = self.do_edit(&target_ref, &text, keyboard).await;
+                }
+                continue;
+            }
+
             let pane_assoc = self.reply_route_pending.take();
             let rename_assoc = self.rename_route_pending.take();
             match self
@@ -2174,18 +2428,42 @@ fn build_attention_actions(
     reason: &crate::monitor::status::WaitReason,
     suppressed_count: u32,
     focused: bool,
+    question_data: Option<&QuestionData>,
 ) -> Vec<Vec<ActionButton>> {
     use crate::monitor::status::WaitReason;
 
-    let mut row1 = vec![];
+    let mut rows: Vec<Vec<ActionButton>> = vec![];
 
+    // For single-select questions with options, add option buttons
+    if let Some(qd) = question_data
+        && !qd.multi_select
+        && !qd.options.is_empty()
+    {
+        let mut option_row = vec![];
+        for (i, opt) in qd.options.iter().enumerate() {
+            option_row.push(ActionButton {
+                label: opt.label.clone(),
+                callback_data: format!("q:{entity_id}:{i}"),
+            });
+            // Max 3 buttons per row for readability
+            if option_row.len() == 3 {
+                rows.push(option_row);
+                option_row = vec![];
+            }
+        }
+        if !option_row.is_empty() {
+            rows.push(option_row);
+        }
+    }
+
+    let mut action_row = vec![];
     match reason {
         WaitReason::Approval | WaitReason::Permission => {
-            row1.push(ActionButton {
+            action_row.push(ActionButton {
                 label: "Approve".into(),
                 callback_data: format!("a:{entity_id}"),
             });
-            row1.push(ActionButton {
+            action_row.push(ActionButton {
                 label: "Reject".into(),
                 callback_data: format!("r:{entity_id}"),
             });
@@ -2193,30 +2471,57 @@ fn build_attention_actions(
         WaitReason::Question | WaitReason::Input => {}
     }
 
-    row1.push(ActionButton {
+    action_row.push(ActionButton {
         label: "Output".into(),
         callback_data: format!("o:{entity_id}"),
     });
+    rows.push(action_row);
 
-    let mut row2 = vec![];
+    let mut focus_row = vec![];
     if focused {
         let label = if suppressed_count > 0 {
             format!("Unfocus ({suppressed_count} suppressed)")
         } else {
             "Unfocus".into()
         };
-        row2.push(ActionButton {
+        focus_row.push(ActionButton {
             label,
             callback_data: "uf".into(),
         });
     } else {
-        row2.push(ActionButton {
+        focus_row.push(ActionButton {
             label: "Focus".into(),
             callback_data: format!("fp:{entity_id}"),
         });
     }
+    rows.push(focus_row);
 
-    vec![row1, row2]
+    rows
+}
+
+fn build_question_buttons(entity_id: u16, qd: &QuestionData) -> Vec<Vec<ActionButton>> {
+    let mut rows: Vec<Vec<ActionButton>> = vec![];
+    if !qd.multi_select && !qd.options.is_empty() {
+        let mut option_row = vec![];
+        for (i, opt) in qd.options.iter().enumerate() {
+            option_row.push(ActionButton {
+                label: opt.label.clone(),
+                callback_data: format!("q:{entity_id}:{i}"),
+            });
+            if option_row.len() == 3 {
+                rows.push(option_row);
+                option_row = vec![];
+            }
+        }
+        if !option_row.is_empty() {
+            rows.push(option_row);
+        }
+    }
+    rows.push(vec![ActionButton {
+        label: "Output".into(),
+        callback_data: format!("o:{entity_id}"),
+    }]);
+    rows
 }
 
 fn capture_tail(terminal: &dyn Terminal, pane: &PaneHandle, lines: usize) -> String {

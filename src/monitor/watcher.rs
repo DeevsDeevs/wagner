@@ -341,6 +341,17 @@ impl SessionWatcher {
             .map(|(name, ctx)| (name.to_string(), ctx.map(String::from)))
     }
 
+    pub fn get_pane_question_data(
+        &self,
+        pane_id: &str,
+    ) -> Option<Vec<super::events::QuestionData>> {
+        self.pane_watchers
+            .get(pane_id)?
+            .deriver
+            .pending_question_data()
+            .map(|s| s.to_vec())
+    }
+
     pub fn take_pane_response(&mut self, pane_id: &str) -> Option<String> {
         self.pane_watchers
             .get_mut(pane_id)?

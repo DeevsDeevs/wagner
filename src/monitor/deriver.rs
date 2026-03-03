@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use super::events::AgentEvent;
+use super::events::{AgentEvent, QuestionData};
 use super::status::{
     Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, GenericActivity,
     PaneStatus, TerminalStatus, WaitReason,
@@ -39,6 +39,7 @@ struct PendingTool {
     tool_id: String,
     tool_name: String,
     context: Option<String>,
+    question_data: Option<Vec<QuestionData>>,
     proposed_at: Instant,
 }
 
@@ -96,6 +97,7 @@ impl StatusDeriver {
                 tool_id,
                 tool_name,
                 tool_context,
+                question_data,
                 ..
             } => {
                 self.state = DerivedState::Active;
@@ -104,6 +106,7 @@ impl StatusDeriver {
                     tool_id: tool_id.clone(),
                     tool_name: tool_name.clone(),
                     context: tool_context.clone(),
+                    question_data: question_data.clone(),
                     proposed_at: Instant::now(),
                 });
                 self.action_seq += 1;
@@ -203,6 +206,10 @@ impl StatusDeriver {
         self.pending_tool
             .as_ref()
             .map(|p| (p.tool_name.as_str(), p.context.as_deref()))
+    }
+
+    pub fn pending_question_data(&self) -> Option<&[QuestionData]> {
+        self.pending_tool.as_ref()?.question_data.as_deref()
     }
 
     pub fn action_seq(&self) -> u64 {
@@ -329,6 +336,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "Bash".into(),
             tool_context: None,
+            question_data: None,
         });
         assert!(d.last_tool_name() == Some("Bash"));
 
@@ -349,6 +357,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "Bash".into(),
             tool_context: None,
+            question_data: None,
         });
 
         std::thread::sleep(Duration::from_millis(60));
@@ -364,6 +373,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "AskUserQuestion".into(),
             tool_context: Some("Which database?".into()),
+            question_data: None,
         });
 
         std::thread::sleep(Duration::from_millis(60));
@@ -385,6 +395,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "Bash".into(),
             tool_context: None,
+            question_data: None,
         });
         d.process(&AgentEvent::ToolRejected {
             engine: Engine::ClaudeCode,
@@ -424,6 +435,7 @@ mod tests {
             tool_id: "call_1".into(),
             tool_name: "exec_command".into(),
             tool_context: None,
+            question_data: None,
         });
         assert!(status.is_active());
     }
@@ -465,6 +477,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "Bash".into(),
             tool_context: Some("cargo test".into()),
+            question_data: None,
         });
         assert_eq!(d.last_context(), Some("cargo test"));
     }
@@ -477,6 +490,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "WebSearch".into(),
             tool_context: None,
+            question_data: None,
         });
         assert_eq!(d.last_context(), Some("WebSearch"));
     }
@@ -489,6 +503,7 @@ mod tests {
             tool_id: "t1".into(),
             tool_name: "Bash".into(),
             tool_context: Some("ls".into()),
+            question_data: None,
         });
         assert!(d.last_context().is_some());
         d.process(&AgentEvent::TurnComplete {
@@ -583,5 +598,42 @@ mod tests {
             response_text: None,
         });
         assert_eq!(d.response_text(), None);
+    }
+
+    #[test]
+    fn pending_question_data_available_after_ask_user_question() {
+        use crate::monitor::events::{QuestionData, QuestionOption};
+
+        let mut d = claude_deriver();
+        let qd = QuestionData {
+            question: "Which DB?".into(),
+            options: vec![
+                QuestionOption {
+                    label: "Postgres".into(),
+                    description: Some("SQL".into()),
+                },
+                QuestionOption {
+                    label: "Mongo".into(),
+                    description: None,
+                },
+            ],
+            multi_select: false,
+        };
+        d.process(&AgentEvent::ToolProposed {
+            engine: Engine::ClaudeCode,
+            tool_id: "t1".into(),
+            tool_name: "AskUserQuestion".into(),
+            tool_context: Some("Which DB?".into()),
+            question_data: Some(vec![qd.clone()]),
+        });
+        assert_eq!(d.pending_question_data(), Some([qd].as_slice()));
+
+        // Cleared after tool completion
+        d.process(&AgentEvent::ToolCompleted {
+            engine: Engine::ClaudeCode,
+            tool_id: "t1".into(),
+            is_error: false,
+        });
+        assert_eq!(d.pending_question_data(), None);
     }
 }

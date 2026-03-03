@@ -1,4 +1,4 @@
-use super::events::AgentEvent;
+use super::events::{AgentEvent, QuestionData, QuestionOption};
 use crate::model::Engine;
 
 pub fn parse_claude_event(line: &str) -> Option<AgentEvent> {
@@ -120,12 +120,59 @@ fn extract_tool_proposed(content: &[serde_json::Value]) -> Option<AgentEvent> {
         .unwrap_or("")
         .to_string();
     let tool_context = extract_tool_context(&tool_name, tool_block);
+    let question_data = extract_question_data(&tool_name, tool_block);
     Some(AgentEvent::ToolProposed {
         engine: Engine::ClaudeCode,
         tool_id,
         tool_name,
         tool_context,
+        question_data,
     })
+}
+
+fn extract_question_data(
+    tool_name: &str,
+    tool_block: &serde_json::Value,
+) -> Option<Vec<QuestionData>> {
+    if tool_name != "AskUserQuestion" {
+        return None;
+    }
+    let input = tool_block.get("input")?;
+    let questions = input.get("questions")?.as_array()?;
+    let parsed: Vec<QuestionData> = questions
+        .iter()
+        .filter_map(|q| {
+            let question = q.get("question")?.as_str()?.to_string();
+            let multi_select = q
+                .get("multiSelect")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let options = q
+                .get("options")?
+                .as_array()?
+                .iter()
+                .filter_map(|o| {
+                    Some(QuestionOption {
+                        label: o.get("label")?.as_str()?.to_string(),
+                        description: o
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .map(String::from),
+                    })
+                })
+                .collect();
+            Some(QuestionData {
+                question,
+                options,
+                multi_select,
+            })
+        })
+        .collect();
+    if parsed.is_empty() {
+        None
+    } else {
+        Some(parsed)
+    }
 }
 
 fn extract_text_content(content: &[serde_json::Value]) -> String {
@@ -239,6 +286,7 @@ mod tests {
                 tool_id: "toolu_123".to_string(),
                 tool_name: "Bash".to_string(),
                 tool_context: Some("ls".to_string()),
+                question_data: None,
             }
         );
     }
@@ -300,6 +348,7 @@ mod tests {
                 tool_id: "toolu_789".to_string(),
                 tool_name: "Read".to_string(),
                 tool_context: None,
+                question_data: None,
             }
         );
     }
@@ -315,6 +364,20 @@ mod tests {
                 tool_id: "toolu_q1".to_string(),
                 tool_name: "AskUserQuestion".to_string(),
                 tool_context: Some("Which database should we use?".to_string()),
+                question_data: Some(vec![QuestionData {
+                    question: "Which database should we use?".to_string(),
+                    options: vec![
+                        QuestionOption {
+                            label: "Postgres".to_string(),
+                            description: Some("SQL".to_string()),
+                        },
+                        QuestionOption {
+                            label: "Mongo".to_string(),
+                            description: Some("NoSQL".to_string()),
+                        },
+                    ],
+                    multi_select: false,
+                }]),
             }
         );
     }
@@ -347,6 +410,7 @@ mod tests {
                 tool_id: "t1".to_string(),
                 tool_name: "Read".to_string(),
                 tool_context: Some("/src/main.rs".to_string()),
+                question_data: None,
             }
         );
     }
@@ -374,6 +438,7 @@ mod tests {
                 tool_id: "t1".to_string(),
                 tool_name: "WebSearch".to_string(),
                 tool_context: None,
+                question_data: None,
             }
         );
     }
@@ -408,5 +473,59 @@ mod tests {
                 reason: "Error: This command requires approval".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn extract_question_data_multiselect() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_q2","name":"AskUserQuestion","input":{"questions":[{"question":"Which features?","header":"Feat","options":[{"label":"Auth"},{"label":"DB","description":"Database"}],"multiSelect":true}]}}]}}"#;
+        let event = parse_claude_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed {
+                question_data: Some(qds),
+                ..
+            } => {
+                assert_eq!(qds.len(), 1);
+                let qd = &qds[0];
+                assert_eq!(qd.question, "Which features?");
+                assert!(qd.multi_select);
+                assert_eq!(qd.options.len(), 2);
+                assert_eq!(qd.options[0].label, "Auth");
+                assert_eq!(qd.options[0].description, None);
+                assert_eq!(qd.options[1].label, "DB");
+                assert_eq!(qd.options[1].description, Some("Database".into()));
+            }
+            other => panic!("expected ToolProposed with question_data, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_question_data_multiple_questions() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_q3","name":"AskUserQuestion","input":{"questions":[{"question":"What topic?","header":"Topic","options":[{"label":"A"},{"label":"B"}],"multiSelect":false},{"question":"What type?","header":"Type","options":[{"label":"X"},{"label":"Y"},{"label":"Z"}],"multiSelect":false}]}}]}}"#;
+        let event = parse_claude_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed {
+                question_data: Some(qds),
+                ..
+            } => {
+                assert_eq!(qds.len(), 2);
+                assert_eq!(qds[0].question, "What topic?");
+                assert_eq!(qds[0].options.len(), 2);
+                assert_eq!(qds[1].question, "What type?");
+                assert_eq!(qds[1].options.len(), 3);
+            }
+            other => panic!("expected ToolProposed with 2 questions, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_question_tool_has_no_question_data() {
+        let line = r#"{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#;
+        let event = parse_claude_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { question_data, .. } => {
+                assert!(question_data.is_none());
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
     }
 }

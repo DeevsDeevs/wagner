@@ -1,3 +1,4 @@
+use crate::monitor::QuestionData;
 use crate::monitor::status::{SessionAggregateStatus, WaitReason};
 use crate::transport::{CoreEvent, CoreResponse, ProgressStep};
 
@@ -9,24 +10,35 @@ pub fn render_event(event: &CoreEvent) -> String {
             pane_id: _,
             reason,
             output_tail,
+            question_data,
         } => {
             let task = escape(task_name);
             let title = escape(pane_name);
             let reason_label = escape(reason.label());
-            let tail = if output_tail.is_empty() {
-                String::new()
-            } else {
-                format!("\n\n```\n{}\n```", escape_code(output_tail))
-            };
-            let hint = match reason {
-                WaitReason::Question | WaitReason::Input => {
-                    String::from("_Reply to this message with your answer_")
+
+            match (reason, question_data.as_ref().and_then(|qs| qs.first())) {
+                (WaitReason::Question, Some(qd)) => {
+                    render_question_body(&task, &title, &reason_label, qd)
                 }
-                WaitReason::Approval | WaitReason::Permission => {
-                    format!("/approve {task}  /reject {task}")
+                _ => {
+                    let tail = if output_tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n\n```\n{}\n```", escape_code(output_tail))
+                    };
+                    let hint = match reason {
+                        WaitReason::Question | WaitReason::Input => {
+                            String::from("_Reply to this message with your answer_")
+                        }
+                        WaitReason::Approval | WaitReason::Permission => {
+                            format!("/approve {task}  /reject {task}")
+                        }
+                    };
+                    format!(
+                        "\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}{tail}\n\n{hint}"
+                    )
                 }
-            };
-            format!("\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}{tail}\n\n{hint}")
+            }
         }
 
         CoreEvent::AgentIdle {
@@ -417,6 +429,32 @@ fn markdown_to_telegram_html(md: &str) -> String {
     out
 }
 
+pub fn render_question_message(
+    task_name: &str,
+    pane_name: &str,
+    qd: &QuestionData,
+) -> String {
+    let task = escape(task_name);
+    let title = escape(pane_name);
+    let reason_label = escape("Question");
+    render_question_body(&task, &title, &reason_label, qd)
+}
+
+fn render_question_body(
+    task: &str,
+    title: &str,
+    reason_label: &str,
+    qd: &QuestionData,
+) -> String {
+    let question_text = escape(&qd.question);
+    let hint = if qd.multi_select {
+        String::from("_Reply to this message with your answer_")
+    } else {
+        String::from("_Tap an option or reply with your answer_")
+    };
+    format!("\u{1F534} *{task}* \\| {title} — Waiting: {reason_label}\n\n{question_text}\n\n{hint}")
+}
+
 fn status_icon(status: &SessionAggregateStatus) -> &'static str {
     match status {
         SessionAggregateStatus::NeedsAttention => "\u{1F534}",
@@ -534,6 +572,7 @@ mod tests {
             pane_id: "%5".into(),
             reason: crate::monitor::status::WaitReason::Approval,
             output_tail: "last line".into(),
+            question_data: None,
         });
         assert!(text.contains("my\\-task"));
         assert!(text.contains("Approval"));
@@ -551,6 +590,7 @@ mod tests {
             pane_id: "%5".into(),
             reason: crate::monitor::status::WaitReason::Question,
             output_tail: "Which database?".into(),
+            question_data: None,
         });
         assert!(text.contains("Question"));
         assert!(text.contains("Reply to this message"));
@@ -565,6 +605,7 @@ mod tests {
             pane_id: "%5".into(),
             reason: crate::monitor::status::WaitReason::Input,
             output_tail: String::new(),
+            question_data: None,
         });
         assert!(text.contains("Reply to this message"));
         assert!(!text.contains("/approve"));
@@ -620,9 +661,39 @@ mod tests {
             pane_id: "%5".into(),
             reason: crate::monitor::status::WaitReason::Permission,
             output_tail: String::new(),
+            question_data: None,
         });
         assert!(text.contains("/approve"));
         assert!(text.contains("/reject"));
         assert!(!text.contains("Reply to this message"));
+    }
+
+    #[test]
+    fn render_needs_attention_question_with_data() {
+        use crate::monitor::{QuestionData, QuestionOption};
+        let text = render_event(&CoreEvent::NeedsAttention {
+            task_name: "my-task".into(),
+            pane_name: "api".into(),
+            pane_id: "%5".into(),
+            reason: crate::monitor::status::WaitReason::Question,
+            output_tail: String::new(),
+            question_data: Some(vec![QuestionData {
+                question: "Which database?".into(),
+                options: vec![
+                    QuestionOption {
+                        label: "Postgres".into(),
+                        description: Some("SQL".into()),
+                    },
+                    QuestionOption {
+                        label: "Mongo".into(),
+                        description: None,
+                    },
+                ],
+                multi_select: false,
+            }]),
+        });
+        assert!(text.contains("Which database?"));
+        assert!(text.contains("Tap an option"));
+        assert!(!text.contains("/approve"));
     }
 }

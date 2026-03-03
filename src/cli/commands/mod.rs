@@ -1,6 +1,6 @@
 use crate::cli::{
-    ChainsCommands, Cli, Commands, DaemonCommands, PluginCommands, WorkspaceCommands,
-    print_completions,
+    ChainsCommands, Cli, Commands, ConfigCommands, DaemonCommands, PluginCommands,
+    WorkspaceCommands, print_completions,
 };
 use std::path::PathBuf;
 use tracing::{debug, info};
@@ -20,6 +20,9 @@ pub fn run(cli: Cli) -> Result<()> {
 
     if let Some(Commands::Daemon { command }) = cli.command {
         return cmd_daemon(command, config);
+    }
+    if let Some(Commands::Config { command }) = cli.command {
+        return cmd_config(command);
     }
     if let Some(ref cmd) = cli.command
         && let Some(result) = try_ipc_command(cmd)
@@ -70,6 +73,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Terminal { name }) => cmd_quick_launch(&wagner, Engine::Terminal, name),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
+        Some(Commands::Config { .. }) => unreachable!(),
         Some(Commands::Daemon { .. }) => unreachable!(),
         Some(Commands::Status { .. })
         | Some(Commands::Send { .. })
@@ -1372,5 +1376,151 @@ fn cmd_plugin(command: PluginCommands) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn prompt_line(prompt: &str) -> Result<String> {
+    use std::io::{self, Write};
+    print!("{}", prompt);
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
+}
+
+fn cmd_config(command: Option<ConfigCommands>) -> Result<()> {
+    match command.unwrap_or(ConfigCommands::Show) {
+        ConfigCommands::Show => cmd_config_show(),
+        ConfigCommands::Telegram => cmd_config_telegram(),
+        ConfigCommands::Agent => cmd_config_agent(),
+        ConfigCommands::Path => cmd_config_path(),
+    }
+}
+
+fn cmd_config_show() -> Result<()> {
+    let config = Config::load()?;
+
+    println!("Wagner Configuration");
+    println!("────────────────────");
+    println!("  Default agent:  {}", config.default_agent);
+    println!("  Tasks root:     {}", config.tasks_root.display());
+
+    match &config.daemon.telegram {
+        Some(tg) => {
+            let masked = if tg.bot_token.len() > 8 {
+                format!("{}…{}", &tg.bot_token[..4], &tg.bot_token[tg.bot_token.len() - 4..])
+            } else {
+                "****".to_string()
+            };
+            println!("  Telegram:       {} (chat {})", masked, tg.chat_id);
+        }
+        None => println!("  Telegram:       not configured"),
+    }
+
+    println!(
+        "  Chains plugin:  {}",
+        if config.plugins.chains.enabled { "enabled" } else { "disabled" }
+    );
+    println!("  Config file:    {}", Config::config_path().display());
+
+    Ok(())
+}
+
+fn cmd_config_telegram() -> Result<()> {
+    use wagner::TelegramConfig;
+
+    let mut config = Config::load()?;
+
+    if let Some(existing) = &config.daemon.telegram {
+        let masked = if existing.bot_token.len() > 8 {
+            format!(
+                "{}…{}",
+                &existing.bot_token[..4],
+                &existing.bot_token[existing.bot_token.len() - 4..]
+            )
+        } else {
+            "****".to_string()
+        };
+        println!("Telegram is already configured:");
+        println!("  Bot token: {}", masked);
+        println!("  Chat ID:   {}", existing.chat_id);
+        println!();
+        let answer = prompt_line("Reconfigure? [y/N] ")?;
+        if !answer.eq_ignore_ascii_case("y") {
+            return Ok(());
+        }
+        println!();
+    }
+
+    println!("Telegram Bot Setup");
+    println!("──────────────────");
+    println!("1. Create a bot via @BotFather on Telegram");
+    println!("2. Send /start to your bot");
+    println!("3. Get your chat ID via @userinfobot");
+    println!();
+
+    let bot_token = loop {
+        let token = prompt_line("Bot token: ")?;
+        if !token.is_empty() {
+            break token;
+        }
+        println!("Bot token is required.");
+    };
+
+    let chat_id: i64 = loop {
+        let input = prompt_line("Chat ID: ")?;
+        match input.parse() {
+            Ok(id) => break id,
+            Err(_) => println!("Enter a valid integer chat ID."),
+        }
+    };
+
+    let notify_input = prompt_line("Notify on waiting? [Y/n] ")?;
+    let notify_waiting = !notify_input.eq_ignore_ascii_case("n");
+
+    config.daemon.telegram = Some(TelegramConfig {
+        bot_token,
+        chat_id,
+        notify_waiting,
+        rate_limit_ms: 50,
+        allowed_users: vec![],
+    });
+    config.save()?;
+
+    println!();
+    println!("Telegram configured.");
+    println!("Restart the daemon to apply: wagner daemon restart");
+
+    Ok(())
+}
+
+fn cmd_config_agent() -> Result<()> {
+    let mut config = Config::load()?;
+    let agents = ["claude", "codex"];
+
+    println!("Default agent: {}", config.default_agent);
+    println!("Options: {}", agents.join(", "));
+    println!();
+
+    let input = prompt_line(&format!("Select default agent [{}]: ", config.default_agent))?;
+
+    let choice = if input.is_empty() {
+        config.default_agent.clone()
+    } else if agents.contains(&input.as_str()) {
+        input
+    } else {
+        println!("Unknown agent '{}'. Options: {}", input, agents.join(", "));
+        return Ok(());
+    };
+
+    config.default_agent = choice.clone();
+    config.save()?;
+    println!("Default agent set to: {}", choice);
+
+    Ok(())
+}
+
+fn cmd_config_path() -> Result<()> {
+    println!("{}", Config::config_path().display());
     Ok(())
 }

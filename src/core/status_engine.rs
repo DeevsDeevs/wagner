@@ -191,12 +191,18 @@ impl StatusEngine {
                 } => *r,
                 _ => WaitReason::Approval,
             };
+            let question_data = if reason == WaitReason::Question {
+                self.watcher.get_pane_question_data(pane_id)
+            } else {
+                None
+            };
             Some(CoreEvent::NeedsAttention {
                 task_name: task.name.clone(),
                 pane_name,
                 pane_id: pane_id.clone(),
                 reason,
                 output_tail,
+                question_data,
             })
         } else if is_idle && (was_active || was_waiting) {
             let response_text = self.watcher.take_pane_response(pane_id);
@@ -307,5 +313,12 @@ impl StatusEngine {
 
     pub fn get_pane_context(&self, pane_id: &str) -> Option<String> {
         self.watcher.get_pane_context(pane_id)
+    }
+
+    pub fn get_pane_question_data(
+        &self,
+        pane_id: &str,
+    ) -> Option<Vec<crate::monitor::events::QuestionData>> {
+        self.watcher.get_pane_question_data(pane_id)
     }
 }

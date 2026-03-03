@@ -15,7 +15,7 @@ pub mod wagner;
 
 pub use agent::{Agent, AgentChoice, ClaudeCode, Codex, TestAgent};
 pub use attach::{AttachDetection, derive_task_name, detect_attach_mode};
-pub use config::Config;
+pub use config::{Config, TelegramConfig};
 pub use error::{Result, WagnerError};
 pub use model::{Engine, RepoSource, Task, TaskKind, TaskRepo, TrackedPane};
 pub use store::Store;

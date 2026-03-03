@@ -65,6 +65,7 @@ fn parse_response_item(obj: &serde_json::Value) -> Option<AgentEvent> {
                 tool_id: call_id,
                 tool_name: name,
                 tool_context: None,
+                question_data: None,
             })
         }
         "function_call_output" | "custom_tool_call_output" => {
@@ -90,6 +91,7 @@ fn parse_response_item(obj: &serde_json::Value) -> Option<AgentEvent> {
                 tool_id: call_id,
                 tool_name: "web_search".to_string(),
                 tool_context: None,
+                question_data: None,
             })
         }
         _ => None,
@@ -164,6 +166,7 @@ mod tests {
                 tool_id: "call_123".to_string(),
                 tool_name: "exec_command".to_string(),
                 tool_context: None,
+                question_data: None,
             }
         );
     }
@@ -241,6 +244,7 @@ mod tests {
                 tool_id: "call_456".to_string(),
                 tool_name: "my_tool".to_string(),
                 tool_context: None,
+                question_data: None,
             }
         );
     }

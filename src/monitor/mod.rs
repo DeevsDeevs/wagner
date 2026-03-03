@@ -20,6 +20,7 @@ use crate::terminal::{PaneHandle, Terminal};
 pub use ansi::strip_ansi;
 pub use detector::{AgentDetector, IDLE_THRESHOLD};
 pub use detectors::TerminalDetector;
+pub use events::{QuestionData, QuestionOption};
 pub use status::{
     Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, PaneStatus,
     STUCK_THRESHOLD, SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,

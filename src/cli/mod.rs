@@ -155,6 +155,13 @@ pub enum Commands {
         command: ChainsCommands,
     },
 
+    /// View and manage configuration
+    #[command(visible_alias = "cfg")]
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommands>,
+    },
+
     /// Launch Claude Code in the current directory
     Claude {
         /// Custom task name (defaults to directory name)
@@ -268,6 +275,18 @@ pub enum Commands {
         #[command(subcommand)]
         command: DaemonCommands,
     },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommands {
+    /// Set up Telegram notifications
+    Telegram,
+    /// Set the default agent engine
+    Agent,
+    /// Show current configuration
+    Show,
+    /// Print config file path
+    Path,
 }
 
 #[derive(Subcommand)]
@@ -465,6 +484,8 @@ _wagner() {{
         'n:Reject tool use'
         'output:Capture pane output'
         'resume:Resume a dead agent'
+        'config:View and manage configuration'
+        'cfg:View and manage configuration'
         'daemon:Run the daemon for remote monitoring'
     )
 
@@ -658,6 +679,16 @@ _wagner() {{
                     ;;
                 resume)
                     _arguments '1:task:_wagner_tasks' '2:pane:'
+                    ;;
+                config|cfg)
+                    local -a config_commands
+                    config_commands=(
+                        'telegram:Set up Telegram notifications'
+                        'agent:Set the default agent engine'
+                        'show:Show current configuration'
+                        'path:Print config file path'
+                    )
+                    _describe 'config command' config_commands
                     ;;
                 daemon)
                     local -a daemon_commands
