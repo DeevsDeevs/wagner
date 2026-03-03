@@ -1408,7 +1408,11 @@ fn cmd_config_show() -> Result<()> {
     match &config.daemon.telegram {
         Some(tg) => {
             let masked = if tg.bot_token.len() > 8 {
-                format!("{}…{}", &tg.bot_token[..4], &tg.bot_token[tg.bot_token.len() - 4..])
+                format!(
+                    "{}…{}",
+                    &tg.bot_token[..4],
+                    &tg.bot_token[tg.bot_token.len() - 4..]
+                )
             } else {
                 "****".to_string()
             };
@@ -1419,7 +1423,11 @@ fn cmd_config_show() -> Result<()> {
 
     println!(
         "  Chains plugin:  {}",
-        if config.plugins.chains.enabled { "enabled" } else { "disabled" }
+        if config.plugins.chains.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
     println!("  Config file:    {}", Config::config_path().display());
 
@@ -1502,7 +1510,10 @@ fn cmd_config_agent() -> Result<()> {
     println!("Options: {}", agents.join(", "));
     println!();
 
-    let input = prompt_line(&format!("Select default agent [{}]: ", config.default_agent))?;
+    let input = prompt_line(&format!(
+        "Select default agent [{}]: ",
+        config.default_agent
+    ))?;
 
     let choice = if input.is_empty() {
         config.default_agent.clone()

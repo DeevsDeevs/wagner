@@ -483,8 +483,9 @@ impl TelegramAdapter {
                 ..
             } => {
                 // Clean up stored question data for this entity
-                if let Some(&eid) =
-                    self.entity_reverse.get(&(task_name.clone(), pane_id.clone()))
+                if let Some(&eid) = self
+                    .entity_reverse
+                    .get(&(task_name.clone(), pane_id.clone()))
                 {
                     self.question_data.remove(&eid);
                     self.question_index.remove(&eid);
@@ -582,13 +583,12 @@ impl TelegramAdapter {
             }
 
             CoreEvent::AgentWorking {
-                task_name,
-                pane_id,
-                ..
+                task_name, pane_id, ..
             } => {
                 // Clean up stored question data for this entity
-                if let Some(&eid) =
-                    self.entity_reverse.get(&(task_name.clone(), pane_id.clone()))
+                if let Some(&eid) = self
+                    .entity_reverse
+                    .get(&(task_name.clone(), pane_id.clone()))
                 {
                     self.question_data.remove(&eid);
                     self.question_index.remove(&eid);
@@ -2109,8 +2109,7 @@ impl TelegramAdapter {
                             if let Some(next_qd) = questions.and_then(|qs| qs.get(next_idx)) {
                                 let text = render_question_message(&task, display_name, next_qd);
                                 let buttons = build_question_buttons(entity_id, next_qd);
-                                self.next_question_edit =
-                                    Some((pane_id.clone(), text, buttons));
+                                self.next_question_edit = Some((pane_id.clone(), text, buttons));
                             }
                             (
                                 CoreResponse::Confirmation {

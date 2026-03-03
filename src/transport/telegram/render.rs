@@ -429,23 +429,14 @@ fn markdown_to_telegram_html(md: &str) -> String {
     out
 }
 
-pub fn render_question_message(
-    task_name: &str,
-    pane_name: &str,
-    qd: &QuestionData,
-) -> String {
+pub fn render_question_message(task_name: &str, pane_name: &str, qd: &QuestionData) -> String {
     let task = escape(task_name);
     let title = escape(pane_name);
     let reason_label = escape("Question");
     render_question_body(&task, &title, &reason_label, qd)
 }
 
-fn render_question_body(
-    task: &str,
-    title: &str,
-    reason_label: &str,
-    qd: &QuestionData,
-) -> String {
+fn render_question_body(task: &str, title: &str, reason_label: &str, qd: &QuestionData) -> String {
     let question_text = escape(&qd.question);
     let hint = if qd.multi_select {
         String::from("_Reply to this message with your answer_")
