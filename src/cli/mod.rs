@@ -155,6 +155,27 @@ pub enum Commands {
         command: ChainsCommands,
     },
 
+    /// Launch Claude Code in the current directory
+    Claude {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Launch Codex in the current directory
+    Codex {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Launch a terminal pane in the current directory
+    Terminal {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
     /// Start agent sessions on existing repos (no worktrees)
     ///
     /// Lightweight mode: manages tmux/agents without creating worktrees or branches.
@@ -255,6 +276,8 @@ pub enum DaemonCommands {
     Start,
     /// Stop a running daemon
     Stop,
+    /// Stop and restart the daemon
+    Restart,
     /// Check if daemon is running
     Status,
 }
@@ -428,6 +451,9 @@ _wagner() {{
         'repair:Clean up orphaned worktrees'
         'plugin:Manage plugins'
         'chains:Manage chains (requires chains plugin)'
+        'claude:Launch Claude Code in the current directory'
+        'codex:Launch Codex in the current directory'
+        'terminal:Launch a terminal pane in the current directory'
         'start:Start agent sessions on existing repos'
         's:Start agent sessions on existing repos'
         'detach:Stop tracking an attached task'
@@ -593,6 +619,11 @@ _wagner() {{
                             ;;
                     esac
                     ;;
+                claude|codex|terminal)
+                    _arguments \
+                        '-n[Task name]:name:' \
+                        '--name=[Task name]:name:'
+                    ;;
                 start|s)
                     _arguments \
                         '*:repo path:_files -/' \
@@ -633,6 +664,7 @@ _wagner() {{
                     daemon_commands=(
                         'start:Start the daemon (foreground)'
                         'stop:Stop a running daemon'
+                        'restart:Stop and restart the daemon'
                         'status:Check if daemon is running'
                     )
                     _describe 'daemon command' daemon_commands

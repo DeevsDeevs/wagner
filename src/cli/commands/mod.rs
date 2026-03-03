@@ -5,8 +5,8 @@ use crate::cli::{
 use std::path::PathBuf;
 use tracing::{debug, info};
 use wagner::{
-    Agent, AgentChoice, AttachDetection, Config, RepoSource, RepoSpec, Result, Terminal, Tmux,
-    Wagner, default_branch_for_task, derive_task_name, detect_attach_mode, plugins,
+    Agent, AgentChoice, AttachDetection, Config, Engine, RepoSource, RepoSpec, Result, Terminal,
+    Tmux, Wagner, default_branch_for_task, derive_task_name, detect_attach_mode, plugins,
 };
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -65,6 +65,11 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
+        Some(Commands::Claude { name }) => {
+            cmd_quick_launch(&wagner, Engine::ClaudeCode, name)
+        }
+        Some(Commands::Codex { name }) => cmd_quick_launch(&wagner, Engine::Codex, name),
+        Some(Commands::Terminal { name }) => cmd_quick_launch(&wagner, Engine::Terminal, name),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
         Some(Commands::Daemon { .. }) => unreachable!(),
@@ -333,6 +338,14 @@ fn cmd_attach<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, task: Option<String>
         _ => {}
     }
     wagner.attach(&task_name, None)
+}
+
+fn cmd_quick_launch<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    engine: Engine,
+    name: Option<String>,
+) -> Result<()> {
+    wagner.quick_launch(engine, name.as_deref())
 }
 
 fn cmd_start<T: Terminal, A: Agent>(
@@ -1171,26 +1184,15 @@ fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(wagner::transport::daemon::run_daemon(config))
         }
-        DaemonCommands::Stop => {
-            let Some(pid_str) = read_daemon_pid() else {
-                println!("Daemon not running (no PID file)");
-                return Ok(());
-            };
-            if !daemon_alive(&pid_str) {
-                println!("Daemon not running (stale PID file, removing)");
-                let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
-                return Ok(());
+        DaemonCommands::Stop => stop_daemon(),
+        DaemonCommands::Restart => {
+            stop_daemon_and_wait();
+            if config.daemon.telegram.is_none() {
+                info!("No Telegram configured, running with log transport");
             }
-            let sent = std::process::Command::new("kill")
-                .args(["-TERM", &pid_str])
-                .status()
-                .is_ok_and(|s| s.success());
-            if sent {
-                println!("Sent SIGTERM to daemon (PID {pid_str})");
-            } else {
-                println!("Failed to send SIGTERM to daemon (PID {pid_str})");
-            }
-            Ok(())
+            info!("Starting daemon");
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(wagner::transport::daemon::run_daemon(config))
         }
         DaemonCommands::Status => {
             match read_daemon_pid() {
@@ -1202,6 +1204,57 @@ fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn stop_daemon() -> Result<()> {
+    let Some(pid_str) = read_daemon_pid() else {
+        println!("Daemon not running (no PID file)");
+        return Ok(());
+    };
+    if !daemon_alive(&pid_str) {
+        println!("Daemon not running (stale PID file, removing)");
+        let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
+        return Ok(());
+    }
+    let sent = std::process::Command::new("kill")
+        .args(["-TERM", &pid_str])
+        .status()
+        .is_ok_and(|s| s.success());
+    if sent {
+        println!("Sent SIGTERM to daemon (PID {pid_str})");
+    } else {
+        println!("Failed to send SIGTERM to daemon (PID {pid_str})");
+    }
+    Ok(())
+}
+
+fn stop_daemon_and_wait() {
+    let Some(pid_str) = read_daemon_pid() else {
+        println!("Daemon not running, starting fresh");
+        return;
+    };
+    if !daemon_alive(&pid_str) {
+        println!("Daemon not running (stale PID file, removing)");
+        let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
+        return;
+    }
+    let sent = std::process::Command::new("kill")
+        .args(["-TERM", &pid_str])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !sent {
+        println!("Failed to send SIGTERM to daemon (PID {pid_str})");
+        return;
+    }
+    println!("Sent SIGTERM to daemon (PID {pid_str}), waiting...");
+    for _ in 0..50 {
+        if !daemon_alive(&pid_str) {
+            println!("Daemon stopped");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    println!("Daemon did not stop within 5s, proceeding anyway");
 }
 
 fn read_daemon_pid() -> Option<String> {

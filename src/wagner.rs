@@ -208,6 +208,51 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         Ok(task)
     }
 
+    pub fn quick_launch(&self, engine: crate::model::Engine, name: Option<&str>) -> Result<()> {
+        let cwd = std::env::current_dir()?.canonicalize()?;
+        let dir_name = cwd
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "task".to_string());
+        let task_name = name.unwrap_or(&dir_name);
+
+        if self.store.task_exists(task_name) {
+            let session_name = session_name_for_task(task_name);
+            if self.terminal.session_exists(task_name)? {
+                match self.resume_dead_agents(task_name) {
+                    Ok(n) if n > 0 => {
+                        debug!(count = n, "Resumed dead agents");
+                    }
+                    _ => {}
+                }
+                return self.terminal.attach(&SessionHandle(session_name));
+            }
+            self.store.delete_task(task_name)?;
+        }
+
+        let branch =
+            crate::attach::get_current_branch(&cwd).unwrap_or_else(|| "none".to_string());
+        let repo = TaskRepo {
+            name: dir_name.clone(),
+            source: RepoSource::Local(cwd.clone()),
+            worktree: cwd.clone(),
+            branch,
+        };
+
+        let mut task = Task::new_attached(task_name, cwd.clone(), vec![repo.clone()]);
+        self.store.save_task(&task)?;
+
+        let session = self.terminal.create_session(task_name, &cwd)?;
+        if let Ok(panes) = self.terminal.list_panes(&session)
+            && let Some(pane) = panes.first()
+        {
+            self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine)?;
+        }
+
+        self.store.save_task(&task)?;
+        self.terminal.attach(&session)
+    }
+
     pub fn detach_task(&self, name: &str) -> Result<()> {
         let _task = self.store.load_task(name)?;
 

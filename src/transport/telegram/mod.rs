@@ -1148,7 +1148,14 @@ impl TelegramAdapter {
                     .capture(&pane, 500)
                     .map(|s: String| s.lines().count())
                     .unwrap_or(0);
-                if let Err(e) = terminal.send_keys(&pane, text) {
+                let send_result = if text == "y" {
+                    terminal.send_approve(&pane)
+                } else if text == "n" {
+                    terminal.send_reject(&pane)
+                } else {
+                    terminal.send_keys(&pane, text)
+                };
+                if let Err(e) = send_result {
                     return (
                         CoreResponse::Error {
                             message: format!("Failed to send: {e}"),
@@ -1259,7 +1266,7 @@ impl TelegramAdapter {
                         let task = task.to_string();
                         let pane_id = pane_id.to_string();
                         let handle = PaneHandle(pane_id.clone(), String::new());
-                        if let Err(e) = terminal.send_key(&handle, "y") {
+                        if let Err(e) = terminal.send_approve(&handle) {
                             return (
                                 CoreResponse::Error {
                                     message: format!("Failed to approve: {e}"),
@@ -1267,7 +1274,6 @@ impl TelegramAdapter {
                                 vec![],
                             );
                         }
-                        let _ = terminal.send_key(&handle, "Enter");
                         let display_name = tasks
                             .iter()
                             .find(|t| t.name == task)
@@ -1320,7 +1326,7 @@ impl TelegramAdapter {
                         let task = task.to_string();
                         let pane_id = pane_id.to_string();
                         let handle = PaneHandle(pane_id.clone(), String::new());
-                        if let Err(e) = terminal.send_key(&handle, "n") {
+                        if let Err(e) = terminal.send_reject(&handle) {
                             return (
                                 CoreResponse::Error {
                                     message: format!("Failed to reject: {e}"),
@@ -1328,7 +1334,6 @@ impl TelegramAdapter {
                                 vec![],
                             );
                         }
-                        let _ = terminal.send_key(&handle, "Enter");
                         let display_name = tasks
                             .iter()
                             .find(|t| t.name == task)
@@ -1547,9 +1552,9 @@ impl TelegramAdapter {
                                 .get_pane_status(&session_name, &pane.0)
                                 .cloned()
                                 .unwrap_or(PaneStatus::Unknown);
-                            if status.is_waiting() {
-                                let _ = terminal.send_key(pane, "y");
-                                let _ = terminal.send_key(pane, "Enter");
+                            if status.is_waiting()
+                                && terminal.send_approve(pane).is_ok()
+                            {
                                 approved += 1;
                             }
                         }
@@ -1970,7 +1975,7 @@ impl TelegramAdapter {
             1 => {
                 let (task_name, pane_id, pane_name) = &waiting_panes[0];
                 let handle = PaneHandle(pane_id.clone(), String::new());
-                if let Err(e) = terminal.send_key(&handle, "y") {
+                if let Err(e) = terminal.send_approve(&handle) {
                     return (
                         CoreResponse::Error {
                             message: format!("Failed to approve: {e}"),
@@ -1978,7 +1983,6 @@ impl TelegramAdapter {
                         vec![],
                     );
                 }
-                let _ = terminal.send_key(&handle, "Enter");
                 let engine = tasks
                     .iter()
                     .flat_map(|t| &t.panes)

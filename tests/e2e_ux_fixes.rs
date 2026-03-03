@@ -547,8 +547,8 @@ fn approve_no_waiting_pane_errors() {
     let keys = terminal.get_sent_keys();
     let new_keys: Vec<_> = keys[keys_before..].to_vec();
     assert!(
-        !new_keys.iter().any(|(_, k)| k == "y"),
-        "Should NOT send 'y' to non-waiting pane: {new_keys:?}"
+        new_keys.is_empty(),
+        "Should NOT send any keys to non-waiting pane: {new_keys:?}"
     );
 }
 
@@ -581,8 +581,8 @@ fn reject_no_waiting_pane_errors() {
     let keys = terminal.get_sent_keys();
     let new_keys: Vec<_> = keys[keys_before..].to_vec();
     assert!(
-        !new_keys.iter().any(|(_, k)| k == "n"),
-        "Should NOT send 'n' to non-waiting pane: {new_keys:?}"
+        new_keys.is_empty(),
+        "Should NOT send any keys to non-waiting pane: {new_keys:?}"
     );
 }
 

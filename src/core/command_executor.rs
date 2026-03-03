@@ -175,7 +175,7 @@ pub fn execute(
                 Some(true),
             ) {
                 Some(pane) => {
-                    if let Err(e) = send_confirm_to_pane(terminal, &pane, "y") {
+                    if let Err(e) = send_approve_to_pane(terminal, &pane) {
                         return CoreResponse::Error { message: e };
                     }
                     let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
@@ -204,7 +204,7 @@ pub fn execute(
                 Some(true),
             ) {
                 Some(pane) => {
-                    if let Err(e) = send_confirm_to_pane(terminal, &pane, "n") {
+                    if let Err(e) = send_reject_to_pane(terminal, &pane) {
                         return CoreResponse::Error { message: e };
                     }
                     let display_pane = resolve_pane_display_name(tasks, task_name, &pane.0);
@@ -618,14 +618,16 @@ pub fn execute(
     }
 }
 
-fn send_confirm_to_pane(
-    terminal: &dyn Terminal,
-    pane: &PaneHandle,
-    response: &str,
-) -> Result<(), String> {
+fn send_approve_to_pane(terminal: &dyn Terminal, pane: &PaneHandle) -> Result<(), String> {
     terminal
-        .send_confirm(pane, response)
-        .map_err(|e| format!("Failed to send '{}': {}", response, e))
+        .send_approve(pane)
+        .map_err(|e| format!("Failed to approve: {e}"))
+}
+
+fn send_reject_to_pane(terminal: &dyn Terminal, pane: &PaneHandle) -> Result<(), String> {
+    terminal
+        .send_reject(pane)
+        .map_err(|e| format!("Failed to reject: {e}"))
 }
 
 fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task]) -> CoreResponse {
@@ -654,7 +656,7 @@ fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task])
         1 => {
             let (task_name, pane_id, _) = &waiting_panes[0];
             let handle = PaneHandle(pane_id.clone(), String::new());
-            if let Err(e) = send_confirm_to_pane(terminal, &handle, "y") {
+            if let Err(e) = send_approve_to_pane(terminal, &handle) {
                 return CoreResponse::Error { message: e };
             }
             let display_pane = resolve_pane_display_name(tasks, task_name, pane_id);
