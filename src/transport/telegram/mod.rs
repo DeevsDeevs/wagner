@@ -1552,9 +1552,7 @@ impl TelegramAdapter {
                                 .get_pane_status(&session_name, &pane.0)
                                 .cloned()
                                 .unwrap_or(PaneStatus::Unknown);
-                            if status.is_waiting()
-                                && terminal.send_approve(pane).is_ok()
-                            {
+                            if status.is_waiting() && terminal.send_approve(pane).is_ok() {
                                 approved += 1;
                             }
                         }

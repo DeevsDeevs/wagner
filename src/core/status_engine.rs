@@ -106,9 +106,7 @@ impl StatusEngine {
                         .panes
                         .iter()
                         .filter_map(|tp| {
-                            let status = self
-                                .watcher
-                                .get_pane_status(session_name, &tp.pane_id)?;
+                            let status = self.watcher.get_pane_status(session_name, &tp.pane_id)?;
                             Some((tp.name.clone(), status.label()))
                         })
                         .collect();

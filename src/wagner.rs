@@ -230,8 +230,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             self.store.delete_task(task_name)?;
         }
 
-        let branch =
-            crate::attach::get_current_branch(&cwd).unwrap_or_else(|| "none".to_string());
+        let branch = crate::attach::get_current_branch(&cwd).unwrap_or_else(|| "none".to_string());
         let repo = TaskRepo {
             name: dir_name.clone(),
             source: RepoSource::Local(cwd.clone()),

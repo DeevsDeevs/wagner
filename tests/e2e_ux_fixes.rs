@@ -690,10 +690,17 @@ fn pane_count_matches_live_tmux() {
     // Kill the tmux pane so tracked count (1) diverges from live count (0)
     let task = {
         let store = Store::new(ctx.config());
-        store.list_tasks().unwrap().into_iter().find(|t| t.name == "pane-count").unwrap()
+        store
+            .list_tasks()
+            .unwrap()
+            .into_iter()
+            .find(|t| t.name == "pane-count")
+            .unwrap()
     };
     let pane_id = &task.panes[0].pane_id;
-    terminal.kill_pane(&PaneHandle(pane_id.clone(), String::new())).unwrap();
+    terminal
+        .kill_pane(&PaneHandle(pane_id.clone(), String::new()))
+        .unwrap();
 
     // ListTasks should report 0 panes (live), not 1 (tracked)
     let resp = ctx.execute_cmd(&terminal, &CoreCommand::ListTasks);
@@ -702,7 +709,10 @@ fn pane_count_matches_live_tmux() {
             let summary = tasks.iter().find(|(_s, _)| _s.name == "pane-count");
             assert!(summary.is_some(), "Task should appear in list");
             let (s, _) = summary.unwrap();
-            assert_eq!(s.pane_count, 0, "pane_count should reflect live tmux state, not stale tracking");
+            assert_eq!(
+                s.pane_count, 0,
+                "pane_count should reflect live tmux state, not stale tracking"
+            );
         }
         other => panic!("Expected TaskList, got: {other:?}"),
     }

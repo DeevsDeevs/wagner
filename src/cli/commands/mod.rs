@@ -65,9 +65,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
-        Some(Commands::Claude { name }) => {
-            cmd_quick_launch(&wagner, Engine::ClaudeCode, name)
-        }
+        Some(Commands::Claude { name }) => cmd_quick_launch(&wagner, Engine::ClaudeCode, name),
         Some(Commands::Codex { name }) => cmd_quick_launch(&wagner, Engine::Codex, name),
         Some(Commands::Terminal { name }) => cmd_quick_launch(&wagner, Engine::Terminal, name),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
