@@ -1102,45 +1102,11 @@ impl TelegramAdapter {
                 .iter()
                 .flat_map(|t| &t.panes)
                 .find(|p| p.pane_id == pane_id)
-                .map(|p| p.name.clone());
+                .map(|p| p.name.as_str());
 
-            let enriched = match cmd {
-                CoreCommand::CaptureOutput { lines, .. } => Some(CoreCommand::CaptureOutput {
-                    task_name: task_name.clone(),
-                    pane_name,
-                    lines: *lines,
-                }),
-                CoreCommand::Approve { .. } => Some(CoreCommand::Approve {
-                    task_name: task_name.clone(),
-                    pane_name,
-                }),
-                CoreCommand::Reject { .. } => Some(CoreCommand::Reject {
-                    task_name: task_name.clone(),
-                    pane_name,
-                }),
-                CoreCommand::Resume { .. } => Some(CoreCommand::Resume {
-                    task_name: task_name.clone(),
-                    pane_name,
-                }),
-                _ => None,
-            };
-
-            if let Some(enriched_cmd) = enriched {
-                return self.handle_command(&enriched_cmd, core, terminal, store, tasks);
+            if let Some(enriched) = cmd.with_reply_context(&task_name, pane_name) {
+                return self.handle_command(&enriched, core, terminal, store, tasks);
             }
-        }
-
-        match cmd {
-            CoreCommand::CaptureOutput { task_name, .. } if task_name.is_empty() => {
-                return (
-                    CoreResponse::Error {
-                        message: "Usage: /output <task> [lines] — or reply to a pane message"
-                            .into(),
-                    },
-                    vec![],
-                );
-            }
-            _ => {}
         }
 
         self.handle_command(cmd, core, terminal, store, tasks)
@@ -2313,8 +2279,30 @@ impl Adapter for TelegramAdapter {
                         pane_name,
                         sticky,
                     },
-                    _,
-                ) => self.handle_focus(&task_name, pane_name.as_deref(), sticky),
+                    reply_ctx,
+                ) => {
+                    if task_name.is_empty() {
+                        if let Some(reply_id) = reply_ctx
+                            && let Some((rt, rp)) = self.message_to_pane.get(&reply_id).cloned()
+                        {
+                            let pane_name = tasks
+                                .iter()
+                                .flat_map(|t| &t.panes)
+                                .find(|p| p.pane_id == rp)
+                                .map(|p| p.name.as_str());
+                            self.handle_focus(&rt, pane_name, sticky)
+                        } else {
+                            (
+                                CoreResponse::Error {
+                                    message: "Usage: /focus <task> [pane] [--sticky] — or reply to a pane message".into(),
+                                },
+                                vec![],
+                            )
+                        }
+                    } else {
+                        self.handle_focus(&task_name, pane_name.as_deref(), sticky)
+                    }
+                }
                 TelegramInput::Command(ParsedCommand::Unfocus, _) => self.handle_unfocus(),
                 TelegramInput::Command(ParsedCommand::UsageError { usage }, _) => (
                     CoreResponse::Error {

@@ -93,10 +93,16 @@ pub struct TerminalConfig {
     pub use_control_mode: bool,
     #[serde(default = "default_control_mode_timeout_ms")]
     pub control_mode_timeout_ms: u64,
+    #[serde(default = "default_shell_init_delay_ms")]
+    pub shell_init_delay_ms: u64,
 }
 
 fn default_use_control_mode() -> bool {
     true
+}
+
+fn default_shell_init_delay_ms() -> u64 {
+    200
 }
 
 fn default_control_mode_timeout_ms() -> u64 {
@@ -108,6 +114,7 @@ impl Default for TerminalConfig {
         Self {
             use_control_mode: default_use_control_mode(),
             control_mode_timeout_ms: default_control_mode_timeout_ms(),
+            shell_init_delay_ms: default_shell_init_delay_ms(),
         }
     }
 }

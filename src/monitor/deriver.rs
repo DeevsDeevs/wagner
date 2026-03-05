@@ -229,6 +229,16 @@ impl StatusDeriver {
         self.action_seq = 0;
     }
 
+    pub fn reset(&mut self) {
+        self.state = DerivedState::Idle;
+        self.pending_tool = None;
+        self.last_event_time = Instant::now();
+        self.last_context = None;
+        self.clear_steps();
+        self.response_text = None;
+        self.accumulated_text = None;
+    }
+
     fn to_pane_status(&self) -> PaneStatus {
         let agent_type = match self.engine {
             Engine::ClaudeCode => AgentType::ClaudeCode,

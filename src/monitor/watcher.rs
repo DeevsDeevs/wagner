@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::MonitorConfig;
 use crate::model::{Engine, PENDING_DISCOVERY, Task, TrackedPane};
@@ -23,14 +23,19 @@ pub struct SessionWatcher {
     max_lines_per_poll: usize,
     approval_timeout: Duration,
     idle_threshold: Duration,
+    path_updates: Vec<(String, PathBuf)>,
 }
 
 struct PaneWatcher {
     engine: Engine,
     jsonl_path: PathBuf,
+    project_dir: Option<PathBuf>,
     deriver: StatusDeriver,
     file_offset: u64,
     last_status: PaneStatus,
+    last_data_at: Instant,
+    session_check_interval: Duration,
+    path_changed: bool,
 }
 
 impl PaneWatcher {
@@ -44,12 +49,25 @@ impl PaneWatcher {
             .with_approval_timeout(approval_timeout)
             .with_idle_threshold(idle_threshold);
 
+        let project_dir = if engine == Engine::ClaudeCode
+            && jsonl_path.as_os_str() != PENDING_DISCOVERY
+        {
+            jsonl_path.parent().map(PathBuf::from)
+        } else {
+            None
+        };
+
+        let now = Instant::now();
         Self {
             engine,
             jsonl_path,
+            project_dir,
             deriver,
             file_offset: 0,
             last_status: PaneStatus::Unknown,
+            last_data_at: now,
+            session_check_interval: Duration::from_secs(10),
+            path_changed: false,
         }
     }
 
@@ -69,11 +87,25 @@ impl PaneWatcher {
 
         if file_len < self.file_offset {
             self.file_offset = 0;
+            self.deriver.reset();
         }
 
         let was_initial = self.file_offset == 0;
+        let offset_before = self.file_offset;
         if file_len > self.file_offset {
             self.read_new_lines(max_lines);
+        }
+
+        let got_new_data = self.file_offset > offset_before;
+        if got_new_data {
+            self.last_data_at = Instant::now();
+        } else if self.project_dir.is_some()
+            && self.last_data_at.elapsed() > self.session_check_interval
+            && !self.last_status.is_active()
+            && !self.last_status.is_waiting()
+        {
+            self.try_discover_newer_jsonl();
+            self.last_data_at = Instant::now();
         }
 
         // After initial read of existing JSONL, discard stale response/progress
@@ -85,6 +117,69 @@ impl PaneWatcher {
 
         let status = self.deriver.tick();
         self.maybe_update(status)
+    }
+
+    fn try_discover_newer_jsonl(&mut self) {
+        let Some(dir) = self.project_dir.as_ref() else {
+            return;
+        };
+
+        let current_mtime = std::fs::metadata(&self.jsonl_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+        // If the current file was recently modified, the agent is still active —
+        // don't scan for a replacement even if we haven't read new data yet.
+        if current_mtime
+            .elapsed()
+            .is_ok_and(|e| e < self.session_check_interval)
+        {
+            return;
+        }
+
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+
+        let mut newest: Option<(PathBuf, std::time::SystemTime)> = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata() {
+                if meta.len() == 0 {
+                    continue;
+                }
+                let mtime = meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                if newest.as_ref().is_none_or(|(_, t)| mtime > *t) {
+                    newest = Some((path, mtime));
+                }
+            }
+        }
+
+        if let Some((path, new_mtime)) = newest {
+            // Only swap if the candidate is a different file, has a newer mtime,
+            // AND was modified very recently (actively being written to by a new session).
+            // This prevents swapping when the agent is just idle but still alive.
+            let candidate_is_active = new_mtime
+                .elapsed()
+                .is_ok_and(|e| e < self.session_check_interval);
+
+            if path != self.jsonl_path && new_mtime > current_mtime && candidate_is_active {
+                tracing::info!(
+                    old = %self.jsonl_path.display(),
+                    new = %path.display(),
+                    "detected newer JSONL session, hot-swapping watcher"
+                );
+                self.jsonl_path = path;
+                self.file_offset = 0;
+                self.deriver.reset();
+                self.last_data_at = Instant::now();
+                self.path_changed = true;
+            }
+        }
     }
 
     fn read_new_lines(&mut self, max_lines: usize) {
@@ -173,6 +268,7 @@ impl SessionWatcher {
             max_lines_per_poll: config.max_lines_per_poll,
             approval_timeout: Duration::from_millis(config.approval_timeout_ms),
             idle_threshold: Duration::from_millis(config.idle_threshold_ms),
+            path_updates: Vec::new(),
         }
     }
 
@@ -183,6 +279,12 @@ impl SessionWatcher {
                     let resolved = resolve_jsonl_path(tracked, task);
                     if resolved.as_os_str() != PENDING_DISCOVERY {
                         watcher.jsonl_path = resolved;
+                        if watcher.project_dir.is_none()
+                            && tracked.engine == Engine::ClaudeCode
+                        {
+                            watcher.project_dir =
+                                watcher.jsonl_path.parent().map(PathBuf::from);
+                        }
                     }
                 }
             } else {
@@ -217,13 +319,20 @@ impl SessionWatcher {
             if let Some(watcher) = self.pane_watchers.get_mut(&pane.0) {
                 if watcher.jsonl_path.as_os_str() == PENDING_DISCOVERY {
                     untracked_panes.push(pane.clone());
-                } else if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
-                    self.pane_statuses
-                        .insert(pane.0.clone(), new_status.clone());
-                    updates.push(StatusUpdate {
-                        pane: pane.clone(),
-                        status: new_status,
-                    });
+                } else {
+                    if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
+                        self.pane_statuses
+                            .insert(pane.0.clone(), new_status.clone());
+                        updates.push(StatusUpdate {
+                            pane: pane.clone(),
+                            status: new_status,
+                        });
+                    }
+                    Self::collect_path_change(
+                        &mut self.path_updates,
+                        &pane.0,
+                        watcher,
+                    );
                 }
             } else {
                 untracked_panes.push(pane.clone());
@@ -268,6 +377,11 @@ impl SessionWatcher {
                     if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
                         self.pane_statuses.insert(pane.0.clone(), new_status);
                     }
+                    Self::collect_path_change(
+                        &mut self.path_updates,
+                        &pane.0,
+                        watcher,
+                    );
                 } else {
                     untracked_panes.push(pane.clone());
                 }
@@ -363,6 +477,21 @@ impl SessionWatcher {
         self.pane_statuses
             .get(pane_id)
             .or_else(|| self.fallback.get_pane_status(session_name, pane_id))
+    }
+
+    pub fn take_path_updates(&mut self) -> Vec<(String, PathBuf)> {
+        std::mem::take(&mut self.path_updates)
+    }
+
+    fn collect_path_change(
+        path_updates: &mut Vec<(String, PathBuf)>,
+        pane_id: &str,
+        watcher: &mut PaneWatcher,
+    ) {
+        if watcher.path_changed {
+            path_updates.push((pane_id.to_string(), watcher.jsonl_path.clone()));
+            watcher.path_changed = false;
+        }
     }
 }
 

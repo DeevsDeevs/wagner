@@ -144,6 +144,94 @@ pub enum CoreCommand {
     Help,
 }
 
+impl CoreCommand {
+    /// If this command has an empty `task_name`, fill it (and optionally `pane_name`)
+    /// from reply context. Returns `None` when enrichment doesn't apply.
+    #[must_use]
+    pub fn with_reply_context(
+        &self,
+        ctx_task: &str,
+        ctx_pane: Option<&str>,
+    ) -> Option<CoreCommand> {
+        let pane = |orig: &Option<String>| -> Option<String> {
+            orig.clone().or_else(|| ctx_pane.map(str::to_string))
+        };
+        match self {
+            CoreCommand::TaskStatus { task_name } if task_name.is_empty() => {
+                Some(CoreCommand::TaskStatus {
+                    task_name: ctx_task.to_string(),
+                })
+            }
+            CoreCommand::SendMessage {
+                task_name,
+                pane_name,
+                message,
+            } if task_name.is_empty() => Some(CoreCommand::SendMessage {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+                message: message.clone(),
+            }),
+            CoreCommand::Approve {
+                task_name,
+                pane_name,
+            } if task_name.is_empty() => Some(CoreCommand::Approve {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+            }),
+            CoreCommand::Reject {
+                task_name,
+                pane_name,
+            } if task_name.is_empty() => Some(CoreCommand::Reject {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+            }),
+            CoreCommand::CaptureOutput {
+                task_name,
+                pane_name,
+                lines,
+            } if task_name.is_empty() => Some(CoreCommand::CaptureOutput {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+                lines: *lines,
+            }),
+            CoreCommand::Resume {
+                task_name,
+                pane_name,
+            } if task_name.is_empty() => Some(CoreCommand::Resume {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+            }),
+            CoreCommand::KillPane { task_name, .. } if task_name.is_empty() => {
+                Some(CoreCommand::KillPane {
+                    task_name: ctx_task.to_string(),
+                    pane_name: ctx_pane?.to_string(),
+                })
+            }
+            CoreCommand::SetPaneMode {
+                task_name,
+                pane_name,
+                mode,
+            } if task_name.is_empty() => Some(CoreCommand::SetPaneMode {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+                mode: *mode,
+            }),
+            CoreCommand::AddPane {
+                task_name,
+                pane_name,
+                agent,
+                repo_name,
+            } if task_name.is_empty() => Some(CoreCommand::AddPane {
+                task_name: ctx_task.to_string(),
+                pane_name: pane(pane_name),
+                agent: agent.clone(),
+                repo_name: repo_name.clone(),
+            }),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[allow(clippy::type_complexity)]

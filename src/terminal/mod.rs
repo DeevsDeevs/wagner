@@ -40,6 +40,8 @@ pub trait Terminal: Send + Sync {
     fn get_pane_command(&self, pane: &PaneHandle) -> Result<String>;
     fn resize_pane(&self, pane: &PaneHandle, width: u16, height: u16) -> Result<()>;
 
+    fn shell_init_delay(&self) {}
+
     fn send_approve(&self, pane: &PaneHandle) -> Result<()> {
         self.send_key(pane, "Enter")?;
         Ok(())

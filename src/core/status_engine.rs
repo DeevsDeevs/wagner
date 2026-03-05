@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::config::MonitorConfig;
@@ -150,12 +151,7 @@ impl StatusEngine {
                 && let Some(response) = self.watcher.take_pane_response(pane_id)
                 && !response.is_empty()
             {
-                let pane_name = task
-                    .panes
-                    .iter()
-                    .find(|tp| tp.pane_id == *pane_id)
-                    .map(|tp| tp.name.clone())
-                    .unwrap_or_else(|| pane_title.clone());
+                let pane_name = resolve_pane_name(task, pane_id, pane_title);
                 return Some(CoreEvent::AgentIdle {
                     task_name: task.name.clone(),
                     pane_name,
@@ -175,12 +171,7 @@ impl StatusEngine {
 
         self.last_statuses.insert(pane_id.clone(), current.clone());
 
-        let pane_name = task
-            .panes
-            .iter()
-            .find(|tp| tp.pane_id == *pane_id)
-            .map(|tp| tp.name.clone())
-            .unwrap_or_else(|| pane_title.clone());
+        let pane_name = resolve_pane_name(task, pane_id, pane_title);
 
         if is_waiting && !was_waiting {
             let output_tail = self.watcher.get_pane_context(pane_id).unwrap_or_default();
@@ -263,12 +254,7 @@ impl StatusEngine {
 
         let step_count = steps.len() + if pending_step.is_some() { 1 } else { 0 };
 
-        let pane_name = task
-            .panes
-            .iter()
-            .find(|tp| tp.pane_id == *pane_id)
-            .map(|tp| tp.name.clone())
-            .unwrap_or_else(|| pane.1.clone());
+        let pane_name = resolve_pane_name(task, pane_id, &pane.1);
 
         Some(CoreEvent::AgentProgress {
             task_name: task.name.clone(),
@@ -321,4 +307,18 @@ impl StatusEngine {
     ) -> Option<Vec<crate::monitor::events::QuestionData>> {
         self.watcher.get_pane_question_data(pane_id)
     }
+
+    pub fn take_path_updates(&mut self) -> Vec<(String, PathBuf)> {
+        self.watcher.take_path_updates()
+    }
+}
+
+fn resolve_pane_name(task: &Task, pane_id: &str, fallback_title: &str) -> String {
+    task.panes
+        .iter()
+        .find(|tp| tp.pane_id == pane_id)
+        .map(|tp| tp.name.as_str())
+        .filter(|n| !n.is_empty())
+        .unwrap_or(fallback_title)
+        .to_string()
 }

@@ -197,9 +197,38 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
 }
 
 async fn daemon_tick(state: &mut DaemonState, adapter: &mut DaemonAdapter) -> crate::Result<()> {
-    let tasks = state.store.list_tasks()?;
+    let mut tasks = state.store.list_tasks()?;
 
     let events = state.core.tick(&state.terminal, &tasks);
+
+    let path_updates = state.core.status_engine.take_path_updates();
+    for (pane_id, new_path) in path_updates {
+        let Some(new_session_id) = new_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+        else {
+            warn!(pane_id = %pane_id, path = %new_path.display(), "drift detection produced invalid session id, skipping");
+            continue;
+        };
+
+        for task in &mut tasks {
+            if let Some(tp) = task.panes.iter_mut().find(|p| p.pane_id == pane_id) {
+                info!(
+                    task = %task.name, pane = %tp.name,
+                    old_session = %tp.session_id, new_session = %new_session_id,
+                    "updating session after JSONL drift detection"
+                );
+                tp.session_id = new_session_id.clone();
+                tp.jsonl_path = new_path.clone();
+                if let Err(e) = state.store.save_task(task) {
+                    error!(task = %task.name, %e, "failed to persist session update");
+                }
+                break;
+            }
+        }
+    }
 
     if tokio::time::timeout(
         Duration::from_secs(30),

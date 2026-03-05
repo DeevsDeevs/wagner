@@ -198,6 +198,13 @@ impl Terminal for Tmux {
         Ok(PaneHandle(pane_id, title))
     }
 
+    fn shell_init_delay(&self) {
+        let ms = self.config.shell_init_delay_ms;
+        if ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+        }
+    }
+
     fn capture(&self, pane: &PaneHandle, lines: usize) -> Result<String> {
         self.run(&[
             "capture-pane",
