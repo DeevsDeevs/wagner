@@ -132,6 +132,12 @@ pub enum Commands {
         check: bool,
     },
 
+    /// Fetch latest changes for all repos in a workspace
+    Sync {
+        /// Workspace name (syncs all workspaces if omitted)
+        workspace: Option<String>,
+    },
+
     /// Clean up orphaned worktrees and task directories
     Repair {
         /// Show what would be cleaned up without making changes
@@ -467,6 +473,7 @@ _wagner() {{
         'workspace:Manage workspaces'
         'ws:Manage workspaces'
         'update:Update wagner to latest version'
+        'sync:Fetch latest for workspace repos'
         'repair:Clean up orphaned worktrees'
         'plugin:Manage plugins'
         'chains:Manage chains (requires chains plugin)'
@@ -541,6 +548,9 @@ _wagner() {{
                     ;;
                 update)
                     _arguments '--check[Check for updates without installing]'
+                    ;;
+                sync)
+                    _arguments '1:workspace:_wagner_workspaces'
                     ;;
                 workspace|ws)
                     local -a ws_commands

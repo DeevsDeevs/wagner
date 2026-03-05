@@ -1,0 +1,44 @@
+{
+  "name": "wagner",
+  "path": "/Users/deevs/programming/agents/wagner",
+  "repos": [
+    {
+      "name": "wagner",
+      "source": "/Users/deevs/programming/agents/wagner",
+      "worktree": "/Users/deevs/programming/agents/wagner",
+      "branch": "main"
+    }
+  ],
+  "created_at": "2026-03-04T15:51:10.728383Z",
+  "diff_base": null,
+  "kind": "attached",
+  "panes": [
+    {
+      "name": "wagner",
+      "repo_name": "wagner",
+      "engine": "terminal",
+      "session_id": "e81c95c6-f3c0-49a4-896b-47686aec1a53",
+      "pane_id": "%96",
+      "jsonl_path": "pending-discovery",
+      "launched_at": "2026-03-05T15:21:27.665756Z"
+    },
+    {
+      "name": "test-pane",
+      "repo_name": "wagner",
+      "engine": "terminal",
+      "session_id": "96aff4c3-fa77-480e-b29c-1c8cc7122636",
+      "pane_id": "%98",
+      "jsonl_path": "pending-discovery",
+      "launched_at": "2026-03-05T15:42:34.929937Z"
+    },
+    {
+      "name": "test-claude",
+      "repo_name": "wagner",
+      "engine": "claude_code",
+      "session_id": "506e2765-b884-48dd-9595-4d15722408fe",
+      "pane_id": "%99",
+      "jsonl_path": "/Users/deevs/.claude/projects/-Users-deevs-programming-agents-wagner/506e2765-b884-48dd-9595-4d15722408fe.jsonl",
+      "launched_at": "2026-03-05T15:42:41.466732Z"
+    }
+  ]
+}

@@ -59,9 +59,10 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
 
         "/reject" | "/n" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::UsageError {
-                    usage: "/reject <task> [pane]",
-                });
+                return Some(ParsedCommand::Core(CoreCommand::Reject {
+                    task_name: String::new(),
+                    pane_name: None,
+                }));
             }
             let (task_name, pane_name) = split_task_pane(rest);
             Some(ParsedCommand::Core(CoreCommand::Reject {
@@ -120,9 +121,10 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
 
         "/resume" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::UsageError {
-                    usage: "/resume <task> [pane]",
-                });
+                return Some(ParsedCommand::Core(CoreCommand::Resume {
+                    task_name: String::new(),
+                    pane_name: None,
+                }));
             }
             let (task_name, pane_name) = split_task_pane(rest);
             Some(ParsedCommand::Core(CoreCommand::Resume {
@@ -170,9 +172,10 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
 
         "/kill" => {
             if rest.is_empty() {
-                return Some(ParsedCommand::UsageError {
-                    usage: "/kill <task> <pane>",
-                });
+                return Some(ParsedCommand::Core(CoreCommand::KillPane {
+                    task_name: String::new(),
+                    pane_name: String::new(),
+                }));
             }
             let (task_name, pane_name) = split_task_pane(rest);
             match pane_name {
@@ -181,20 +184,20 @@ pub fn parse_command(text: &str) -> Option<ParsedCommand> {
                     pane_name: pane,
                 })),
                 None => Some(ParsedCommand::UsageError {
-                    usage: "/kill <task> <pane>",
+                    usage: "/kill <task> <pane> — or reply to a pane message",
                 }),
             }
         }
 
         "/focus" => {
-            if rest.is_empty() {
-                return Some(ParsedCommand::UsageError {
-                    usage: "/focus <task> [pane] [--sticky]",
-                });
-            }
             let sticky = rest.contains("--sticky");
             let clean = rest.replace("--sticky", "");
-            let (task_name, pane_name) = split_task_pane(clean.trim());
+            let trimmed = clean.trim();
+            let (task_name, pane_name) = if trimmed.is_empty() {
+                (String::new(), None)
+            } else {
+                split_task_pane(trimmed)
+            };
             Some(ParsedCommand::Focus {
                 task_name,
                 pane_name,
@@ -472,7 +475,9 @@ mod tests {
     #[test]
     fn parse_resume_no_task() {
         match parse_command("/resume") {
-            Some(ParsedCommand::UsageError { .. }) => {}
+            Some(ParsedCommand::Core(CoreCommand::Resume { task_name, .. })) => {
+                assert!(task_name.is_empty());
+            }
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -480,7 +485,9 @@ mod tests {
     #[test]
     fn parse_reject_no_task() {
         match parse_command("/reject") {
-            Some(ParsedCommand::UsageError { .. }) => {}
+            Some(ParsedCommand::Core(CoreCommand::Reject { task_name, .. })) => {
+                assert!(task_name.is_empty());
+            }
             other => panic!("unexpected: {other:?}"),
         }
     }
@@ -580,9 +587,18 @@ mod tests {
             Some(ParsedCommand::UsageError { .. }) => {}
             other => panic!("unexpected: {other:?}"),
         }
+    }
 
+    #[test]
+    fn parse_kill_no_args() {
         match parse_command("/kill") {
-            Some(ParsedCommand::UsageError { .. }) => {}
+            Some(ParsedCommand::Core(CoreCommand::KillPane {
+                task_name,
+                pane_name,
+            })) => {
+                assert!(task_name.is_empty());
+                assert!(pane_name.is_empty());
+            }
             other => panic!("unexpected: {other:?}"),
         }
     }

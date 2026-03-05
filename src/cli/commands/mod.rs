@@ -24,6 +24,9 @@ pub fn run(cli: Cli) -> Result<()> {
     if let Some(Commands::Config { command }) = cli.command {
         return cmd_config(command);
     }
+    if let Some(Commands::Sync { workspace }) = cli.command {
+        return cmd_sync(&config, workspace.as_deref());
+    }
     if let Some(ref cmd) = cli.command
         && let Some(result) = try_ipc_command(cmd)
     {
@@ -75,6 +78,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
         Some(Commands::Config { .. }) => unreachable!(),
         Some(Commands::Daemon { .. }) => unreachable!(),
+        Some(Commands::Sync { .. }) => unreachable!(),
         Some(Commands::Status { .. })
         | Some(Commands::Send { .. })
         | Some(Commands::Approve { .. })
@@ -447,6 +451,52 @@ fn cmd_cd<T: Terminal, A: Agent>(
 fn cmd_tui<T: Terminal + 'static, A: Agent + 'static>(wagner: Wagner<T, A>) -> Result<()> {
     info!("Launching TUI");
     wagner::tui::run(wagner)
+}
+
+fn cmd_sync(config: &Config, workspace: Option<&str>) -> Result<()> {
+    let workspaces: Vec<(&str, &wagner::config::Workspace)> = match workspace {
+        Some(name) => {
+            let ws = config
+                .workspaces
+                .get(name)
+                .ok_or_else(|| wagner::WagnerError::Git(format!("Workspace '{name}' not found")))?;
+            vec![(name, ws)]
+        }
+        None => config
+            .workspaces
+            .iter()
+            .map(|(k, v)| (k.as_str(), v))
+            .collect(),
+    };
+
+    if workspaces.is_empty() {
+        println!("No workspaces configured");
+        return Ok(());
+    }
+
+    for (ws_name, ws) in &workspaces {
+        println!("Syncing workspace: {ws_name}");
+        for (repo_name, path) in &ws.repos {
+            let expanded = shellexpand::tilde(path);
+            let repo_path = PathBuf::from(expanded.as_ref());
+            print!("  {repo_name} ({})... ", repo_path.display());
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            match std::process::Command::new("git")
+                .args(["-C", &repo_path.to_string_lossy(), "fetch", "--all", "--prune"])
+                .output()
+            {
+                Ok(output) if output.status.success() => println!("done"),
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("error: {}", stderr.trim());
+                }
+                Err(e) => println!("error: {e}"),
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn cmd_repair(config: &Config, dry_run: bool) -> Result<()> {

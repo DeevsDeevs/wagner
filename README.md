@@ -81,6 +81,15 @@ wagner rm my-feature        # remove task/worktrees
 wagner rm my-feature -f     # also remove task branches
 ```
 
+## Sync Workspace Repos
+
+Fetch latest changes for all repos in a workspace before creating tasks:
+
+```bash
+wagner sync              # fetch all workspace repos
+wagner sync app          # fetch repos in specific workspace
+```
+
 ## Daemon + Remote Control
 
 Start daemon:

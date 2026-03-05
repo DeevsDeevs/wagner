@@ -403,14 +403,13 @@ pub fn execute(
                         };
                     }
                 },
-                None => match task.repos.first().cloned() {
-                    Some(r) => r,
-                    None => {
-                        return CoreResponse::Error {
-                            message: format!("Task '{task_name}' has no repos"),
-                        };
+                None => {
+                    if task.repos.len() == 1 {
+                        task.repos[0].clone()
+                    } else {
+                        task.core_repo()
                     }
-                },
+                }
             };
 
             let session_alive = terminal.session_exists(task_name).unwrap_or(false);
@@ -468,6 +467,7 @@ pub fn execute(
             };
 
             if engine_type != Engine::Terminal {
+                terminal.shell_init_delay();
                 let launch_cmd = engine_type.launch_command(&session_id);
                 if let Err(e) =
                     terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms())

@@ -103,32 +103,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         self.setup_plugin_symlinks(&task)?;
 
-        let is_multi_repo = task.repos.len() > 1;
-        let session_dir = if is_multi_repo {
-            task.path.clone()
-        } else {
-            task.repos
-                .first()
-                .map(|r| r.worktree.clone())
-                .unwrap_or_else(|| task.path.clone())
-        };
-
-        let session = self.terminal.create_session(name, &session_dir)?;
-
-        if let Ok(panes) = self.terminal.list_panes(&session)
-            && let Some(pane) = panes.first()
-        {
-            let first_repo = task.repos[0].clone();
-            let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
-        }
-
-        if is_multi_repo {
-            for i in 1..task.repos.len() {
-                let repo = task.repos[i].clone();
-                let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo, None);
-            }
-        }
+        let session = self.create_session_with_panes(name, &mut task)?;
+        let _ = session; // session handle not needed after pane setup
 
         self.store.save_task(&task)?;
         Ok(task)
@@ -177,32 +153,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.store.save_task(&task)?;
         self.setup_plugin_symlinks_attached(&task)?;
 
-        let is_multi_repo = task.repos.len() > 1;
-        let session_dir = if is_multi_repo {
-            task.path.clone()
-        } else {
-            task.repos
-                .first()
-                .map(|r| r.worktree.clone())
-                .unwrap_or_else(|| task.path.clone())
-        };
-
-        let session = self.terminal.create_session(name, &session_dir)?;
-
-        if let Ok(panes) = self.terminal.list_panes(&session)
-            && let Some(pane) = panes.first()
-        {
-            let first_repo = task.repos[0].clone();
-            let _ = self.prepare_agent_in_pane(&mut task, pane, &first_repo, None);
-        }
-
-        if is_multi_repo {
-            for i in 1..task.repos.len() {
-                let repo = task.repos[i].clone();
-                let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.prepare_agent_in_pane(&mut task, &pane, &repo, None);
-            }
-        }
+        let session = self.create_session_with_panes(name, &mut task)?;
+        let _ = session;
 
         self.store.save_task(&task)?;
         Ok(task)
@@ -427,12 +379,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 if task.repos.len() == 1 {
                     task.repos[0].clone()
                 } else {
-                    TaskRepo {
-                        name: task_name.to_string(),
-                        source: RepoSource::Local(task.path.clone()),
-                        worktree: task.path.clone(),
-                        branch: String::new(),
-                    }
+                    task.core_repo()
                 }
             }
         };
@@ -489,12 +436,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 if task.repos.len() == 1 {
                     task.repos[0].clone()
                 } else {
-                    TaskRepo {
-                        name: task_name.to_string(),
-                        source: RepoSource::Local(task.path.clone()),
-                        worktree: task.path.clone(),
-                        branch: String::new(),
-                    }
+                    task.core_repo()
                 }
             }
         };
@@ -512,6 +454,45 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
         self.store.save_task(&task)?;
         Ok(pane)
+    }
+
+    fn create_session_with_panes(
+        &self,
+        name: &str,
+        task: &mut Task,
+    ) -> Result<SessionHandle> {
+        let is_multi_repo = task.repos.len() > 1;
+        let session_dir = if is_multi_repo {
+            task.path.clone()
+        } else {
+            task.repos
+                .first()
+                .map(|r| r.worktree.clone())
+                .unwrap_or_else(|| task.path.clone())
+        };
+
+        let session = self.terminal.create_session(name, &session_dir)?;
+
+        if is_multi_repo {
+            if let Ok(panes) = self.terminal.list_panes(&session)
+                && let Some(pane) = panes.first()
+            {
+                let core_repo = task.core_repo();
+                let _ = self.prepare_agent_in_pane(task, pane, &core_repo, None);
+            }
+            let repos: Vec<_> = task.repos.clone();
+            for repo in &repos {
+                let pane = self.terminal.create_pane(&session, &repo.worktree)?;
+                let _ = self.prepare_agent_in_pane(task, &pane, repo, None);
+            }
+        } else if let Ok(panes) = self.terminal.list_panes(&session)
+            && let Some(pane) = panes.first()
+        {
+            let first_repo = task.repos[0].clone();
+            let _ = self.prepare_agent_in_pane(task, pane, &first_repo, None);
+        }
+
+        Ok(session)
     }
 
     fn prepare_agent_in_pane_with_engine(
@@ -538,6 +519,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         };
 
         if engine_type != Engine::Terminal {
+            self.terminal.shell_init_delay();
             let cmd = engine_type.launch_command(&session_id);
             self.terminal
                 .send_text_enter(pane, &cmd, engine_type.enter_delay_ms())?;
@@ -589,6 +571,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             None => task.next_pane_name(&repo.name),
         };
 
+        self.terminal.shell_init_delay();
         let cmd = self.agent.launch_command(&session_id);
         self.terminal.send_keys(pane, &cmd)?;
 

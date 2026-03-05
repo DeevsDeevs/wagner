@@ -27,10 +27,12 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
             | InputMode::Confirm
             | InputMode::EditSetting
             | InputMode::ChainSearch
+            | InputMode::AddPaneName
     );
     let is_workspace_select = app.input_mode == InputMode::SelectWorkspace;
+    let is_add_pane_agent = app.input_mode == InputMode::AddPaneAgent;
 
-    let (main_area, bottom_area) = if is_input_mode || is_workspace_select {
+    let (main_area, bottom_area) = if is_input_mode || is_workspace_select || is_add_pane_agent {
         let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
         (chunks[0], Some(chunks[1]))
     } else if app.status_message.is_some() {
@@ -61,6 +63,8 @@ pub fn draw<T: Terminal, A: Agent>(frame: &mut Frame, app: &App<T, A>) {
     if let Some(input_area) = bottom_area {
         if is_workspace_select {
             draw_workspace_bar(frame, input_area, app);
+        } else if is_add_pane_agent {
+            draw_add_pane_agent_bar(frame, input_area, app);
         } else {
             draw_input_bar(frame, input_area, app);
         }
@@ -230,6 +234,15 @@ fn draw_help_popup(frame: &mut Frame, area: Rect, keybindings: &crate::config::K
 
 fn draw_input_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
     TextInput::new(&app.input_label, &app.input_buffer, app.input_cursor).draw(frame, area);
+}
+
+fn draw_add_pane_agent_bar<T: Terminal, A: Agent>(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App<T, A>,
+) {
+    Selector::new(&app.input_label, &app.add_pane_options, app.add_pane_index)
+        .draw(frame, area);
 }
 
 fn draw_workspace_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

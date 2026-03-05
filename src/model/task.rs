@@ -134,6 +134,15 @@ impl Task {
         }
     }
 
+    pub fn core_repo(&self) -> TaskRepo {
+        TaskRepo {
+            name: self.name.clone(),
+            source: RepoSource::Local(self.path.clone()),
+            worktree: self.path.clone(),
+            branch: String::new(),
+        }
+    }
+
     pub fn find_pane_by_name(&self, name: &str) -> Option<&TrackedPane> {
         self.panes.iter().find(|p| p.name == name)
     }
