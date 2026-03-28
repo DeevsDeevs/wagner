@@ -11,11 +11,20 @@ use std::path::Path;
 const SESSION_PREFIX: &str = "wagner_";
 
 pub fn session_name_for_task(task_name: &str) -> String {
-    format!(
-        "{}{}",
-        SESSION_PREFIX,
-        task_name.replace(['/', '.', ' '], "_")
-    )
+    // Use distinct replacement strings for each special character to avoid collisions.
+    // E.g., "my.task", "my/task", and "my task" must produce different session names.
+    let sanitized = task_name
+        .replace('/', "_s_")
+        .replace('.', "_d_")
+        .replace(' ', "_w_");
+
+    // Strip any remaining characters that aren't tmux-safe [a-zA-Z0-9_-]
+    let safe: String = sanitized
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+
+    format!("{}{}", SESSION_PREFIX, safe)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -75,25 +84,31 @@ mod tests {
     fn session_name_with_slashes() {
         assert_eq!(
             session_name_for_task("2026-01-07/hotfixes"),
-            "wagner_2026-01-07_hotfixes"
+            "wagner_2026-01-07_s_hotfixes"
         );
     }
 
     #[test]
     fn session_name_with_dots() {
-        assert_eq!(session_name_for_task("feature.v2.0"), "wagner_feature_v2_0");
+        assert_eq!(
+            session_name_for_task("feature.v2.0"),
+            "wagner_feature_d_v2_d_0"
+        );
     }
 
     #[test]
     fn session_name_with_spaces() {
-        assert_eq!(session_name_for_task("my task name"), "wagner_my_task_name");
+        assert_eq!(
+            session_name_for_task("my task name"),
+            "wagner_my_w_task_w_name"
+        );
     }
 
     #[test]
     fn session_name_with_multiple_special_chars() {
         assert_eq!(
             session_name_for_task("2026/01/07 feature.fix"),
-            "wagner_2026_01_07_feature_fix"
+            "wagner_2026_s_01_s_07_w_feature_d_fix"
         );
     }
 
@@ -105,5 +120,73 @@ mod tests {
     #[test]
     fn session_name_preserves_hyphens() {
         assert_eq!(session_name_for_task("my-task-name"), "wagner_my-task-name");
+    }
+
+    // --- Uniqueness tests ---
+
+    #[test]
+    fn session_name_uniqueness_dot_vs_slash_vs_space() {
+        let dot = session_name_for_task("my.task");
+        let slash = session_name_for_task("my/task");
+        let space = session_name_for_task("my task");
+        assert_ne!(dot, slash, "dot and slash must differ");
+        assert_ne!(dot, space, "dot and space must differ");
+        assert_ne!(slash, space, "slash and space must differ");
+    }
+
+    #[test]
+    fn session_name_tmux_safe_characters() {
+        // Verify output only contains [a-zA-Z0-9_-]
+        let names = [
+            "my.task",
+            "my/task",
+            "my task",
+            "2026/01/07 feature.fix",
+            "hello@world#1!",
+            "a/b.c d",
+        ];
+        for name in &names {
+            let result = session_name_for_task(name);
+            for ch in result.chars() {
+                assert!(
+                    ch.is_ascii_alphanumeric() || ch == '_' || ch == '-',
+                    "non-tmux-safe char '{}' in session name for '{}'",
+                    ch,
+                    name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn session_name_consecutive_special_chars() {
+        let result = session_name_for_task("a..b//c  d");
+        assert_eq!(result, "wagner_a_d__d_b_s__s_c_w__w_d");
+        // Verify the encoding is reversible / unique
+        assert_ne!(
+            session_name_for_task("a..b"),
+            session_name_for_task("a//b")
+        );
+    }
+
+    #[test]
+    fn session_name_leading_trailing_special_chars() {
+        let leading = session_name_for_task(".task");
+        let trailing = session_name_for_task("task.");
+        assert_ne!(leading, trailing, "leading vs trailing dot must differ");
+        assert!(leading.starts_with("wagner_"));
+        assert!(trailing.starts_with("wagner_"));
+    }
+
+    #[test]
+    fn session_name_strips_non_tmux_safe_chars() {
+        // Characters like @, #, !, etc. should be stripped
+        assert_eq!(session_name_for_task("hello@world"), "wagner_helloworld");
+        assert_eq!(session_name_for_task("test#1"), "wagner_test1");
+    }
+
+    #[test]
+    fn session_name_empty_input() {
+        assert_eq!(session_name_for_task(""), "wagner_");
     }
 }
