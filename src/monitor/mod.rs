@@ -2,6 +2,7 @@ mod ansi;
 pub mod claude_events;
 pub mod codex_events;
 pub mod deriver;
+pub mod droid_events;
 mod detector;
 mod detectors;
 pub mod events;
