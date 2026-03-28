@@ -2538,6 +2538,6 @@ fn strip_tui_chrome(output: &str, engine: Engine) -> String {
             }
             lines[..end].join("\n")
         }
-        _ => output.to_string(),
+        Engine::ClaudeCode | Engine::Droid | Engine::Terminal => output.to_string(),
     }
 }

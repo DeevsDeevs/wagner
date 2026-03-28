@@ -18,16 +18,15 @@ pub fn parse_droid_event(line: &str) -> Option<AgentEvent> {
 }
 
 fn parse_session_start(obj: &serde_json::Value) -> Option<AgentEvent> {
-    let session_id = obj
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let session_id = obj.get("id").and_then(|v| v.as_str())?;
+    if session_id.is_empty() {
+        return None;
+    }
     let model = obj.get("model").and_then(|v| v.as_str()).map(String::from);
 
     Some(AgentEvent::SessionStarted {
         engine: Engine::Droid,
-        session_id,
+        session_id: session_id.to_string(),
         model,
     })
 }
@@ -277,14 +276,27 @@ mod tests {
     #[test]
     fn parse_session_start_without_id() {
         let line = r#"{"type":"session_start","model":"opus"}"#;
-        let event = parse_droid_event(line).unwrap();
-        assert_eq!(
-            event,
-            AgentEvent::SessionStarted {
-                engine: Engine::Droid,
-                session_id: "".to_string(),
-                model: Some("opus".to_string()),
-            }
+        assert!(
+            parse_droid_event(line).is_none(),
+            "session_start with missing id should return None"
+        );
+    }
+
+    #[test]
+    fn parse_session_start_with_empty_id() {
+        let line = r#"{"type":"session_start","id":"","model":"opus"}"#;
+        assert!(
+            parse_droid_event(line).is_none(),
+            "session_start with empty id should return None"
+        );
+    }
+
+    #[test]
+    fn parse_session_start_with_null_id() {
+        let line = r#"{"type":"session_start","id":null,"model":"opus"}"#;
+        assert!(
+            parse_droid_event(line).is_none(),
+            "session_start with null id should return None"
         );
     }
 

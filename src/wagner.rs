@@ -88,7 +88,19 @@ pub fn add_pane_shared(
                 PathBuf::from(PENDING_DISCOVERY)
             }
         }
-        _ => PathBuf::from(PENDING_DISCOVERY),
+        Engine::Droid => {
+            let project_id = repo.worktree.to_string_lossy().replace('/', "-");
+            if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(home)
+                    .join(".factory")
+                    .join("sessions")
+                    .join(project_id)
+                    .join(format!("{session_id}.jsonl"))
+            } else {
+                PathBuf::from(PENDING_DISCOVERY)
+            }
+        }
+        Engine::Codex | Engine::Terminal => PathBuf::from(PENDING_DISCOVERY),
     };
 
     let tracked = TrackedPane {
@@ -600,7 +612,19 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                     PathBuf::from(PENDING_DISCOVERY)
                 }
             }
-            _ => PathBuf::from(PENDING_DISCOVERY),
+            Engine::Droid => {
+                let project_id = repo.worktree.to_string_lossy().replace('/', "-");
+                if let Ok(home) = std::env::var("HOME") {
+                    std::path::PathBuf::from(home)
+                        .join(".factory")
+                        .join("sessions")
+                        .join(project_id)
+                        .join(format!("{session_id}.jsonl"))
+                } else {
+                    PathBuf::from(PENDING_DISCOVERY)
+                }
+            }
+            Engine::Codex | Engine::Terminal => PathBuf::from(PENDING_DISCOVERY),
         };
 
         let tracked = TrackedPane {
