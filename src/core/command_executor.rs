@@ -1,9 +1,5 @@
-use chrono::Utc;
-use std::path::PathBuf;
-use uuid::Uuid;
-
 use crate::config::Config;
-use crate::model::{Engine, PENDING_DISCOVERY, Task, TrackedPane};
+use crate::model::{Engine, Task};
 use crate::monitor::status::PaneStatus;
 use crate::monitor::strip_ansi;
 use crate::plugins::PluginProvider;
@@ -394,130 +390,43 @@ pub fn execute(
                 }
             };
 
-            let repo = match repo_name {
-                Some(name) => match task.repos.iter().find(|r| r.name == *name).cloned() {
-                    Some(r) => r,
-                    None => {
-                        return CoreResponse::Error {
-                            message: format!("Repo '{}' not found in task '{}'", name, task_name),
-                        };
-                    }
-                },
-                None => {
-                    if task.repos.len() == 1 {
-                        task.repos[0].clone()
-                    } else {
-                        task.core_repo()
-                    }
-                }
-            };
-
-            let session_alive = terminal.session_exists(task_name).unwrap_or(false);
-
-            let session = if session_alive {
-                SessionHandle(session_name_for_task(task_name))
-            } else {
-                match terminal.create_session(task_name, &repo.worktree) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        return CoreResponse::Error {
-                            message: format!("Failed to create session: {e}"),
-                        };
-                    }
-                }
-            };
-
-            let pane = if session_alive {
-                match terminal.create_pane(&session, &repo.worktree) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        return CoreResponse::Error {
-                            message: format!("Failed to create pane: {e}"),
-                        };
-                    }
-                }
-            } else {
-                match terminal.list_panes(&session) {
-                    Ok(panes) if !panes.is_empty() => panes.into_iter().next().unwrap(),
-                    _ => {
-                        return CoreResponse::Error {
-                            message: "Session created but no panes found".into(),
-                        };
-                    }
-                }
-            };
-
-            let session_id = Uuid::new_v4().to_string();
-            let name = match pane_name {
-                Some(n) => {
-                    if task.panes.iter().any(|p| p.name == *n) {
-                        task.next_pane_name(n)
-                    } else {
-                        n.clone()
-                    }
-                }
-                None => {
-                    let base = match engine_type {
-                        Engine::ClaudeCode => format!("claude-{}", repo.name),
-                        Engine::Codex => format!("codex-{}", repo.name),
-                        Engine::Terminal => repo.name.clone(),
-                    };
-                    task.next_pane_name(&base)
-                }
-            };
-
-            if engine_type != Engine::Terminal {
-                terminal.shell_init_delay();
-                let launch_cmd = engine_type.launch_command(&session_id);
-                if let Err(e) =
-                    terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms())
-                {
+            let repo = match crate::wagner::resolve_repo(&task, repo_name.as_deref()) {
+                Ok(r) => r,
+                Err(_) => {
+                    let name = repo_name.as_deref().unwrap_or("(default)");
                     return CoreResponse::Error {
-                        message: format!("Failed to launch agent: {e}"),
+                        message: format!(
+                            "Repo '{}' not found in task '{}'",
+                            name, task_name
+                        ),
                     };
                 }
-            }
+            };
 
-            let jsonl_path = match engine_type {
-                Engine::ClaudeCode => {
-                    let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
-                    if let Ok(home) = std::env::var("HOME") {
-                        PathBuf::from(home)
-                            .join(".claude")
-                            .join("projects")
-                            .join(project_id)
-                            .join(format!("{session_id}.jsonl"))
-                    } else {
-                        PathBuf::from(PENDING_DISCOVERY)
+            match crate::wagner::add_pane_shared(
+                terminal,
+                store,
+                &mut task,
+                &repo,
+                engine_type,
+                pane_name.as_deref(),
+            ) {
+                Ok(tracked) => {
+                    let label = match engine_type {
+                        Engine::ClaudeCode => "Claude",
+                        Engine::Codex => "Codex",
+                        Engine::Terminal => "terminal",
+                    };
+                    CoreResponse::Confirmation {
+                        message: format!(
+                            "Added {label} pane '{}' to {task_name}",
+                            tracked.name
+                        ),
                     }
                 }
-                _ => PathBuf::from(PENDING_DISCOVERY),
-            };
-
-            let tracked = TrackedPane {
-                name: name.clone(),
-                repo_name: repo.name.clone(),
-                engine: engine_type,
-                session_id,
-                pane_id: pane.0.clone(),
-                jsonl_path,
-                launched_at: Utc::now(),
-            };
-            task.panes.push(tracked);
-
-            if let Err(e) = store.save_task(&task) {
-                return CoreResponse::Error {
-                    message: format!("Pane created but failed to save: {e}"),
-                };
-            }
-
-            let label = match engine_type {
-                Engine::ClaudeCode => "Claude",
-                Engine::Codex => "Codex",
-                Engine::Terminal => "terminal",
-            };
-            CoreResponse::Confirmation {
-                message: format!("Added {label} pane '{name}' to {task_name}"),
+                Err(e) => CoreResponse::Error {
+                    message: format!("Failed to add pane: {e}"),
+                },
             }
         }
 

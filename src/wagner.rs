@@ -12,6 +12,120 @@ use std::process::Command;
 use tracing::debug;
 use uuid::Uuid;
 
+/// Shared pane-creation logic used by both `Wagner::add_pane_with_engine` and
+/// `command_executor::execute` (AddPane handler). This eliminates the duplication
+/// that previously existed in `command_executor.rs`.
+///
+/// Handles: session check/creation, pane creation, agent launch, JSONL path
+/// prediction, TrackedPane construction, and task persistence.
+pub fn add_pane_shared(
+    terminal: &dyn Terminal,
+    store: &Store,
+    task: &mut Task,
+    repo: &TaskRepo,
+    engine_type: crate::model::Engine,
+    pane_name: Option<&str>,
+) -> Result<TrackedPane> {
+    use crate::model::{Engine, PENDING_DISCOVERY};
+
+    let task_name = &task.name;
+    let session = SessionHandle(session_name_for_task(task_name));
+
+    let created_session = if !terminal.session_exists(task_name)? {
+        terminal.create_session(task_name, &repo.worktree)?;
+        true
+    } else {
+        false
+    };
+
+    let pane = if created_session {
+        let panes = terminal.list_panes(&session)?;
+        panes
+            .into_iter()
+            .next()
+            .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
+    } else {
+        terminal.create_pane(&session, &repo.worktree)?
+    };
+
+    let session_id = Uuid::new_v4().to_string();
+
+    let name = match pane_name {
+        Some(n) => {
+            if task.panes.iter().any(|p| p.name == n) {
+                task.next_pane_name(n)
+            } else {
+                n.to_string()
+            }
+        }
+        None => {
+            let base = match engine_type {
+                Engine::ClaudeCode => format!("claude-{}", repo.name),
+                Engine::Codex => format!("codex-{}", repo.name),
+                Engine::Terminal => repo.name.clone(),
+            };
+            task.next_pane_name(&base)
+        }
+    };
+
+    if engine_type != Engine::Terminal {
+        terminal.shell_init_delay();
+        let launch_cmd = engine_type.launch_command(&session_id);
+        terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms())?;
+    }
+
+    let jsonl_path = match engine_type {
+        Engine::ClaudeCode => {
+            let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
+            if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(home)
+                    .join(".claude")
+                    .join("projects")
+                    .join(project_id)
+                    .join(format!("{session_id}.jsonl"))
+            } else {
+                PathBuf::from(PENDING_DISCOVERY)
+            }
+        }
+        _ => PathBuf::from(PENDING_DISCOVERY),
+    };
+
+    let tracked = TrackedPane {
+        name,
+        repo_name: repo.name.clone(),
+        engine: engine_type,
+        session_id,
+        pane_id: pane.0.clone(),
+        jsonl_path,
+        launched_at: Utc::now(),
+    };
+
+    task.panes.push(tracked.clone());
+    store.save_task(task)?;
+
+    Ok(tracked)
+}
+
+/// Resolve a repo from a task given an optional repo_name.
+/// Uses the named repo if specified, otherwise falls back to the first repo.
+pub fn resolve_repo(task: &Task, repo_name: Option<&str>) -> Result<TaskRepo> {
+    match repo_name {
+        Some(name) => task
+            .repos
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
+            .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new())),
+        None => task
+            .repos
+            .first()
+            .cloned()
+            .ok_or_else(|| {
+                WagnerError::Terminal("Task has no repos".into())
+            }),
+    }
+}
+
 pub struct Wagner<T: Terminal, A: Agent> {
     pub terminal: T,
     pub agent: A,
@@ -359,51 +473,19 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         engine: Option<crate::model::Engine>,
     ) -> Result<PaneHandle> {
         let mut task = self.store.load_task(task_name)?;
-        let session = SessionHandle(session_name_for_task(task_name));
+        let repo = resolve_repo(&task, repo_name)?;
 
-        let repo = match repo_name {
-            Some(name) => task
-                .repos
-                .iter()
-                .find(|r| r.name == name)
-                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
-                .clone(),
-            None => task
-                .repos
-                .first()
-                .cloned()
-                .unwrap_or_else(|| task.core_repo()),
-        };
+        let engine_type = engine.unwrap_or_else(|| self.agent.engine());
+        let tracked = add_pane_shared(
+            &self.terminal,
+            &self.store,
+            &mut task,
+            &repo,
+            engine_type,
+            pane_name,
+        )?;
 
-        let created_session = if !self.terminal.session_exists(task_name)? {
-            self.terminal.create_session(task_name, &repo.worktree)?;
-            true
-        } else {
-            false
-        };
-
-        let pane = if created_session {
-            let panes = self.terminal.list_panes(&session)?;
-            panes
-                .into_iter()
-                .next()
-                .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
-        } else {
-            self.terminal.create_pane(&session, &repo.worktree)?
-        };
-
-        if let Some(engine_type) = engine {
-            self.prepare_agent_in_pane_with_engine(
-                &mut task,
-                &pane,
-                &repo,
-                pane_name,
-                engine_type,
-            )?;
-        } else {
-            self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
-        }
-        self.store.save_task(&task)?;
+        let pane = PaneHandle(tracked.pane_id.clone(), tracked.name.clone());
         Ok(pane)
     }
 
@@ -413,43 +495,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         repo_name: Option<&str>,
         pane_name: Option<&str>,
     ) -> Result<PaneHandle> {
-        let mut task = self.store.load_task(task_name)?;
-        let session = SessionHandle(session_name_for_task(task_name));
-
-        let repo = match repo_name {
-            Some(name) => task
-                .repos
-                .iter()
-                .find(|r| r.name == name)
-                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
-                .clone(),
-            None => task
-                .repos
-                .first()
-                .cloned()
-                .unwrap_or_else(|| task.core_repo()),
-        };
-
-        let created_session = if !self.terminal.session_exists(task_name)? {
-            self.terminal.create_session(task_name, &repo.worktree)?;
-            true
-        } else {
-            false
-        };
-
-        let pane = if created_session {
-            let panes = self.terminal.list_panes(&session)?;
-            panes
-                .into_iter()
-                .next()
-                .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
-        } else {
-            self.terminal.create_pane(&session, &repo.worktree)?
-        };
-
-        self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
-        self.store.save_task(&task)?;
-        Ok(pane)
+        self.add_pane_with_engine(task_name, repo_name, pane_name, None)
     }
 
     fn create_session_with_panes(
