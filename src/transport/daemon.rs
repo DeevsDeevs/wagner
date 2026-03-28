@@ -159,20 +159,19 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
                 info!("received SIGINT, shutting down");
                 break;
             }
+            Some((cmd, resp_tx)) = ipc_rx.recv() => {
+                let tasks = state.store.list_tasks().unwrap_or_default();
+                let response = state.core.execute(
+                    &state.terminal,
+                    &state.store,
+                    &cmd,
+                    &tasks,
+                );
+                let _ = resp_tx.send(response);
+            }
             _ = tokio::time::sleep(poll_interval) => {
                 if let Err(e) = daemon_tick(&mut state, &mut adapter).await {
                     error!(%e, "daemon tick error");
-                }
-
-                while let Ok((cmd, resp_tx)) = ipc_rx.try_recv() {
-                    let tasks = state.store.list_tasks().unwrap_or_default();
-                    let response = state.core.execute(
-                        &state.terminal,
-                        &state.store,
-                        &cmd,
-                        &tasks,
-                    );
-                    let _ = resp_tx.send(response);
                 }
             }
         }
