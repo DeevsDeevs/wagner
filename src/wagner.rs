@@ -361,13 +361,6 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let mut task = self.store.load_task(task_name)?;
         let session = SessionHandle(session_name_for_task(task_name));
 
-        let created_session = if !self.terminal.session_exists(task_name)? {
-            self.terminal.create_session(task_name, &task.path)?;
-            true
-        } else {
-            false
-        };
-
         let repo = match repo_name {
             Some(name) => task
                 .repos
@@ -375,13 +368,18 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 .find(|r| r.name == name)
                 .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
                 .clone(),
-            None => {
-                if task.repos.len() == 1 {
-                    task.repos[0].clone()
-                } else {
-                    task.core_repo()
-                }
-            }
+            None => task
+                .repos
+                .first()
+                .cloned()
+                .unwrap_or_else(|| task.core_repo()),
+        };
+
+        let created_session = if !self.terminal.session_exists(task_name)? {
+            self.terminal.create_session(task_name, &repo.worktree)?;
+            true
+        } else {
+            false
         };
 
         let pane = if created_session {
@@ -418,13 +416,6 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         let mut task = self.store.load_task(task_name)?;
         let session = SessionHandle(session_name_for_task(task_name));
 
-        let created_session = if !self.terminal.session_exists(task_name)? {
-            self.terminal.create_session(task_name, &task.path)?;
-            true
-        } else {
-            false
-        };
-
         let repo = match repo_name {
             Some(name) => task
                 .repos
@@ -432,13 +423,18 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 .find(|r| r.name == name)
                 .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
                 .clone(),
-            None => {
-                if task.repos.len() == 1 {
-                    task.repos[0].clone()
-                } else {
-                    task.core_repo()
-                }
-            }
+            None => task
+                .repos
+                .first()
+                .cloned()
+                .unwrap_or_else(|| task.core_repo()),
+        };
+
+        let created_session = if !self.terminal.session_exists(task_name)? {
+            self.terminal.create_session(task_name, &repo.worktree)?;
+            true
+        } else {
+            false
         };
 
         let pane = if created_session {
@@ -461,27 +457,24 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         name: &str,
         task: &mut Task,
     ) -> Result<SessionHandle> {
-        let is_multi_repo = task.repos.len() > 1;
-        let session_dir = if is_multi_repo {
-            task.path.clone()
-        } else {
-            task.repos
-                .first()
-                .map(|r| r.worktree.clone())
-                .unwrap_or_else(|| task.path.clone())
-        };
+        let session_dir = task
+            .repos
+            .first()
+            .map(|r| r.worktree.clone())
+            .unwrap_or_else(|| task.path.clone());
 
         let session = self.terminal.create_session(name, &session_dir)?;
 
-        if is_multi_repo {
+        if task.repos.len() > 1 {
+            let repos: Vec<_> = task.repos.clone();
+            // First pane (already created with session) gets first repo
             if let Ok(panes) = self.terminal.list_panes(&session)
                 && let Some(pane) = panes.first()
             {
-                let core_repo = task.core_repo();
-                let _ = self.prepare_agent_in_pane(task, pane, &core_repo, None);
+                let _ = self.prepare_agent_in_pane(task, pane, &repos[0], None);
             }
-            let repos: Vec<_> = task.repos.clone();
-            for repo in &repos {
+            // Additional repos get new panes
+            for repo in &repos[1..] {
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
                 let _ = self.prepare_agent_in_pane(task, &pane, repo, None);
             }
