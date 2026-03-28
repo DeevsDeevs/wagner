@@ -60,7 +60,7 @@ There are TWO paths to launch agents:
 1. `prepare_agent_in_pane()` - uses Agent trait (for managed task creation)
 2. `prepare_agent_in_pane_with_engine()` - uses Engine enum directly (for quick_launch, add_pane)
 
-The command_executor in the daemon also has its own inline pane creation logic (a known issue being fixed).
+The command_executor `AddPane` path delegates to shared Wagner pane-creation logic to keep daemon/local behavior aligned.
 
 ## Persistence
 - Config: `~/.config/wagner/config.json`

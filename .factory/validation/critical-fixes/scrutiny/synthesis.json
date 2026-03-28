@@ -1,7 +1,7 @@
 {
   "milestone": "critical-fixes",
-  "round": 1,
-  "status": "fail",
+  "round": 2,
+  "status": "pass",
   "validatorsRun": {
     "test": {
       "passed": true,
@@ -20,60 +20,46 @@
     }
   },
   "reviewsSummary": {
-    "total": 3,
-    "passed": 2,
-    "failed": 1,
-    "failedFeatures": [
-      "dedup-command-executor-pane-logic"
-    ]
+    "total": 1,
+    "passed": 1,
+    "failed": 0,
+    "failedFeatures": []
   },
-  "blockingIssues": [
-    {
-      "featureId": "dedup-command-executor-pane-logic",
-      "severity": "blocking",
-      "description": "Feature description required a parity test proving CoreCommand::AddPane via command_executor matches direct Wagner add_pane path; added test only validates execute_cmd outputs and does not invoke/compare the direct path."
-    }
-  ],
+  "blockingIssues": [],
   "appliedUpdates": [
     {
-      "target": "services.yaml",
-      "description": "Updated lint command to `devbox run -- cargo clippy --all-features -- -D warnings` to match verified working invocation in this devbox environment.",
-      "sourceFeature": "dedup-command-executor-pane-logic"
+      "target": "library",
+      "description": "Updated `.factory/library/architecture.md` to reflect that command_executor AddPane now delegates to shared Wagner pane-creation logic.",
+      "sourceFeature": "fix-scrutiny-parity-test"
     }
   ],
   "suggestedGuidanceUpdates": [
     {
       "target": "AGENTS.md",
-      "suggestion": "Correct mock terminal location: `MockTerminal` used by tests is in `src/terminal/mock.rs`, not `src/agent/test.rs`.",
-      "evidence": "Reported in reviews for `fix-pane-start-directory` and `fix-quick-launch-data-destruction`; both compared mission AGENTS guidance against repository files and found mismatch.",
+      "suggestion": "Correct mock terminal location guidance to point to `src/terminal/mock.rs` (not `src/agent/test.rs`).",
+      "evidence": "Observed in reviews for `fix-pane-start-directory` and `fix-quick-launch-data-destruction`; mission AGENTS guidance still references the wrong file.",
       "isSystemic": true
     },
     {
       "target": "skills/rust-worker",
-      "suggestion": "Update validator command guidance to use `devbox run -- cargo ...` form when passing rustc/clippy args after `--`, and explicitly note the failing form observed in this environment.",
-      "evidence": "Multiple reviews observed `devbox run cargo clippy --all-features -- -D warnings` failing with `unknown flag: --all-features`, while `devbox run -- cargo clippy --all-features -- -D warnings` succeeded.",
+      "suggestion": "Clarify clippy invocation guidance to use `devbox run -- cargo clippy --all-features -- -D warnings` for this devbox environment.",
+      "evidence": "Repeated review observations across this milestone show `devbox run cargo clippy --all-features -- -D warnings` can fail with `unknown flag: --all-features`, while the `devbox run -- cargo ...` form succeeds.",
       "isSystemic": true
-    },
-    {
-      "target": "validation-contract.md",
-      "suggestion": "Add an assertion that explicitly checks for direct-path parity testing when a feature description requires command_executor vs Wagner path equivalence, not only delegation behavior.",
-      "evidence": "Review for `dedup-command-executor-pane-logic` found feature requirement gap: contract covered delegation/worktree correctness but not comparative parity test requested by feature description.",
-      "isSystemic": false
     }
   ],
   "rejectedObservations": [
     {
-      "observation": "Duplicate report that services lint command format fails without `devbox run --`.",
-      "reason": "duplicate"
+      "observation": "Repeated report that services lint command format is incorrect.",
+      "reason": "already-applied in round 1; `.factory/services.yaml` already uses `devbox run -- cargo clippy --all-features -- -D warnings`."
     },
     {
-      "observation": "Duplicate report that mission AGENTS.md points to wrong mock terminal file.",
-      "reason": "duplicate"
+      "observation": "Worker did not follow RED-first testing sequence.",
+      "reason": "ambiguous process-compliance note for a single run, not shared-state guidance."
     },
     {
-      "observation": "Worker marked followedProcedure=true despite not doing RED-first tests.",
-      "reason": "ambiguous; this is worker-level process compliance, not a shared-state fact needing repository update."
+      "observation": "Contract parity-gap observation from round 1.",
+      "reason": "superseded by completed `fix-scrutiny-parity-test` and now passing re-review."
     }
   ],
-  "previousRound": null
+  "previousRound": ".factory/validation/critical-fixes/scrutiny/synthesis.round1.json"
 }

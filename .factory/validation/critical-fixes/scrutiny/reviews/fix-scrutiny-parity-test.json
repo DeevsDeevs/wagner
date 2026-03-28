@@ -1,0 +1,26 @@
+{
+  "featureId": "fix-scrutiny-parity-test",
+  "reviewedAt": "2026-03-28T22:02:02Z",
+  "commitId": "4249d43e653fc1c50048611e085de5a342c8b9e8",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix directly addresses the prior scrutiny failure: commit 4249d43 adds dedicated parity tests in tests/parity_add_pane.rs that invoke both the direct Wagner add_pane_with_engine path and the command_executor CoreCommand::AddPane path under shared fixtures, then assert equivalent structural outcomes (engine, repo selection, pane naming pattern, JSONL behavior, and session directory recreation behavior). No blocking or non-blocking implementation defects were identified in this fix.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Mission and skill lint command guidance is inconsistent with services.yaml and the command form actually used in this mission.",
+      "evidence": "Mission AGENTS.md:24 and .factory/skills/rust-worker/SKILL.md:40/61 document `devbox run cargo clippy --all-features -- -D warnings`, while .factory/services.yaml:6 documents `devbox run -- cargo clippy --all-features -- -D warnings`; the fix worker handoff verification for session 880e50c1-c27b-431e-b271-b60f51c5bad7 also records the `devbox run -- cargo clippy ...` form."
+    },
+    {
+      "area": "knowledge",
+      "observation": "Shared architecture knowledge is stale about AddPane duplication status.",
+      "evidence": ".factory/library/architecture.md:63 still states command_executor has its own inline pane creation logic as a known issue, but dedup-command-executor-pane-logic (commit be509577e58e1edd2166042b6172d9891115fb32) already refactored AddPane to shared logic."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/critical-fixes/scrutiny/reviews/dedup-command-executor-pane-logic.json",
+  "summary": "Re-run fix review passes. The previous blocking gap (missing direct-vs-executor parity proof) is now resolved by new parity tests that exercise both paths and assert equivalent outcomes across key scenarios."
+}
