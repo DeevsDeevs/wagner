@@ -1,9 +1,11 @@
 mod claude;
 mod codex;
+mod droid;
 mod test;
 
 pub use claude::ClaudeCode;
 pub use codex::Codex;
+pub use droid::Droid;
 pub use test::TestAgent;
 
 use crate::error::{Result, WagnerError};
@@ -22,6 +24,7 @@ pub trait Agent: Send + Sync {
 pub enum AgentChoice {
     Claude(ClaudeCode),
     Codex(Codex),
+    Droid(Droid),
 }
 
 impl AgentChoice {
@@ -29,6 +32,7 @@ impl AgentChoice {
         match key {
             "claude" | "claude-code" => Ok(Self::Claude(ClaudeCode::new())),
             "codex" => Ok(Self::Codex(Codex::new())),
+            "droid" => Ok(Self::Droid(Droid::new())),
             _ => Err(WagnerError::InvalidAgent(key.to_string())),
         }
     }
@@ -39,6 +43,7 @@ impl Agent for AgentChoice {
         match self {
             Self::Claude(agent) => agent.name(),
             Self::Codex(agent) => agent.name(),
+            Self::Droid(agent) => agent.name(),
         }
     }
 
@@ -46,6 +51,7 @@ impl Agent for AgentChoice {
         match self {
             Self::Claude(agent) => agent.engine(),
             Self::Codex(agent) => agent.engine(),
+            Self::Droid(agent) => agent.engine(),
         }
     }
 
@@ -53,6 +59,7 @@ impl Agent for AgentChoice {
         match self {
             Self::Claude(agent) => agent.launch_command(session_id),
             Self::Codex(agent) => agent.launch_command(session_id),
+            Self::Droid(agent) => agent.launch_command(session_id),
         }
     }
 
@@ -60,6 +67,7 @@ impl Agent for AgentChoice {
         match self {
             Self::Claude(agent) => agent.predict_jsonl_path(session_id, cwd),
             Self::Codex(agent) => agent.predict_jsonl_path(session_id, cwd),
+            Self::Droid(agent) => agent.predict_jsonl_path(session_id, cwd),
         }
     }
 
@@ -67,6 +75,7 @@ impl Agent for AgentChoice {
         match self {
             Self::Claude(agent) => agent.resume_command(session_id),
             Self::Codex(agent) => agent.resume_command(session_id),
+            Self::Droid(agent) => agent.resume_command(session_id),
         }
     }
 }

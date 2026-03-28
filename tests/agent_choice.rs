@@ -1,5 +1,5 @@
 use wagner::model::Engine;
-use wagner::{Agent, AgentChoice, WagnerError};
+use wagner::{Agent, AgentChoice, Droid, WagnerError};
 
 #[test]
 fn test_agent_choice_claude() {
@@ -53,4 +53,44 @@ fn test_claude_resume_command() {
         agent.resume_command("my-session"),
         "claude --resume my-session"
     );
+}
+
+#[test]
+fn test_agent_choice_from_key_droid() {
+    let agent = AgentChoice::from_key("droid").unwrap();
+    assert_eq!(agent.launch_command("test-id"), "droid");
+    assert_eq!(agent.name(), "droid");
+    assert_eq!(agent.engine(), Engine::Droid);
+    assert!(matches!(agent, AgentChoice::Droid(_)));
+}
+
+#[test]
+fn test_droid_predict_jsonl_path() {
+    let agent = AgentChoice::from_key("droid").unwrap();
+    let cwd = std::path::Path::new("/Users/test/myproject");
+    let path = agent.predict_jsonl_path("abc-123", cwd);
+    assert!(path.is_some());
+    let path = path.unwrap();
+    let path_str = path.to_string_lossy();
+    assert!(path_str.ends_with("abc-123.jsonl"));
+    assert!(path_str.contains(".factory/sessions/"));
+    assert!(path_str.contains("-Users-test-myproject"));
+}
+
+#[test]
+fn test_droid_resume_command() {
+    let agent = AgentChoice::from_key("droid").unwrap();
+    assert_eq!(
+        agent.resume_command("my-session"),
+        "droid --resume my-session"
+    );
+}
+
+#[test]
+fn test_droid_agent_direct() {
+    let agent = Droid::new();
+    assert_eq!(agent.name(), "droid");
+    assert_eq!(agent.engine(), Engine::Droid);
+    assert_eq!(agent.launch_command("ses-1"), "droid");
+    assert_eq!(agent.resume_command("ses-1"), "droid --resume ses-1");
 }
