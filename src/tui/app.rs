@@ -1168,6 +1168,21 @@ impl<T: Terminal, A: Agent> App<T, A> {
             let pane = crate::terminal::PaneHandle(pane_id.to_string(), String::new());
             match self.wagner.terminal.kill_pane(&pane) {
                 Ok(_) => {
+                    // Update task.panes tracking (mirrors command_executor KillPane)
+                    if let Some(task_name) = &self.selected_task
+                        && let Ok(mut task) = self.wagner.store.load_task(task_name)
+                    {
+                        task.panes.retain(|p| p.pane_id != pane_id);
+                        if let Err(e) = self.wagner.store.save_task(&task) {
+                            self.set_status(&format!(
+                                "Pane killed but failed to save: {}",
+                                e
+                            ));
+                            self.selected_pane = None;
+                            let _ = self.refresh_data();
+                            return;
+                        }
+                    }
                     self.set_status(&format!("Deleted pane: {}", pane_id));
                     self.selected_pane = None;
                     let _ = self.refresh_data();

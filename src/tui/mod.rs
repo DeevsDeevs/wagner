@@ -4,7 +4,7 @@ mod event;
 mod ui;
 pub mod widgets;
 
-pub use app::App;
+pub use app::{App, InputMode};
 
 use crate::agent::Agent;
 use crate::error::Result;
