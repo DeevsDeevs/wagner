@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 use wagner::config::Workspace;
-use wagner::{Config, MockTerminal, PaneHandle, RepoSource, RepoSpec, Terminal, TestAgent, Wagner};
+use wagner::{Config, MockTerminal, PaneHandle, RepoSource, RepoSpec, TaskKind, Terminal, TestAgent, Wagner};
 
 struct TestContext {
     _temp_dir: TempDir,
@@ -935,4 +935,115 @@ fn test_attached_task_preserves_repo() {
         "Repo files should be preserved after detach"
     );
     assert!(ctx.repo_path.exists(), "Repo directory should still exist");
+}
+
+#[test]
+fn test_detach_managed_task_rejected() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    // Create a managed task (the default TaskKind for create_task)
+    let spec = RepoSpec {
+        name: "test-repo".to_string(),
+        source: RepoSource::Local(ctx.repo_path.clone()),
+        branch: "detach-guard-test".to_string(),
+    };
+    wagner.create_task("managed-no-detach", &[spec], None).unwrap();
+
+    // Verify the task exists and has a session
+    let task_before = wagner.get_task("managed-no-detach").unwrap();
+    assert_eq!(task_before.kind, TaskKind::Managed);
+    assert!(
+        wagner.terminal.session_exists("managed-no-detach").unwrap(),
+        "Session should exist before detach attempt"
+    );
+
+    // Attempt to detach — must fail
+    let result = wagner.detach_task("managed-no-detach");
+    assert!(result.is_err(), "detach_task should fail for managed tasks");
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("managed") || err_msg.contains("Managed"),
+        "Error should mention managed task: {}",
+        err_msg
+    );
+
+    // Verify session was NOT killed
+    assert!(
+        wagner.terminal.session_exists("managed-no-detach").unwrap(),
+        "Session should still exist after rejected detach"
+    );
+
+    // Verify task was NOT deleted from store
+    let task_after = wagner.get_task("managed-no-detach");
+    assert!(
+        task_after.is_ok(),
+        "Task should still exist in store after rejected detach"
+    );
+}
+
+#[test]
+fn test_detach_attached_task_succeeds() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    // Create an attached task (TaskKind::Attached)
+    wagner
+        .attach_task("attached-detach-ok", vec![ctx.repo_path.clone()])
+        .unwrap();
+
+    let task = wagner.get_task("attached-detach-ok").unwrap();
+    assert_eq!(task.kind, TaskKind::Attached);
+    assert!(
+        wagner.terminal.session_exists("attached-detach-ok").unwrap(),
+        "Session should exist before detach"
+    );
+
+    // Detach should succeed
+    let result = wagner.detach_task("attached-detach-ok");
+    assert!(result.is_ok(), "detach_task should succeed for attached tasks");
+
+    // Session should be killed
+    assert!(
+        !wagner.terminal.session_exists("attached-detach-ok").unwrap(),
+        "Session should be removed after successful detach"
+    );
+
+    // Task should be removed from store
+    let task_after = wagner.get_task("attached-detach-ok");
+    assert!(
+        task_after.is_err(),
+        "Task should be removed from store after successful detach"
+    );
+}
+
+#[test]
+fn test_detach_managed_session_and_store_untouched() {
+    let ctx = TestContext::new();
+    let wagner = ctx.wagner();
+
+    let spec = RepoSpec {
+        name: "test-repo".to_string(),
+        source: RepoSource::Local(ctx.repo_path.clone()),
+        branch: "guard-untouched".to_string(),
+    };
+    wagner.create_task("guard-test", &[spec], None).unwrap();
+
+    let task_before = wagner.get_task("guard-test").unwrap();
+    let panes_before = task_before.panes.len();
+
+    // Attempt detach on managed task
+    let _ = wagner.detach_task("guard-test");
+
+    // Verify store state is unchanged
+    let task_after = wagner.get_task("guard-test").unwrap();
+    assert_eq!(task_after.panes.len(), panes_before, "Panes should be unchanged");
+    assert_eq!(task_after.kind, TaskKind::Managed, "Kind should be unchanged");
+    assert_eq!(task_after.name, "guard-test", "Name should be unchanged");
+
+    // Verify session still exists
+    assert!(
+        wagner.terminal.session_exists("guard-test").unwrap(),
+        "Session should remain alive after rejected detach"
+    );
 }

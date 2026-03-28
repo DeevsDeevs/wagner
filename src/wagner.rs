@@ -353,7 +353,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     }
 
     pub fn detach_task(&self, name: &str) -> Result<()> {
-        let _task = self.store.load_task(name)?;
+        let task = self.store.load_task(name)?;
+
+        if task.kind == crate::model::TaskKind::Managed {
+            return Err(WagnerError::DetachManagedTask(name.to_string()));
+        }
 
         if self.terminal.session_exists(name)? {
             self.terminal
