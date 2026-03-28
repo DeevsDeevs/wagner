@@ -206,7 +206,11 @@ pub enum RepoSource {
 
 impl RepoSource {
     pub fn parse(s: &str) -> Self {
-        if s.starts_with("git@") || s.starts_with("https://") || s.starts_with("git://") {
+        if s.starts_with("git@")
+            || s.starts_with("https://")
+            || s.starts_with("http://")
+            || s.starts_with("git://")
+        {
             Self::Remote(s.to_string())
         } else {
             let expanded = shellexpand::tilde(s);

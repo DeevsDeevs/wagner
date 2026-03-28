@@ -1128,23 +1128,82 @@ pub struct RepoSpec {
 
 impl RepoSpec {
     pub fn parse(s: &str, default_branch: Option<&str>) -> Result<Self> {
-        let parts: Vec<&str> = s.split(':').collect();
-
-        match parts.len() {
-            3 => Ok(Self {
-                name: parts[0].to_string(),
-                source: RepoSource::parse(parts[1]),
-                branch: parts[2].to_string(),
-            }),
-            2 => Ok(Self {
-                name: parts[0].to_string(),
-                source: RepoSource::parse(parts[1]),
-                branch: default_branch.unwrap_or("main").to_string(),
-            }),
-            _ => Err(WagnerError::InvalidRepoSpec(format!(
-                "Expected format: name:source:branch or name:source, got: {}",
+        // Split into name and rest (at most 2 parts)
+        let Some((name, rest)) = s.split_once(':') else {
+            return Err(WagnerError::InvalidRepoSpec(format!(
+                "Expected format: name:source[:branch], got: {}",
                 s
-            ))),
+            )));
+        };
+
+        if name.is_empty() || rest.is_empty() {
+            return Err(WagnerError::InvalidRepoSpec(format!(
+                "Expected format: name:source[:branch], got: {}",
+                s
+            )));
+        }
+
+        // Parse rest into (source, optional branch) depending on URL type
+        let (source_str, branch) = Self::split_source_and_branch(rest);
+
+        Ok(Self {
+            name: name.to_string(),
+            source: RepoSource::parse(source_str),
+            branch: branch
+                .unwrap_or_else(|| default_branch.unwrap_or("main"))
+                .to_string(),
+        })
+    }
+
+    /// Split a source string (after the name: prefix) into (source, optional branch).
+    ///
+    /// Handles:
+    /// - HTTPS/HTTP URLs: `https://host/path` or `https://host/path:branch`
+    /// - SSH URLs: `git@host:path` or `git@host:path:branch`
+    /// - Local paths: `/path/to/repo` or `/path/to/repo:branch`
+    fn split_source_and_branch(rest: &str) -> (&str, Option<&str>) {
+        if rest.starts_with("https://") || rest.starts_with("http://") || rest.starts_with("git://")
+        {
+            // For scheme-based URLs, find the scheme separator position
+            let scheme_end = rest.find("://").unwrap() + 3; // past "://"
+            // Look for ':' after the scheme — the last one is the branch delimiter
+            if let Some(last_colon) = rest[scheme_end..].rfind(':') {
+                let split_pos = scheme_end + last_colon;
+                let source = &rest[..split_pos];
+                let branch = &rest[split_pos + 1..];
+                if !branch.is_empty() {
+                    return (source, Some(branch));
+                }
+            }
+            (rest, None)
+        } else if let Some(after_git_at) = rest.strip_prefix("git@") {
+            // SSH URLs: git@host:path — first ':' after 'git@' is part of the URL.
+            // If there's a second ':', it's the branch delimiter.
+            let prefix_len = rest.len() - after_git_at.len(); // length of "git@"
+            // Find the first ':' (host:path separator, part of the URL)
+            if let Some(first_colon) = after_git_at.find(':') {
+                let after_first_colon = &after_git_at[first_colon + 1..];
+                // Look for another ':' — that's the branch delimiter
+                if let Some(second_colon) = after_first_colon.rfind(':') {
+                    let split_pos = prefix_len + first_colon + 1 + second_colon;
+                    let source = &rest[..split_pos];
+                    let branch = &rest[split_pos + 1..];
+                    if !branch.is_empty() {
+                        return (source, Some(branch));
+                    }
+                }
+            }
+            (rest, None)
+        } else {
+            // Local path: the last ':' is the branch delimiter
+            if let Some(last_colon) = rest.rfind(':') {
+                let source = &rest[..last_colon];
+                let branch = &rest[last_colon + 1..];
+                if !source.is_empty() && !branch.is_empty() {
+                    return (source, Some(branch));
+                }
+            }
+            (rest, None)
         }
     }
 }
@@ -1229,5 +1288,148 @@ mod tests {
     fn url_to_repo_path_ssh_protocol_with_port() {
         let result = url_to_repo_path("ssh://git@github.com:22/user/repo.git");
         assert_eq!(result, PathBuf::from("github.com/user/repo"));
+    }
+
+    // --- RepoSpec::parse tests ---
+
+    #[test]
+    fn repo_spec_parse_https_url() {
+        let spec =
+            RepoSpec::parse("myrepo:https://github.com/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://github.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_ssh_url() {
+        let spec =
+            RepoSpec::parse("myrepo:git@github.com:org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git@github.com:org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:https://github.com/org/repo:feat", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "feat");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://github.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_ssh_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:git@github.com:org/repo:main", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git@github.com:org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_local_path() {
+        // Regression test: local paths continue to work
+        let spec =
+            RepoSpec::parse("myrepo:/path/to/repo:feature/branch", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "feature/branch");
+        match &spec.source {
+            RepoSource::Local(path) => {
+                assert_eq!(path, &PathBuf::from("/path/to/repo"));
+            }
+            _ => panic!("Expected local source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_simple_name_path() {
+        // name:path without branch
+        let spec = RepoSpec::parse("myrepo:/path/to/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Local(path) => {
+                assert_eq!(path, &PathBuf::from("/path/to/repo"));
+            }
+            _ => panic!("Expected local source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_local_path_with_default_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:/path/to/repo", Some("develop")).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "develop");
+    }
+
+    #[test]
+    fn repo_spec_parse_invalid_no_colon() {
+        let result = RepoSpec::parse("invalid", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.com/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.com/org/repo:develop", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "develop");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_ssh_nested_path_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:git@gitlab.com:org/sub/repo:release/v1", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "release/v1");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git@gitlab.com:org/sub/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
     }
 }
