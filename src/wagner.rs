@@ -663,7 +663,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         self.terminal.shell_init_delay();
         let cmd = self.agent.launch_command(&session_id);
-        self.terminal.send_keys(pane, &cmd)?;
+        self.terminal
+            .send_text_enter(pane, &cmd, engine.enter_delay_ms())?;
 
         let jsonl_path = self
             .agent
@@ -706,7 +707,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             }
 
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            self.terminal.send_keys(pane, &resume_cmd)?;
+            self.terminal
+                .send_text_enter(pane, &resume_cmd, tracked.engine.enter_delay_ms())?;
             resumed += 1;
         }
 

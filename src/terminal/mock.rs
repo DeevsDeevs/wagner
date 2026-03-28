@@ -13,6 +13,8 @@ pub struct MockTerminal {
     pub pane_commands: Arc<Mutex<HashMap<String, String>>>,
     pub created_sessions: Arc<Mutex<Vec<(String, std::path::PathBuf)>>>,
     pub created_panes: Arc<Mutex<Vec<(String, std::path::PathBuf)>>>,
+    /// Tracks (pane_id, text, delay_ms) for each send_text_enter call.
+    pub text_enter_calls: Arc<Mutex<Vec<(String, String, u64)>>>,
 }
 
 impl MockTerminal {
@@ -57,6 +59,10 @@ impl MockTerminal {
 
     pub fn get_created_panes(&self) -> Vec<(String, std::path::PathBuf)> {
         self.created_panes.lock().unwrap().clone()
+    }
+
+    pub fn get_text_enter_calls(&self) -> Vec<(String, String, u64)> {
+        self.text_enter_calls.lock().unwrap().clone()
     }
 }
 
@@ -169,6 +175,17 @@ impl Terminal for MockTerminal {
             .lock()
             .unwrap()
             .push((pane.0.clone(), width, height));
+        Ok(())
+    }
+
+    fn send_text_enter(&self, pane: &PaneHandle, text: &str, delay_ms: u64) -> Result<()> {
+        self.text_enter_calls
+            .lock()
+            .unwrap()
+            .push((pane.0.clone(), text.to_string(), delay_ms));
+        // Also record in sent_keys for backward compatibility with existing tests
+        self.send_literal(pane, text)?;
+        self.send_key(pane, "Enter")?;
         Ok(())
     }
 }

@@ -180,9 +180,11 @@ fn test_create_multi_repo_task() {
     assert!(worktree2.exists(), "Worktree 2 should exist");
 
     let terminal = &wagner.terminal;
-    let sent_keys = terminal.get_sent_keys();
+    // send_text_enter records 2 entries per call (send_literal + send_key("Enter"))
+    // so 2 panes × 2 entries = 4 total sent_keys entries
+    let text_enter_calls = terminal.get_text_enter_calls();
     assert_eq!(
-        sent_keys.len(),
+        text_enter_calls.len(),
         2,
         "Should have sent launch command to 2 repo panes (no synthetic core pane)"
     );
