@@ -900,7 +900,15 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn start_new_task(&mut self) {
         if self.wagner.config.workspaces.is_empty() {
-            self.set_status("No workspaces configured. Use: wagner workspace add <name> repo:path");
+            // No workspaces configured: try auto-detecting current git repo
+            if crate::git::detect_git_repo().is_some() {
+                self.input_mode = InputMode::NewTask;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                self.input_label = "Task name (auto-detected repo)".to_string();
+                return;
+            }
+            self.set_status("No workspaces configured and not in a git repo");
             return;
         }
         self.input_mode = InputMode::NewTask;
@@ -922,9 +930,22 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn start_delete(&mut self) {
         if let Some(pane_id) = &self.selected_pane {
+            // Look up friendly pane name from task.panes, fall back to pane_id
+            let display_name = self
+                .selected_task
+                .as_ref()
+                .and_then(|task_name| self.wagner.get_task(task_name).ok())
+                .and_then(|task| {
+                    task.panes
+                        .iter()
+                        .find(|p| p.pane_id == *pane_id)
+                        .map(|p| p.name.clone())
+                })
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| pane_id.clone());
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(format!("delete_pane:{}", pane_id));
-            self.input_label = format!("Delete pane '{}'? [y/n]", pane_id);
+            self.input_label = format!("Delete pane '{}'? [y/n]", display_name);
         } else if let Some(task_name) = &self.selected_task {
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(task_name.clone());
@@ -1060,8 +1081,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         let workspaces: Vec<String> = self.wagner.config.workspaces.keys().cloned().collect();
         if workspaces.is_empty() {
+            // No workspaces: try auto-detecting current git repo
             self.input_mode = InputMode::Normal;
             self.input_buffer.clear();
+            self.create_task_from_auto_detected_repo(&name);
             return;
         }
 
@@ -1118,6 +1141,31 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         self.workspace_list.clear();
         self.workspace_index = 0;
+    }
+
+    fn create_task_from_auto_detected_repo(&mut self, task_name: &str) {
+        let Some((repo_path, repo_name)) = crate::git::detect_git_repo() else {
+            self.set_status("Not in a git repository");
+            return;
+        };
+
+        let default_branch = default_branch_for_task(task_name);
+        let specs = vec![RepoSpec {
+            name: repo_name,
+            source: crate::model::RepoSource::Local(repo_path),
+            branch: default_branch,
+        }];
+
+        match self.wagner.create_task(task_name, &specs, None) {
+            Ok(task) => {
+                self.set_status(&format!("Created task: {}", task.name));
+                self.selected_task = Some(task.name);
+                let _ = self.refresh_data();
+            }
+            Err(e) => {
+                self.set_status(&format!("Error: {}", e));
+            }
+        }
     }
 
     pub fn workspace_next(&mut self) {
@@ -1192,7 +1240,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
             }
         } else {
-            match self.wagner.delete_task(&action, true) {
+            match self.wagner.delete_task(&action, false) {
                 Ok(_) => {
                     self.set_status(&format!("Deleted task: {}", action));
                     self.selected_task = None;

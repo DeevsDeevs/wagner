@@ -174,20 +174,7 @@ fn cmd_new<T: Terminal, A: Agent>(
 }
 
 fn detect_git_repo() -> Option<(std::path::PathBuf, String)> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let repo_path = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-
-    let repo_name = repo_path.file_name()?.to_string_lossy().to_string();
-
-    Some((repo_path, repo_name))
+    wagner::git::detect_git_repo()
 }
 
 fn detect_task_from_cwd(config: &Config) -> Option<String> {
