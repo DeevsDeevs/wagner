@@ -1,0 +1,45 @@
+{
+  "featureId": "droid-engine-and-model",
+  "reviewedAt": "2026-03-28T22:35:43Z",
+  "commitId": "cedb2c3",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "Core Engine/AgentType/DroidActivity additions and required tests were implemented, but the feature did not satisfy the explicit requirement to add Droid arms to all Engine match expressions across the codebase.",
+    "issues": [
+      {
+        "file": "src/wagner.rs",
+        "line": 91,
+        "severity": "blocking",
+        "description": "Engine match for jsonl_path still uses a catchall (`_ => PathBuf::from(PENDING_DISCOVERY)`) instead of an explicit `Engine::Droid` arm, so not all Engine matches include Droid as required."
+      },
+      {
+        "file": "src/wagner.rs",
+        "line": 603,
+        "severity": "blocking",
+        "description": "Second jsonl_path Engine match in add_pane_with_engine still uses a catchall instead of an explicit `Engine::Droid` arm, violating the feature requirement to update all Engine match expressions."
+      },
+      {
+        "file": "src/transport/telegram/mod.rs",
+        "line": 2541,
+        "severity": "blocking",
+        "description": "`strip_tui_chrome` matches on Engine with `Engine::Codex` plus `_` catchall; this was not updated to include an explicit `Engine::Droid` arm despite the requirement to add Droid arms to all Engine matches."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The mission AGENTS.md explicitly says to avoid `_ =>` catchall arms for Engine/AgentType matches, but this feature preserved Engine catchalls and treated that as acceptable. This suggests enforcement is missing (rule is documented but not guarded by checks).",
+      "evidence": "Mission AGENTS.md: \"No `_ =>` catchall arms for Engine or AgentType matches\"; handoff verification notes \"include Droid arm or use _ catchall where appropriate\"; code still has catchalls at src/wagner.rs:91,603 and src/transport/telegram/mod.rs:2541."
+    },
+    {
+      "area": "skills",
+      "observation": "rust-worker procedure requires RED-first (write failing tests before implementation), but transcript shows implementation edits occurred before adding tests, and no failing-test phase was recorded.",
+      "evidence": "Transcript skeleton sequence: multiple Edit calls across src/* first, then later \"Step 11: Write tests\" and only then validator runs."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed: while primary Droid model/status additions and tests are present, explicit Droid arms were not added to all Engine match expressions as required."
+}

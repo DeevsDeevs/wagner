@@ -17,21 +17,21 @@ The main orchestrator for local flows. Generic over `Terminal` trait and `Agent`
 Wraps StatusEngine + CommandExecutor for the daemon path. Processes CoreCommand/CoreResponse/CoreEvent.
 
 ### Engine Enum (src/model/task.rs)
-Defines supported agent types: ClaudeCode, Codex, Terminal (and soon Droid). Each variant provides:
+Defines supported agent types: ClaudeCode, Codex, Terminal, and Droid. Each variant provides:
 - `launch_command(session_id)` - command to start the agent
 - `resume_command(session_id)` - command to resume a session
 - `process_name()` - for dead-agent detection
 - `enter_delay_ms()` - delay between text send and Enter key in tmux
 
 ### Agent Trait (src/agent/mod.rs)
-Higher-level agent abstraction with `predict_jsonl_path()` for JSONL file discovery. AgentChoice dispatches between implementations (Claude, Codex, and soon Droid).
+Higher-level agent abstraction with `predict_jsonl_path()` for JSONL file discovery. AgentChoice dispatches between implementations (Claude, Codex, and Droid).
 
 ### Terminal Trait (src/terminal/mod.rs)
 Abstracts tmux operations. Key methods: create_session, create_pane, send_text_enter, send_keys, capture, kill_pane. Real impl in tmux.rs.
 
 ### Monitoring Pipeline (src/monitor/)
 - `SessionWatcher` (watcher.rs): tails JSONL files per pane, dispatches to engine-specific parsers
-- `claude_events.rs` / `codex_events.rs`: parse JSONL events into `AgentEvent`
+- `claude_events.rs` / `codex_events.rs` / `droid_events.rs`: parse JSONL events into `AgentEvent`
 - `StatusEngine` (src/core/status_engine.rs): aggregates pane events into session-level status with debouncing
 - `StatusMonitor` (src/monitor/mod.rs): TUI's own status monitoring via terminal capture + agent detection
 

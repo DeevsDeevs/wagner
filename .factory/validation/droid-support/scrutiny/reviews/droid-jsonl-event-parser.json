@@ -1,0 +1,33 @@
+{
+  "featureId": "droid-jsonl-event-parser",
+  "reviewedAt": "2026-03-28T22:35:49Z",
+  "commitId": "f101f0a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature is largely implemented as described (new droid parser module, watcher wiring, and broad test coverage), but there is one blocking correctness issue in malformed event handling for session_start.",
+    "issues": [
+      {
+        "file": "src/monitor/droid_events.rs",
+        "line": 24,
+        "severity": "blocking",
+        "description": "parse_session_start accepts missing `id` by defaulting to an empty string (`unwrap_or(\"\")`) and still emits SessionStarted. This conflicts with the expected malformed-input behavior (return None on malformed input) and can produce invalid session metadata."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-worker skill requires an explicit RED step (write failing tests first), but this transcript shows implementation before any failing-test evidence while handoff reports `followedProcedure: true`.",
+      "evidence": "Transcript skeleton shows `devbox run cargo test` baseline run, then file creation/editing (`Create src/monitor/droid_events.rs`, `Edit watcher.rs`), then passing tests; no pre-implementation failing test run is recorded."
+    },
+    {
+      "area": "conventions",
+      "observation": "An unrelated file mode change was included in the feature commit, suggesting setup-command side effects can leak into feature diffs.",
+      "evidence": "git show f101f0a includes `.factory/init.sh` mode-only change (`old mode 100644`, `new mode 100755`) while this feature scope was parser/watcher work."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review completed for droid-jsonl-event-parser (commit f101f0a). Implementation coverage is strong, but the parser currently treats a malformed session_start without id as valid; this is a blocking issue, so the review is marked fail."
+}
