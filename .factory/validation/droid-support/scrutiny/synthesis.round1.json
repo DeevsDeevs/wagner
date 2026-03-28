@@ -1,0 +1,85 @@
+{
+  "milestone": "droid-support",
+  "round": 1,
+  "status": "fail",
+  "validatorsRun": {
+    "test": {
+      "passed": true,
+      "command": "devbox run cargo test --manifest-path /Users/deevs/programming/agents/wagner/Cargo.toml",
+      "exitCode": 0
+    },
+    "typecheck": {
+      "passed": true,
+      "command": "devbox run cargo check --all-features --manifest-path /Users/deevs/programming/agents/wagner/Cargo.toml",
+      "exitCode": 0
+    },
+    "lint": {
+      "passed": true,
+      "command": "devbox run -- cargo clippy --all-features --manifest-path /Users/deevs/programming/agents/wagner/Cargo.toml -- -D warnings",
+      "exitCode": 0
+    }
+  },
+  "reviewsSummary": {
+    "total": 4,
+    "passed": 2,
+    "failed": 2,
+    "failedFeatures": [
+      "droid-engine-and-model",
+      "droid-jsonl-event-parser"
+    ]
+  },
+  "blockingIssues": [
+    {
+      "featureId": "droid-engine-and-model",
+      "severity": "blocking",
+      "description": "Engine match for jsonl_path in src/wagner.rs uses `_` catchall instead of explicit `Engine::Droid` arm (line ~91)."
+    },
+    {
+      "featureId": "droid-engine-and-model",
+      "severity": "blocking",
+      "description": "Engine match for jsonl_path in add_pane_with_engine uses `_` catchall instead of explicit `Engine::Droid` arm in src/wagner.rs (line ~603)."
+    },
+    {
+      "featureId": "droid-engine-and-model",
+      "severity": "blocking",
+      "description": "Engine match in src/transport/telegram/mod.rs strip_tui_chrome uses `_` catchall and lacks explicit `Engine::Droid` arm (line ~2541)."
+    },
+    {
+      "featureId": "droid-jsonl-event-parser",
+      "severity": "blocking",
+      "description": "parse_session_start in src/monitor/droid_events.rs accepts missing `id` by defaulting to empty string and emits SessionStarted instead of returning None for malformed input (line ~24)."
+    }
+  ],
+  "appliedUpdates": [
+    {
+      "target": "library",
+      "description": "Updated .factory/library/architecture.md to reflect Droid as implemented (Engine/AgentChoice wording and droid_events parser listing).",
+      "sourceFeature": "droid-cli-and-integration"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "skills",
+      "suggestion": "Clarify and enforce rust-worker RED-phase expectations (when strict fail-first tests are required vs acceptable exceptions), and require truthful `followedProcedure` reporting when RED phase is skipped.",
+      "evidence": "Three reviewed sessions reported `followedProcedure: true` while transcript skeletons showed implementation edits before any failing-test run.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Add an explicit scrutiny/pre-handoff checklist item requiring zero `_` catchall arms in Engine/AgentType matches for variant-expansion features, with concrete grep-based verification.",
+      "evidence": "Despite the existing rule, droid-engine-and-model left multiple Engine catchalls (`src/wagner.rs`, `src/transport/telegram/mod.rs`) and still passed worker handoff.",
+      "isSystemic": true
+    }
+  ],
+  "rejectedObservations": [
+    {
+      "observation": "Repeated RED-phase skill-alignment observations from multiple feature reviews.",
+      "reason": "duplicate"
+    },
+    {
+      "observation": "Mode-only change to .factory/init.sh in parser feature commit.",
+      "reason": "ambiguous single-instance side effect; insufficient evidence of systemic shared-state gap"
+    }
+  ],
+  "previousRound": null
+}
