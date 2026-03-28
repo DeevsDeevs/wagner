@@ -73,6 +73,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
         Some(Commands::Claude { name }) => cmd_quick_launch(&wagner, Engine::ClaudeCode, name),
         Some(Commands::Codex { name }) => cmd_quick_launch(&wagner, Engine::Codex, name),
+        Some(Commands::Droid { name }) => cmd_quick_launch(&wagner, Engine::Droid, name),
         Some(Commands::Terminal { name }) => cmd_quick_launch(&wagner, Engine::Terminal, name),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
@@ -1554,7 +1555,7 @@ fn cmd_config_telegram() -> Result<()> {
 
 fn cmd_config_agent() -> Result<()> {
     let mut config = Config::load()?;
-    let agents = ["claude", "codex"];
+    let agents = ["claude", "codex", "droid"];
 
     println!("Default agent: {}", config.default_agent);
     println!("Options: {}", agents.join(", "));

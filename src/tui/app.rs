@@ -949,7 +949,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pending_add_pane = PendingAddPane::default();
         if task.repos.len() <= 1 {
             self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
-            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Terminal".into()];
+            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Droid".into(), "Terminal".into()];
             self.add_pane_index = 0;
             self.input_mode = InputMode::AddPaneAgent;
             self.input_label = "Select agent".to_string();
@@ -959,7 +959,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.input_mode = InputMode::AddPaneAgent;
             self.input_label = "Select agent (repo auto-selected)".to_string();
             self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
-            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Terminal".into()];
+            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Droid".into(), "Terminal".into()];
         }
     }
 
@@ -967,7 +967,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let agent = match self.add_pane_index {
             0 => Some("claude".to_string()),
             1 => Some("codex".to_string()),
-            2 => Some("terminal".to_string()),
+            2 => Some("droid".to_string()),
+            3 => Some("terminal".to_string()),
             _ => Some("claude".to_string()),
         };
         self.pending_add_pane.agent = agent;

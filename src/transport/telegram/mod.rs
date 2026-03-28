@@ -546,7 +546,7 @@ impl TelegramAdapter {
                     }
                     _ if self.awaiting_response.contains_key(pane_id) => {
                         let &(_, _, engine) = self.awaiting_response.get(pane_id).unwrap();
-                        if engine == Engine::ClaudeCode {
+                        if engine == Engine::ClaudeCode || engine == Engine::Droid {
                             // JSONL will deliver response on a later poll — wait for it
                             None
                         } else {
