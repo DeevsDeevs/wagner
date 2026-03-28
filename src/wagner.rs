@@ -285,6 +285,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if self.store.task_exists(task_name) {
             let session_name = session_name_for_task(task_name);
             if self.terminal.session_exists(task_name)? {
+                // Session is alive — resume any dead agents and attach
                 match self.resume_dead_agents(task_name) {
                     Ok(n) if n > 0 => {
                         debug!(count = n, "Resumed dead agents");
@@ -293,7 +294,27 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 }
                 return self.terminal.attach(&SessionHandle(session_name));
             }
-            self.store.delete_task(task_name)?;
+
+            // Session is dead but task exists — recreate session, preserve task data
+            let mut task = self.store.load_task(task_name)?;
+            let repo = task
+                .repos
+                .first()
+                .cloned()
+                .ok_or_else(|| WagnerError::Terminal("Task has no repos".into()))?;
+
+            let session = self.terminal.create_session(task_name, &repo.worktree)?;
+
+            // Clear stale pane tracking and relaunch agent in recreated session
+            task.panes.clear();
+            if let Ok(panes) = self.terminal.list_panes(&session)
+                && let Some(pane) = panes.first()
+            {
+                self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine)?;
+            }
+
+            self.store.save_task(&task)?;
+            return self.terminal.attach(&session);
         }
 
         let branch = crate::attach::get_current_branch(&cwd).unwrap_or_else(|| "none".to_string());
