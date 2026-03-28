@@ -18,6 +18,7 @@ pub enum Engine {
     ClaudeCode,
     Codex,
     Terminal,
+    Droid,
 }
 
 impl Engine {
@@ -26,6 +27,7 @@ impl Engine {
             Engine::ClaudeCode => format!("claude --resume {session_id}"),
             Engine::Codex => "codex".to_string(),
             Engine::Terminal => String::new(),
+            Engine::Droid => format!("droid --resume {session_id}"),
         }
     }
 
@@ -34,6 +36,7 @@ impl Engine {
             Engine::ClaudeCode => format!("claude --session-id {session_id}"),
             Engine::Codex => "codex".to_string(),
             Engine::Terminal => String::new(),
+            Engine::Droid => "droid".to_string(),
         }
     }
 
@@ -42,6 +45,7 @@ impl Engine {
             Engine::ClaudeCode => "claude",
             Engine::Codex => "codex",
             Engine::Terminal => "",
+            Engine::Droid => "droid",
         }
     }
 
@@ -50,6 +54,7 @@ impl Engine {
             Engine::ClaudeCode => 5,
             Engine::Codex => 100,
             Engine::Terminal => 10,
+            Engine::Droid => 5,
         }
     }
 }
@@ -353,5 +358,86 @@ mod tests {
         let pane: TrackedPane = serde_json::from_str(json).unwrap();
         assert_eq!(pane.name, "");
         assert_eq!(pane.repo_name, "api");
+    }
+
+    // --- Engine::Droid tests ---
+
+    #[test]
+    fn engine_launch_command_droid() {
+        assert_eq!(Engine::Droid.launch_command("ses-123"), "droid");
+    }
+
+    #[test]
+    fn engine_resume_command_droid() {
+        assert_eq!(
+            Engine::Droid.resume_command("ses-123"),
+            "droid --resume ses-123"
+        );
+    }
+
+    #[test]
+    fn engine_process_name_droid() {
+        assert_eq!(Engine::Droid.process_name(), "droid");
+    }
+
+    #[test]
+    fn engine_enter_delay_ms_droid() {
+        assert_eq!(Engine::Droid.enter_delay_ms(), 5);
+    }
+
+    #[test]
+    fn tracked_pane_serde_roundtrip_droid() {
+        let pane = TrackedPane {
+            name: "droid-api".into(),
+            repo_name: "api".into(),
+            engine: Engine::Droid,
+            session_id: "s1".into(),
+            pane_id: "%1".into(),
+            jsonl_path: PathBuf::from("pending-discovery"),
+            launched_at: Utc::now(),
+        };
+        let json = serde_json::to_string(&pane).unwrap();
+        assert!(json.contains(r#""engine":"droid""#));
+        let deserialized: TrackedPane = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.engine, Engine::Droid);
+        assert_eq!(deserialized.name, "droid-api");
+        assert_eq!(deserialized.repo_name, "api");
+    }
+
+    #[test]
+    fn engine_backward_compat_without_droid() {
+        // Existing task.json with only claude_code/codex/terminal still deserializes
+        let json = r#"{
+            "repo_name": "api",
+            "engine": "claude_code",
+            "session_id": "s1",
+            "pane_id": "%1",
+            "jsonl_path": "pending-discovery",
+            "launched_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let pane: TrackedPane = serde_json::from_str(json).unwrap();
+        assert_eq!(pane.engine, Engine::ClaudeCode);
+
+        let json_codex = r#"{
+            "repo_name": "api",
+            "engine": "codex",
+            "session_id": "s1",
+            "pane_id": "%1",
+            "jsonl_path": "pending-discovery",
+            "launched_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let pane_codex: TrackedPane = serde_json::from_str(json_codex).unwrap();
+        assert_eq!(pane_codex.engine, Engine::Codex);
+
+        let json_terminal = r#"{
+            "repo_name": "api",
+            "engine": "terminal",
+            "session_id": "s1",
+            "pane_id": "%1",
+            "jsonl_path": "pending-discovery",
+            "launched_at": "2026-01-01T00:00:00Z"
+        }"#;
+        let pane_terminal: TrackedPane = serde_json::from_str(json_terminal).unwrap();
+        assert_eq!(pane_terminal.engine, Engine::Terminal);
     }
 }

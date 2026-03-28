@@ -217,6 +217,7 @@ impl PaneWatcher {
             let event = match self.engine {
                 Engine::ClaudeCode => parse_claude_event(trimmed),
                 Engine::Codex => parse_codex_event(trimmed),
+                Engine::Droid => None,
                 Engine::Terminal => None,
             };
 

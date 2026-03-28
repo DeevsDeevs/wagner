@@ -994,6 +994,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let engine = match pending.agent.as_deref() {
             Some("codex") => Some(crate::model::Engine::Codex),
             Some("terminal") => Some(crate::model::Engine::Terminal),
+            Some("droid") => Some(crate::model::Engine::Droid),
             _ => None,
         };
         match self.wagner.add_pane_with_engine(

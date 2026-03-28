@@ -10,6 +10,7 @@ use crate::terminal::PaneHandle;
 pub enum AgentType {
     ClaudeCode,
     Codex,
+    Droid,
 }
 
 impl fmt::Display for AgentType {
@@ -17,6 +18,7 @@ impl fmt::Display for AgentType {
         match self {
             Self::ClaudeCode => write!(f, "claude"),
             Self::Codex => write!(f, "codex"),
+            Self::Droid => write!(f, "droid"),
         }
     }
 }
@@ -188,6 +190,7 @@ pub enum ActivityKind {
     Generic(GenericActivity),
     Claude(ClaudeActivity),
     Codex(CodexActivity),
+    Droid(DroidActivity),
 }
 
 impl ActivityKind {
@@ -196,6 +199,7 @@ impl ActivityKind {
             Self::Generic(a) => a.label(),
             Self::Claude(a) => a.label(),
             Self::Codex(a) => a.label(),
+            Self::Droid(a) => a.label(),
         }
     }
 
@@ -204,6 +208,7 @@ impl ActivityKind {
             Self::Generic(a) => a.icon(),
             Self::Claude(a) => a.icon(),
             Self::Codex(a) => a.icon(),
+            Self::Droid(a) => a.icon(),
         }
     }
 }
@@ -298,6 +303,29 @@ impl CodexActivity {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DroidActivity {
+    Working,
+    Thinking,
+}
+
+impl DroidActivity {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Working => "Working",
+            Self::Thinking => "Thinking",
+        }
+    }
+
+    pub fn icon(&self) -> char {
+        match self {
+            Self::Working => '●',
+            Self::Thinking => '◐',
+        }
+    }
+}
+
 pub const STUCK_THRESHOLD: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
@@ -364,5 +392,50 @@ impl SessionAggregateStatus {
             Self::Idle => "Idle",
             Self::Empty => "Empty",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_type_droid_display() {
+        assert_eq!(format!("{}", AgentType::Droid), "droid");
+    }
+
+    #[test]
+    fn droid_activity_labels() {
+        let working = DroidActivity::Working;
+        assert_eq!(working.label(), "Working");
+        assert_eq!(working.icon(), '●');
+
+        let thinking = DroidActivity::Thinking;
+        assert_eq!(thinking.label(), "Thinking");
+        assert_eq!(thinking.icon(), '◐');
+    }
+
+    #[test]
+    fn activity_kind_droid_delegates() {
+        let kind = ActivityKind::Droid(DroidActivity::Working);
+        assert_eq!(kind.label(), "Working");
+        assert_eq!(kind.icon(), '●');
+
+        let kind = ActivityKind::Droid(DroidActivity::Thinking);
+        assert_eq!(kind.label(), "Thinking");
+        assert_eq!(kind.icon(), '◐');
+    }
+
+    #[test]
+    fn droid_activity_serde_roundtrip() {
+        let kind = ActivityKind::Droid(DroidActivity::Working);
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: ActivityKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(kind, back);
+
+        let kind = ActivityKind::Droid(DroidActivity::Thinking);
+        let json = serde_json::to_string(&kind).unwrap();
+        let back: ActivityKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(kind, back);
     }
 }

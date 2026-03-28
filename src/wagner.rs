@@ -62,6 +62,7 @@ pub fn add_pane_shared(
             let base = match engine_type {
                 Engine::ClaudeCode => format!("claude-{}", repo.name),
                 Engine::Codex => format!("codex-{}", repo.name),
+                Engine::Droid => format!("droid-{}", repo.name),
                 Engine::Terminal => repo.name.clone(),
             };
             task.next_pane_name(&base)
@@ -572,6 +573,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 let base = match engine_type {
                     Engine::ClaudeCode => format!("claude-{}", repo.name),
                     Engine::Codex => format!("codex-{}", repo.name),
+                    Engine::Droid => format!("droid-{}", repo.name),
                     Engine::Terminal => repo.name.clone(),
                 };
                 task.next_pane_name(&base)

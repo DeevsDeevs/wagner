@@ -371,11 +371,12 @@ pub fn execute(
             let engine_type = match agent.as_deref() {
                 Some("codex") => Engine::Codex,
                 Some("terminal") => Engine::Terminal,
+                Some("droid") => Engine::Droid,
                 Some("claude") | None => Engine::ClaudeCode,
                 Some(other) => {
                     return CoreResponse::Error {
                         message: format!(
-                            "Unknown agent type '{other}'. Use claude, codex, or terminal."
+                            "Unknown agent type '{other}'. Use claude, codex, droid, or terminal."
                         ),
                     };
                 }
@@ -415,6 +416,7 @@ pub fn execute(
                     let label = match engine_type {
                         Engine::ClaudeCode => "Claude",
                         Engine::Codex => "Codex",
+                        Engine::Droid => "Droid",
                         Engine::Terminal => "terminal",
                     };
                     CoreResponse::Confirmation {

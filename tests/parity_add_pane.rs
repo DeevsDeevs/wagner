@@ -154,6 +154,7 @@ fn engine_to_agent_string(engine: Engine) -> Option<&'static str> {
     match engine {
         Engine::ClaudeCode => Some("claude"),
         Engine::Codex => Some("codex"),
+        Engine::Droid => Some("droid"),
         Engine::Terminal => Some("terminal"),
     }
 }
