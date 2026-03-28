@@ -1,0 +1,36 @@
+{
+  "milestone": "critical-fixes",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-PANE-001",
+    "VAL-PANE-002",
+    "VAL-PANE-003",
+    "VAL-PANE-004",
+    "VAL-PANE-005",
+    "VAL-PANE-006",
+    "VAL-PANE-007",
+    "VAL-PANE-008",
+    "VAL-PANE-009",
+    "VAL-PANE-010",
+    "VAL-PANE-011",
+    "VAL-PANE-012",
+    "VAL-PANE-013"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added Flow Validator Guidance: cargo-test section with isolation/concurrency rules for this validation surface.",
+      "source": "setup"
+    }
+  ],
+  "previousRound": null
+}

@@ -25,3 +25,10 @@ Existing tests use:
 ## No Interactive Testing
 
 There is no running application to interact with. All behavioral assertions are verified through the test suite. The "user testing" validator should run `devbox run cargo test` and `devbox run cargo clippy` and verify they pass.
+
+## Flow Validator Guidance: cargo-test
+
+- Isolation boundary: validators must stay inside `/Users/deevs/programming/agents/wagner` and only run cargo-based validation commands.
+- Shared state constraints: do not run concurrent cargo validators; this repo uses a shared target directory and lock files.
+- Required command surface: use `devbox run cargo test` as the primary assertion tool. Use targeted tests only for diagnosis, but finalize with full test command output in the flow report.
+- Evidence location: write assertion evidence and command transcripts under the assigned mission evidence directory only.
