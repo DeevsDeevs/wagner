@@ -1,0 +1,60 @@
+{
+  "milestone": "droid-support",
+  "round": 1,
+  "status": "fail",
+  "assertionsSummary": {
+    "total": 33,
+    "passed": 32,
+    "failed": 1,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-CROSS-001",
+    "VAL-CROSS-003",
+    "VAL-CROSS-004",
+    "VAL-DROID-001",
+    "VAL-DROID-002",
+    "VAL-DROID-003",
+    "VAL-DROID-004",
+    "VAL-DROID-005",
+    "VAL-DROID-006",
+    "VAL-DROID-007",
+    "VAL-DROID-008",
+    "VAL-DROID-009",
+    "VAL-DROID-010",
+    "VAL-DROID-011",
+    "VAL-DROID-012",
+    "VAL-DROID-013",
+    "VAL-DROID-014",
+    "VAL-DROID-015",
+    "VAL-DROID-016",
+    "VAL-DROID-017",
+    "VAL-DROID-018",
+    "VAL-DROID-019",
+    "VAL-DROID-020",
+    "VAL-DROID-021",
+    "VAL-DROID-022",
+    "VAL-DROID-023",
+    "VAL-DROID-024",
+    "VAL-DROID-025",
+    "VAL-DROID-026",
+    "VAL-DROID-027",
+    "VAL-DROID-028",
+    "VAL-DROID-029"
+  ],
+  "failedAssertions": [
+    {
+      "id": "VAL-CROSS-002",
+      "reason": "Implementation does not satisfy assertion: daemon health-check resume path uses `send_keys` instead of `send_text_enter` with `tracked.engine.enter_delay_ms()`."
+    }
+  ],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added cargo argument passthrough guidance: use `devbox run -- cargo ...` for test-binary flags like `-- --exact`.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}
