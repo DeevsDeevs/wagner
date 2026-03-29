@@ -52,7 +52,7 @@ pub fn run(cli: Cli) -> Result<()> {
             workspace.as_deref(),
         ),
         Some(Commands::List) => cmd_list(&wagner),
-        Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
+        Some(Commands::Delete { name, yes, delete_branches }) => cmd_delete(&wagner, &name, yes, delete_branches),
         Some(Commands::Add { .. }) => unreachable!(),
         Some(Commands::RenamePane {
             task,
@@ -66,8 +66,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
         Some(Commands::Update { check }) => cmd_update(check),
-        Some(Commands::Repair { dry_run, execute }) => {
-            cmd_repair(&wagner.config, !execute || dry_run)
+        Some(Commands::Repair { execute }) => {
+            cmd_repair(&wagner.config, !execute)
         }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
@@ -234,12 +234,12 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: bool) -> Result<()> {
-    debug!(task = %name, force = %force, "Deleting task");
+fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, skip_confirm: bool, delete_branches: bool) -> Result<()> {
+    debug!(task = %name, skip_confirm = %skip_confirm, delete_branches = %delete_branches, "Deleting task");
 
-    if !force {
+    if !skip_confirm {
         println!("Delete task '{}'? This will remove worktrees.", name);
-        println!("Use --force to also delete branches.");
+        println!("Use --yes to skip this prompt, --delete-branches to also remove branches.");
         print!("Continue? [y/N] ");
 
         use std::io::{self, Write};
@@ -255,7 +255,7 @@ fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: b
         }
     }
 
-    wagner.delete_task(name, force)?;
+    wagner.delete_task(name, delete_branches)?;
     info!(task = %name, "Task deleted");
     println!("Deleted task: {}", name);
 

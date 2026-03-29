@@ -495,6 +495,12 @@ impl SessionWatcher {
             watcher.path_changed = false;
         }
     }
+
+    /// Inject a pane status for testing purposes.
+    #[doc(hidden)]
+    pub fn inject_pane_status(&mut self, pane_id: &str, status: PaneStatus) {
+        self.pane_statuses.insert(pane_id.to_string(), status);
+    }
 }
 
 #[cfg(test)]

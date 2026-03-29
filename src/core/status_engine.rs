@@ -311,6 +311,12 @@ impl StatusEngine {
     pub fn take_path_updates(&mut self) -> Vec<(String, PathBuf)> {
         self.watcher.take_path_updates()
     }
+
+    /// Inject a pane status for testing purposes.
+    #[doc(hidden)]
+    pub fn inject_pane_status(&mut self, pane_id: &str, status: PaneStatus) {
+        self.watcher.inject_pane_status(pane_id, status);
+    }
 }
 
 fn resolve_pane_name(task: &Task, pane_id: &str, fallback_title: &str) -> String {

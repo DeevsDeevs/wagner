@@ -560,24 +560,36 @@ fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task])
         }
     }
 
-    match waiting_panes.len() {
-        0 => CoreResponse::Error {
+    if waiting_panes.is_empty() {
+        return CoreResponse::Error {
             message: "No panes are waiting for approval.".into(),
-        },
-        1 => {
-            let (task_name, pane_id, _) = &waiting_panes[0];
-            let handle = PaneHandle(pane_id.clone(), String::new());
-            if let Err(e) = send_approve_to_pane(terminal, &handle) {
-                return CoreResponse::Error { message: e };
+        };
+    }
+
+    let mut approved: Vec<String> = vec![];
+    let mut errors: Vec<String> = vec![];
+
+    for (task_name, pane_id, _) in &waiting_panes {
+        let handle = PaneHandle(pane_id.clone(), String::new());
+        match send_approve_to_pane(terminal, &handle) {
+            Ok(()) => {
+                let display_pane = resolve_pane_display_name(tasks, task_name, pane_id);
+                approved.push(format!("{task_name} | {display_pane}"));
             }
-            let display_pane = resolve_pane_display_name(tasks, task_name, pane_id);
-            CoreResponse::Confirmation {
-                message: format!("Approved {task_name} | {display_pane}"),
+            Err(e) => {
+                errors.push(e);
             }
         }
-        _ => CoreResponse::Confirmation {
-            message: format!("{} panes waiting for approval.", waiting_panes.len()),
-        },
+    }
+
+    if approved.is_empty() {
+        return CoreResponse::Error {
+            message: format!("Failed to approve any panes: {}", errors.join("; ")),
+        };
+    }
+
+    CoreResponse::Confirmation {
+        message: format!("Approved {} pane(s): {}", approved.len(), approved.join(", ")),
     }
 }
 
