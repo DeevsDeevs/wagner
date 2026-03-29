@@ -57,33 +57,33 @@ mod tests {
 
     #[test]
     fn cwd_to_project_id_basic() {
-        let cwd = Path::new("/Users/deevs/programming/agents");
-        assert_eq!(cwd_to_project_id(cwd), "-Users-deevs-programming-agents");
+        let cwd = Path::new("/Users/foo/programming/agents");
+        assert_eq!(cwd_to_project_id(cwd), "-Users-foo-programming-agents");
     }
 
     #[test]
     fn cwd_to_project_id_dotfiles() {
-        let cwd = Path::new("/Users/deevs/.ssh");
-        assert_eq!(cwd_to_project_id(cwd), "-Users-deevs--ssh");
+        let cwd = Path::new("/Users/foo/.ssh");
+        assert_eq!(cwd_to_project_id(cwd), "-Users-foo--ssh");
     }
 
     #[test]
     fn cwd_to_project_id_dots_in_path() {
-        let cwd = Path::new("/Users/deevs/.local/share/chezmoi");
-        assert_eq!(cwd_to_project_id(cwd), "-Users-deevs--local-share-chezmoi");
+        let cwd = Path::new("/Users/foo/.local/share/chezmoi");
+        assert_eq!(cwd_to_project_id(cwd), "-Users-foo--local-share-chezmoi");
     }
 
     #[test]
     fn predict_jsonl_path_structure() {
         let agent = ClaudeCode::new();
-        let cwd = Path::new("/Users/deevs/programming/agents");
+        let cwd = Path::new("/Users/foo/programming/agents");
         let session_id = "abc-123";
         let path = agent.predict_jsonl_path(session_id, cwd).unwrap();
         assert!(path.to_string_lossy().contains(".claude/projects/"));
         assert!(path.to_string_lossy().contains("abc-123.jsonl"));
         assert!(
             path.to_string_lossy()
-                .contains("-Users-deevs-programming-agents")
+                .contains("-Users-foo-programming-agents")
         );
     }
 

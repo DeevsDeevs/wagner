@@ -30,6 +30,8 @@ target
 .cargo/
 .claude/
 .codex/
+.wagner/
+.factory/validation/
 /result
 
 # Log files

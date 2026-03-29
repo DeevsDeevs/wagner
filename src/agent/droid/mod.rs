@@ -63,10 +63,10 @@ mod tests {
 
     #[test]
     fn cwd_to_project_id_deep_path() {
-        let cwd = Path::new("/Users/deevs/programming/agents/wagner");
+        let cwd = Path::new("/Users/foo/programming/agents/wagner");
         assert_eq!(
             cwd_to_project_id(cwd),
-            "-Users-deevs-programming-agents-wagner"
+            "-Users-foo-programming-agents-wagner"
         );
     }
 
@@ -91,13 +91,12 @@ mod tests {
     #[test]
     fn predict_jsonl_path_full_structure() {
         let agent = Droid::new();
-        let cwd = Path::new("/Users/deevs/programming/agents");
+        let cwd = Path::new("/Users/foo/programming/agents");
         let session_id = "ses-456";
         let path = agent.predict_jsonl_path(session_id, cwd).unwrap();
         let path_str = path.to_string_lossy();
-        // Should be: {HOME}/.factory/sessions/-Users-deevs-programming-agents/ses-456.jsonl
         assert!(path_str.contains(".factory/sessions/"));
-        assert!(path_str.contains("-Users-deevs-programming-agents"));
+        assert!(path_str.contains("-Users-foo-programming-agents"));
         assert!(path_str.ends_with("ses-456.jsonl"));
     }
 
