@@ -1,0 +1,15 @@
+{
+  "featureId": "fix-detect-task-and-debounce",
+  "reviewedAt": "2026-03-29T00:26:15Z",
+  "commitId": "a3d4baa0946297fbf25ac9ec1ea72bf00ad32e33",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation matches the feature requirements. `detect_task_from_cwd` now delegates to `detect_task_for_cwd`, which checks both managed tasks under `tasks_root` and attached-task registry entries. Session debounce logic now applies a 100ms threshold for `NeedsAttention` while keeping 1s for other statuses. Added integration tests cover attached-task detection (including subdirectories, missing registry, and stale entries) and validate that `NeedsAttention` emits quickly while `Working` still respects normal debounce.",
+    "issues": []
+  },
+  "sharedStateObservations": [],
+  "addressesFailureFrom": null,
+  "summary": "Reviewed handoff, transcript skeleton, skill procedure, and commit diff for `fix-detect-task-and-debounce`. The code changes and tests satisfy expected behavior for attached-task detection and NeedsAttention debounce behavior; no blocking or non-blocking issues were identified."
+}

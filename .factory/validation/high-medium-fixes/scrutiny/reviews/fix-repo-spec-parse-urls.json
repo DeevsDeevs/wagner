@@ -1,0 +1,28 @@
+{
+  "featureId": "fix-repo-spec-parse-urls",
+  "reviewedAt": "2026-03-29T00:25:45Z",
+  "commitId": "e818150d113376d810112463b632970c637ff474",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The feature replaces naive colon splitting with URL-aware parsing and adds broad tests, but there is a blocking parsing bug: scheme-based URLs with port numbers are incorrectly split as if the port/path were a branch.",
+    "issues": [
+      {
+        "file": "src/wagner.rs",
+        "line": 1209,
+        "severity": "blocking",
+        "description": "In split_source_and_branch(), scheme URLs use the last ':' after '://' as the branch delimiter. This misparses valid URLs containing a port (e.g., `myrepo:https://github.com:8443/org/repo`) into source `https://github.com` and branch `8443/org/repo` even when no branch is provided. This violates the requirement that only a ':' not part of the URL should delimit branch."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-worker skill requires RED-first testing (write failing tests before implementation), but this session implemented parser changes before adding tests. The skill feedback still marked followedProcedure=true, so procedure adherence guidance appears under-enforced.",
+      "evidence": "Transcript skeleton: assistant states \"Let me write the fix first\" and performs Edit on src/wagner.rs before adding tests; no prior failing test run is shown."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Review failed due to a blocking URL parsing defect: scheme URLs with ports are treated as having a branch. The rest of the change is directionally correct, but this edge case breaks the stated delimiter rule."
+}
