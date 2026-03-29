@@ -50,8 +50,7 @@ async fn run_select_loop(
 #[tokio::test]
 async fn test_daemon_ipc_immediate_response() {
     let very_long_poll = Duration::from_secs(10);
-    let (ipc_tx, ipc_rx) =
-        mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
+    let (ipc_tx, ipc_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
 
     // Run the select loop in a background task
     let loop_handle = tokio::spawn(run_select_loop(ipc_rx, very_long_poll, 1));
@@ -97,8 +96,7 @@ async fn test_daemon_ipc_immediate_response() {
 async fn test_daemon_ipc_multiple_commands_processed_promptly() {
     let very_long_poll = Duration::from_secs(10);
     let num_commands = 5;
-    let (ipc_tx, ipc_rx) =
-        mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
+    let (ipc_tx, ipc_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
 
     let loop_handle = tokio::spawn(run_select_loop(ipc_rx, very_long_poll, num_commands));
 
@@ -148,8 +146,7 @@ async fn test_daemon_ipc_multiple_commands_processed_promptly() {
 #[tokio::test]
 async fn test_daemon_tick_still_fires_at_poll_interval() {
     let poll_interval = Duration::from_millis(50);
-    let (_ipc_tx, mut ipc_rx) =
-        mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
+    let (_ipc_tx, mut ipc_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
 
     let mut tick_count = 0u32;
     let target_ticks = 3;
@@ -205,8 +202,7 @@ async fn test_ipc_socket_roundtrip_not_gated_by_poll() {
     let sock = dir.path().join("test.sock");
     let listener = UnixListener::bind(&sock).unwrap();
 
-    let (cmd_tx, ipc_rx) =
-        mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
+    let (cmd_tx, ipc_rx) = mpsc::channel::<(CoreCommand, oneshot::Sender<CoreResponse>)>(32);
 
     // Spawn the IPC server
     tokio::spawn(run_ipc_server(listener, cmd_tx));

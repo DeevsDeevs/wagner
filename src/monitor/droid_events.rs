@@ -200,12 +200,22 @@ fn extract_text_content(content: &[serde_json::Value]) -> String {
 fn extract_tool_context(tool_name: &str, tool_block: &serde_json::Value) -> Option<String> {
     let input = tool_block.get("input")?;
     match tool_name {
-        "AskUserQuestion" => {
-            let questions = input.get("questions")?.as_array()?;
-            let first_q = questions.first()?.get("question")?.as_str()?;
-            Some(first_q.to_string())
+        "AskUserQuestion" | "AskUser" => {
+            if let Some(questions) = input.get("questions").and_then(|v| v.as_array()) {
+                let first_q = questions.first()?.get("question")?.as_str()?;
+                return Some(first_q.to_string());
+            }
+            if let Some(q) = input.get("questionnaire").and_then(|v| v.as_str()) {
+                let truncated: String = q.chars().take(100).collect();
+                return Some(if q.chars().count() > 100 {
+                    format!("{truncated}...")
+                } else {
+                    truncated
+                });
+            }
+            None
         }
-        "Bash" => {
+        "Bash" | "Execute" => {
             let cmd = input.get("command")?.as_str()?;
             if cmd.chars().count() > 100 {
                 let truncated: String = cmd.chars().take(100).collect();
@@ -214,12 +224,40 @@ fn extract_tool_context(tool_name: &str, tool_block: &serde_json::Value) -> Opti
                 Some(cmd.to_string())
             }
         }
-        "Read" | "Edit" | "Write" => {
+        "Read" | "Edit" | "MultiEdit" | "Write" | "Create" => {
             let path = input
                 .get("file_path")
                 .or(input.get("path"))
                 .and_then(|v| v.as_str())?;
             Some(path.to_string())
+        }
+        "Grep" | "Glob" => {
+            let pattern = input
+                .get("pattern")
+                .or(input.get("patterns"))
+                .and_then(|v| v.as_str())?;
+            Some(pattern.to_string())
+        }
+        "WebSearch" => {
+            let query = input.get("query")?.as_str()?;
+            Some(query.to_string())
+        }
+        "FetchUrl" => {
+            let url = input.get("url")?.as_str()?;
+            Some(url.to_string())
+        }
+        "Task" => {
+            let desc = input.get("description")?.as_str()?;
+            Some(desc.to_string())
+        }
+        "Skill" => {
+            let skill = input.get("skill")?.as_str()?;
+            Some(skill.to_string())
+        }
+        "TodoWrite" => Some("updating todos".to_string()),
+        "LS" => {
+            let dir = input.get("directory_path")?.as_str()?;
+            Some(dir.to_string())
         }
         _ => None,
     }
@@ -247,7 +285,8 @@ mod tests {
 
     #[test]
     fn parse_session_start() {
-        let line = r#"{"type":"session_start","id":"sess-abc-123","model":"claude-opus-4-20250514"}"#;
+        let line =
+            r#"{"type":"session_start","id":"sess-abc-123","model":"claude-opus-4-20250514"}"#;
         let event = parse_droid_event(line).unwrap();
         assert_eq!(
             event,
@@ -485,14 +524,14 @@ mod tests {
 
     #[test]
     fn parse_tool_proposed_unknown_tool_no_context() {
-        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"WebSearch","input":{"query":"rust async"}}]}}"#;
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"SomeCustomTool","input":{"data":"stuff"}}]}}"#;
         let event = parse_droid_event(line).unwrap();
         assert_eq!(
             event,
             AgentEvent::ToolProposed {
                 engine: Engine::Droid,
                 tool_id: "t1".to_string(),
-                tool_name: "WebSearch".to_string(),
+                tool_name: "SomeCustomTool".to_string(),
                 tool_context: None,
                 question_data: None,
             }
@@ -601,7 +640,8 @@ mod tests {
 
     #[test]
     fn parse_todo_state() {
-        let line = r#"{"type":"todo_state","todos":[{"id":"1","text":"Fix bug","status":"completed"}]}"#;
+        let line =
+            r#"{"type":"todo_state","todos":[{"id":"1","text":"Fix bug","status":"completed"}]}"#;
         let event = parse_droid_event(line).unwrap();
         assert_eq!(event, AgentEvent::Progress);
     }
@@ -725,5 +765,161 @@ mod tests {
                 question_data: None,
             }
         );
+    }
+
+    // --- Droid-specific tool context extraction ---
+
+    #[test]
+    fn parse_execute_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Execute","input":{"command":"cargo build"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        assert_eq!(
+            event,
+            AgentEvent::ToolProposed {
+                engine: Engine::Droid,
+                tool_id: "t1".to_string(),
+                tool_name: "Execute".to_string(),
+                tool_context: Some("cargo build".to_string()),
+                question_data: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_create_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Create","input":{"file_path":"/tmp/new.rs","content":"fn main() {}"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("/tmp/new.rs".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_multi_edit_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"MultiEdit","input":{"file_path":"/src/lib.rs","edits":[]}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("/src/lib.rs".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_grep_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Grep","input":{"pattern":"fn main"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("fn main".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_glob_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Glob","input":{"patterns":"**/*.rs"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("**/*.rs".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_web_search_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"WebSearch","input":{"query":"rust async patterns"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("rust async patterns".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_fetch_url_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"FetchUrl","input":{"url":"https://docs.rs"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("https://docs.rs".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_task_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"worker","description":"research code","prompt":"explore the repo"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("research code".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_skill_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Skill","input":{"skill":"browser-navigation"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("browser-navigation".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_todo_write_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":"1. [completed] Done\n2. [in_progress] Working"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("updating todos".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ls_tool_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"LS","input":{"directory_path":"/src"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed { tool_context, .. } => {
+                assert_eq!(tool_context, Some("/src".to_string()));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_ask_user_questionnaire_context() {
+        let line = r#"{"type":"message","message":{"role":"assistant","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"AskUser","input":{"questionnaire":"1. [question] Which approach?\n[option] A\n[option] B"}}]}}"#;
+        let event = parse_droid_event(line).unwrap();
+        match event {
+            AgentEvent::ToolProposed {
+                tool_name,
+                tool_context,
+                ..
+            } => {
+                assert_eq!(tool_name, "AskUser");
+                assert!(tool_context.is_some());
+                assert!(tool_context.unwrap().starts_with("1. [question]"));
+            }
+            other => panic!("expected ToolProposed, got {other:?}"),
+        }
     }
 }

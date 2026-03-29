@@ -523,8 +523,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             for task in &self.tasks {
                 if task.panes.iter().any(|p| p.pane_id == pane_id) {
                     if let Ok(mut task) = self.wagner.store.load_task(&task.name)
-                        && let Some(tp) =
-                            task.panes.iter_mut().find(|p| p.pane_id == pane_id)
+                        && let Some(tp) = task.panes.iter_mut().find(|p| p.pane_id == pane_id)
                     {
                         tp.session_id = new_session_id;
                         tp.jsonl_path = new_path;
@@ -1013,7 +1012,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pending_add_pane = PendingAddPane::default();
         if task.repos.len() <= 1 {
             self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
-            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Droid".into(), "Terminal".into()];
+            self.add_pane_options = vec![
+                "Claude".into(),
+                "Codex".into(),
+                "Droid".into(),
+                "Terminal".into(),
+            ];
             self.add_pane_index = 0;
             self.input_mode = InputMode::AddPaneAgent;
             self.input_label = "Select agent".to_string();
@@ -1023,7 +1027,12 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.input_mode = InputMode::AddPaneAgent;
             self.input_label = "Select agent (repo auto-selected)".to_string();
             self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
-            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Droid".into(), "Terminal".into()];
+            self.add_pane_options = vec![
+                "Claude".into(),
+                "Codex".into(),
+                "Droid".into(),
+                "Terminal".into(),
+            ];
         }
     }
 
@@ -1265,10 +1274,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                     {
                         task.panes.retain(|p| p.pane_id != pane_id);
                         if let Err(e) = self.wagner.store.save_task(&task) {
-                            self.set_status(&format!(
-                                "Pane killed but failed to save: {}",
-                                e
-                            ));
+                            self.set_status(&format!("Pane killed but failed to save: {}", e));
                             self.selected_pane = None;
                             let _ = self.refresh_data();
                             return;

@@ -31,8 +31,10 @@ pub fn add_pane_shared(
     let task_name = &task.name;
     let session = SessionHandle(session_name_for_task(task_name));
 
+    let pane_cwd = &task.path;
+
     let created_session = if !terminal.session_exists(task_name)? {
-        terminal.create_session(task_name, &repo.worktree)?;
+        terminal.create_session(task_name, pane_cwd)?;
         true
     } else {
         false
@@ -45,7 +47,7 @@ pub fn add_pane_shared(
             .next()
             .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
     } else {
-        terminal.create_pane(&session, &repo.worktree)?
+        terminal.create_pane(&session, pane_cwd)?
     };
 
     let session_id = Uuid::new_v4().to_string();
@@ -133,9 +135,7 @@ pub fn resolve_repo(task: &Task, repo_name: Option<&str>) -> Result<TaskRepo> {
             .repos
             .first()
             .cloned()
-            .ok_or_else(|| {
-                WagnerError::Terminal("Task has no repos".into())
-            }),
+            .ok_or_else(|| WagnerError::Terminal("Task has no repos".into())),
     }
 }
 
@@ -576,18 +576,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         self.add_pane_with_engine(task_name, repo_name, pane_name, None)
     }
 
-    fn create_session_with_panes(
-        &self,
-        name: &str,
-        task: &mut Task,
-    ) -> Result<SessionHandle> {
-        let session_dir = task
-            .repos
-            .first()
-            .map(|r| r.worktree.clone())
-            .unwrap_or_else(|| task.path.clone());
-
-        let session = self.terminal.create_session(name, &session_dir)?;
+    fn create_session_with_panes(&self, name: &str, task: &mut Task) -> Result<SessionHandle> {
+        let session = self.terminal.create_session(name, &task.path)?;
 
         if task.repos.len() > 1 {
             let repos: Vec<_> = task.repos.clone();
@@ -1341,8 +1331,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_https_url() {
-        let spec =
-            RepoSpec::parse("myrepo:https://github.com/org/repo", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:https://github.com/org/repo", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1355,8 +1344,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_ssh_url() {
-        let spec =
-            RepoSpec::parse("myrepo:git@github.com:org/repo", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:git@github.com:org/repo", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1369,8 +1357,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_https_with_branch() {
-        let spec =
-            RepoSpec::parse("myrepo:https://github.com/org/repo:feat", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:https://github.com/org/repo:feat", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "feat");
         match &spec.source {
@@ -1383,8 +1370,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_ssh_with_branch() {
-        let spec =
-            RepoSpec::parse("myrepo:git@github.com:org/repo:main", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:git@github.com:org/repo:main", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1398,8 +1384,7 @@ mod tests {
     #[test]
     fn repo_spec_parse_local_path() {
         // Regression test: local paths continue to work
-        let spec =
-            RepoSpec::parse("myrepo:/path/to/repo:feature/branch", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:/path/to/repo:feature/branch", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "feature/branch");
         match &spec.source {
@@ -1426,8 +1411,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_local_path_with_default_branch() {
-        let spec =
-            RepoSpec::parse("myrepo:/path/to/repo", Some("develop")).unwrap();
+        let spec = RepoSpec::parse("myrepo:/path/to/repo", Some("develop")).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "develop");
     }
@@ -1440,8 +1424,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_http_url() {
-        let spec =
-            RepoSpec::parse("myrepo:http://gitlab.com/org/repo", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:http://gitlab.com/org/repo", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1454,8 +1437,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_http_url_with_branch() {
-        let spec =
-            RepoSpec::parse("myrepo:http://gitlab.com/org/repo:develop", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:http://gitlab.com/org/repo:develop", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "develop");
         match &spec.source {
@@ -1468,8 +1450,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_https_url_with_port() {
-        let spec =
-            RepoSpec::parse("myrepo:https://host:8443/org/repo", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:https://host:8443/org/repo", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1482,8 +1463,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_https_url_with_port_and_branch() {
-        let spec =
-            RepoSpec::parse("myrepo:https://host:8443/org/repo:develop", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:https://host:8443/org/repo:develop", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "develop");
         match &spec.source {
@@ -1496,8 +1476,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_http_url_with_port() {
-        let spec =
-            RepoSpec::parse("myrepo:http://gitlab.local:3000/org/repo", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:http://gitlab.local:3000/org/repo", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1524,8 +1503,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_git_url_with_port() {
-        let spec =
-            RepoSpec::parse("myrepo:git://host:9418/org/repo", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:git://host:9418/org/repo", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1539,8 +1517,7 @@ mod tests {
     #[test]
     fn repo_spec_parse_https_url_port_only_no_path() {
         // Edge case: URL with port but no path beyond authority
-        let spec =
-            RepoSpec::parse("myrepo:https://host:8443", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:https://host:8443", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "main");
         match &spec.source {
@@ -1553,8 +1530,7 @@ mod tests {
 
     #[test]
     fn repo_spec_parse_ssh_nested_path_with_branch() {
-        let spec =
-            RepoSpec::parse("myrepo:git@gitlab.com:org/sub/repo:release/v1", None).unwrap();
+        let spec = RepoSpec::parse("myrepo:git@gitlab.com:org/sub/repo:release/v1", None).unwrap();
         assert_eq!(spec.name, "myrepo");
         assert_eq!(spec.branch, "release/v1");
         match &spec.source {

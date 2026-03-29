@@ -28,9 +28,7 @@ pub fn detect_task_for_cwd(cwd: &Path, config: &Config) -> Option<String> {
         && let Ok(registry) = serde_json::from_str::<HashMap<String, PathBuf>>(&content)
     {
         for (name, task_path) in &registry {
-            if cwd.starts_with(task_path)
-                && task_path.join(".wagner").join("task.json").exists()
-            {
+            if cwd.starts_with(task_path) && task_path.join(".wagner").join("task.json").exists() {
                 return Some(name.clone());
             }
         }

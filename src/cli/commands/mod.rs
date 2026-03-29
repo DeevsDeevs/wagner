@@ -52,7 +52,11 @@ pub fn run(cli: Cli) -> Result<()> {
             workspace.as_deref(),
         ),
         Some(Commands::List) => cmd_list(&wagner),
-        Some(Commands::Delete { name, yes, delete_branches }) => cmd_delete(&wagner, &name, yes, delete_branches),
+        Some(Commands::Delete {
+            name,
+            yes,
+            delete_branches,
+        }) => cmd_delete(&wagner, &name, yes, delete_branches),
         Some(Commands::Add { .. }) => unreachable!(),
         Some(Commands::RenamePane {
             task,
@@ -66,9 +70,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
         Some(Commands::Update { check }) => cmd_update(check),
-        Some(Commands::Repair { execute }) => {
-            cmd_repair(&wagner.config, !execute)
-        }
+        Some(Commands::Repair { execute }) => cmd_repair(&wagner.config, !execute),
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
         Some(Commands::Claude { name }) => cmd_quick_launch(&wagner, Engine::ClaudeCode, name),
@@ -220,7 +222,12 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, skip_confirm: bool, delete_branches: bool) -> Result<()> {
+fn cmd_delete<T: Terminal, A: Agent>(
+    wagner: &Wagner<T, A>,
+    name: &str,
+    skip_confirm: bool,
+    delete_branches: bool,
+) -> Result<()> {
     debug!(task = %name, skip_confirm = %skip_confirm, delete_branches = %delete_branches, "Deleting task");
 
     if !skip_confirm {
@@ -457,7 +464,13 @@ fn cmd_sync(config: &Config, workspace: Option<&str>) -> Result<()> {
             use std::io::Write;
             let _ = std::io::stdout().flush();
             match std::process::Command::new("git")
-                .args(["-C", &repo_path.to_string_lossy(), "fetch", "--all", "--prune"])
+                .args([
+                    "-C",
+                    &repo_path.to_string_lossy(),
+                    "fetch",
+                    "--all",
+                    "--prune",
+                ])
                 .output()
             {
                 Ok(output) if output.status.success() => println!("done"),

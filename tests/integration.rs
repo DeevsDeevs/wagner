@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
 use wagner::config::Workspace;
-use wagner::{Config, MockTerminal, PaneHandle, RepoSource, RepoSpec, TaskKind, Terminal, TestAgent, Wagner};
+use wagner::{
+    Config, MockTerminal, PaneHandle, RepoSource, RepoSpec, TaskKind, Terminal, TestAgent, Wagner,
+};
 
 struct TestContext {
     _temp_dir: TempDir,
@@ -189,9 +191,16 @@ fn test_create_multi_repo_task() {
         "Should have sent launch command to 2 repo panes (no synthetic core pane)"
     );
 
-    assert_eq!(task.panes.len(), 2, "Should have 2 tracked panes (one per repo)");
+    assert_eq!(
+        task.panes.len(),
+        2,
+        "Should have 2 tracked panes (one per repo)"
+    );
     assert_eq!(task.panes[0].repo_name, "repo1", "First pane is first repo");
-    assert_eq!(task.panes[1].repo_name, "repo2", "Second pane is second repo");
+    assert_eq!(
+        task.panes[1].repo_name, "repo2",
+        "Second pane is second repo"
+    );
     assert!(!task.panes[0].session_id.is_empty());
     assert!(!task.panes[1].session_id.is_empty());
     assert_ne!(task.panes[0].session_id, task.panes[1].session_id);
@@ -950,7 +959,9 @@ fn test_detach_managed_task_rejected() {
         source: RepoSource::Local(ctx.repo_path.clone()),
         branch: "detach-guard-test".to_string(),
     };
-    wagner.create_task("managed-no-detach", &[spec], None).unwrap();
+    wagner
+        .create_task("managed-no-detach", &[spec], None)
+        .unwrap();
 
     // Verify the task exists and has a session
     let task_before = wagner.get_task("managed-no-detach").unwrap();
@@ -997,17 +1008,26 @@ fn test_detach_attached_task_succeeds() {
     let task = wagner.get_task("attached-detach-ok").unwrap();
     assert_eq!(task.kind, TaskKind::Attached);
     assert!(
-        wagner.terminal.session_exists("attached-detach-ok").unwrap(),
+        wagner
+            .terminal
+            .session_exists("attached-detach-ok")
+            .unwrap(),
         "Session should exist before detach"
     );
 
     // Detach should succeed
     let result = wagner.detach_task("attached-detach-ok");
-    assert!(result.is_ok(), "detach_task should succeed for attached tasks");
+    assert!(
+        result.is_ok(),
+        "detach_task should succeed for attached tasks"
+    );
 
     // Session should be killed
     assert!(
-        !wagner.terminal.session_exists("attached-detach-ok").unwrap(),
+        !wagner
+            .terminal
+            .session_exists("attached-detach-ok")
+            .unwrap(),
         "Session should be removed after successful detach"
     );
 
@@ -1039,8 +1059,16 @@ fn test_detach_managed_session_and_store_untouched() {
 
     // Verify store state is unchanged
     let task_after = wagner.get_task("guard-test").unwrap();
-    assert_eq!(task_after.panes.len(), panes_before, "Panes should be unchanged");
-    assert_eq!(task_after.kind, TaskKind::Managed, "Kind should be unchanged");
+    assert_eq!(
+        task_after.panes.len(),
+        panes_before,
+        "Panes should be unchanged"
+    );
+    assert_eq!(
+        task_after.kind,
+        TaskKind::Managed,
+        "Kind should be unchanged"
+    );
     assert_eq!(task_after.name, "guard-test", "Name should be unchanged");
 
     // Verify session still exists
