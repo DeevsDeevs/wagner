@@ -179,21 +179,7 @@ fn detect_git_repo() -> Option<(std::path::PathBuf, String)> {
 
 fn detect_task_from_cwd(config: &Config) -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
-    let tasks_root = &config.tasks_root;
-
-    if !cwd.starts_with(tasks_root) {
-        return None;
-    }
-
-    let relative = cwd.strip_prefix(tasks_root).ok()?;
-    let task_name = relative.components().next()?;
-
-    let task_dir = tasks_root.join(task_name);
-    if task_dir.join(".wagner").join("task.json").exists() {
-        Some(task_name.as_os_str().to_string_lossy().to_string())
-    } else {
-        None
-    }
+    wagner::store::detect_task_for_cwd(&cwd, config)
 }
 
 fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {

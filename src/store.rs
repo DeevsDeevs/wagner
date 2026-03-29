@@ -4,6 +4,40 @@ use crate::model::Task;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Resolve the task name for a given working directory by checking both the
+/// managed tasks directory and the attached-task registry.
+pub fn detect_task_for_cwd(cwd: &Path, config: &Config) -> Option<String> {
+    let tasks_root = &config.tasks_root;
+
+    // Check managed tasks under tasks_root
+    if cwd.starts_with(tasks_root)
+        && let Ok(relative) = cwd.strip_prefix(tasks_root)
+        && let Some(task_name) = relative.components().next()
+    {
+        let task_dir = tasks_root.join(task_name);
+        if task_dir.join(".wagner").join("task.json").exists() {
+            return Some(task_name.as_os_str().to_string_lossy().to_string());
+        }
+    }
+
+    // Check attached tasks from the registry
+    let registry_path = tasks_root.join(".attached_registry.json");
+    if registry_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&registry_path)
+        && let Ok(registry) = serde_json::from_str::<HashMap<String, PathBuf>>(&content)
+    {
+        for (name, task_path) in &registry {
+            if cwd.starts_with(task_path)
+                && task_path.join(".wagner").join("task.json").exists()
+            {
+                return Some(name.clone());
+            }
+        }
+    }
+
+    None
+}
+
 pub struct Store {
     config: Config,
 }
