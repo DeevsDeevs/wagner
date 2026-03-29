@@ -1,0 +1,21 @@
+{
+  "featureId": "fix-registry-file-locking",
+  "reviewedAt": "2026-03-29T09:59:36Z",
+  "commitId": "f0e83c7",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fix commit (f0e83c7) directly addresses the prior failure from fix-scrutiny-high-medium-quality by adding advisory locking around the full attached-registry read-modify-write critical section and by upgrading the registry concurrency test to real multi-threaded access. register_attached/unregister_attached now route through with_locked_registry, which acquires an exclusive flock before read, mutates under lock, writes under lock, and releases afterward. The prior commit’s remaining race (740cf3b: unique tmp files without read-modify-write locking) is therefore resolved.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-worker skill mandates RED-first testing, but this worker edited implementation before introducing/updating the failing concurrency test; handoff.skillFeedback still reports followedProcedure=true.",
+      "evidence": "Transcript skeleton for session c36f7efc-1f80-431b-b430-946108830c74 shows Edit calls in src/store.rs before the test rewrite in tests/git_and_persistence.rs; .factory/skills/rust-worker/SKILL.md step 3 requires writing failing tests first."
+    }
+  ],
+  "addressesFailureFrom": ".factory/validation/high-medium-fixes/scrutiny/reviews/fix-scrutiny-high-medium-quality.json",
+  "summary": "Reviewed fix-registry-file-locking as a rerun for the prior failed review. After examining both diffs (740cf3b and f0e83c7), the previously unresolved attached-registry lost-update race is now fixed via advisory locking across the entire read-modify-write section, and the concurrency test now exercises real parallel access. Status: pass."
+}
