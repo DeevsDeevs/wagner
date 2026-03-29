@@ -69,11 +69,18 @@ impl Store {
         }
         let content = serde_json::to_string_pretty(registry)?;
 
-        // Atomic write: write to a temporary file in the same directory,
-        // then rename. This prevents corruption from concurrent writes or
-        // crashes mid-write.
-        let tmp_path = path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, content)?;
+        // Atomic write: write to a uniquely-named temporary file in the same
+        // directory, then rename. Using PID + a monotonic counter ensures
+        // concurrent writers never clobber each other's temp files.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique = format!(
+            "json.tmp.{}.{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed),
+        );
+        let tmp_path = path.with_extension(unique);
+        std::fs::write(&tmp_path, &content)?;
         std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }

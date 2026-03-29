@@ -148,6 +148,10 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
     });
 
     let poll_interval = Duration::from_millis(config.daemon.poll_interval_ms);
+    let mut tick_interval = tokio::time::interval(poll_interval);
+    // The first tick fires immediately; consume it so the loop starts with a
+    // real wait period.
+    tick_interval.tick().await;
 
     loop {
         tokio::select! {
@@ -169,7 +173,7 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
                 );
                 let _ = resp_tx.send(response);
             }
-            _ = tokio::time::sleep(poll_interval) => {
+            _ = tick_interval.tick() => {
                 if let Err(e) = daemon_tick(&mut state, &mut adapter).await {
                     error!(%e, "daemon tick error");
                 }

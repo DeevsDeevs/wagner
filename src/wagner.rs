@@ -1198,16 +1198,24 @@ impl RepoSpec {
     ///
     /// Handles:
     /// - HTTPS/HTTP URLs: `https://host/path` or `https://host/path:branch`
+    /// - HTTPS/HTTP URLs with ports: `https://host:8443/path` or `https://host:8443/path:branch`
     /// - SSH URLs: `git@host:path` or `git@host:path:branch`
     /// - Local paths: `/path/to/repo` or `/path/to/repo:branch`
     fn split_source_and_branch(rest: &str) -> (&str, Option<&str>) {
         if rest.starts_with("https://") || rest.starts_with("http://") || rest.starts_with("git://")
         {
-            // For scheme-based URLs, find the scheme separator position
+            // For scheme-based URLs, find the authority section first.
             let scheme_end = rest.find("://").unwrap() + 3; // past "://"
-            // Look for ':' after the scheme — the last one is the branch delimiter
-            if let Some(last_colon) = rest[scheme_end..].rfind(':') {
-                let split_pos = scheme_end + last_colon;
+            // The authority ends at the first '/' after the scheme. The
+            // authority may contain a port (e.g., host:8443), so we must
+            // skip past it before looking for the branch delimiter ':'.
+            let path_start = rest[scheme_end..]
+                .find('/')
+                .map(|i| scheme_end + i)
+                .unwrap_or(rest.len());
+            // Only search for branch delimiter ':' in the path portion
+            if let Some(last_colon) = rest[path_start..].rfind(':') {
+                let split_pos = path_start + last_colon;
                 let source = &rest[..split_pos];
                 let branch = &rest[split_pos + 1..];
                 if !branch.is_empty() {
@@ -1453,6 +1461,91 @@ mod tests {
         match &spec.source {
             RepoSource::Remote(url) => {
                 assert_eq!(url, "http://gitlab.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_url_with_port() {
+        let spec =
+            RepoSpec::parse("myrepo:https://host:8443/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://host:8443/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_url_with_port_and_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:https://host:8443/org/repo:develop", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "develop");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://host:8443/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url_with_port() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.local:3000/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.local:3000/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url_with_port_and_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.local:3000/org/repo:feat/x", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "feat/x");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.local:3000/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_git_url_with_port() {
+        let spec =
+            RepoSpec::parse("myrepo:git://host:9418/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git://host:9418/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_url_port_only_no_path() {
+        // Edge case: URL with port but no path beyond authority
+        let spec =
+            RepoSpec::parse("myrepo:https://host:8443", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://host:8443");
             }
             _ => panic!("Expected remote source"),
         }
