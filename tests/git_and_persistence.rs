@@ -156,39 +156,84 @@ fn test_registry_atomic_write() {
 
 #[test]
 fn test_registry_concurrent_access() {
-    // Verify that multiple register/unregister operations don't corrupt the file.
+    // Spawn threads performing simultaneous register/unregister operations and
+    // assert that no entries are lost. The file lock in `with_locked_registry`
+    // serialises the read-modify-write critical section so every mutation is
+    // visible in the final state.
+    use std::sync::Arc;
+    use std::thread;
+
     let temp_dir = TempDir::new().unwrap();
     let tasks_root = temp_dir.path().join("tasks");
     std::fs::create_dir_all(&tasks_root).unwrap();
 
-    let config = Config {
-        tasks_root: tasks_root.clone(),
-        ..Config::default()
-    };
-    let store = Store::new(config);
+    let tasks_root = Arc::new(tasks_root);
+    let base_dir = Arc::new(temp_dir.path().to_path_buf());
 
-    // Register multiple tasks sequentially
+    // Spawn 10 threads, each registering its own task concurrently.
+    let mut handles = Vec::new();
     for i in 0..10 {
-        let task_path = temp_dir.path().join(format!("project-{}", i));
-        std::fs::create_dir_all(&task_path).unwrap();
-        store
-            .register_attached(&format!("task-{}", i), &task_path)
-            .expect("register should succeed");
+        let tasks_root = Arc::clone(&tasks_root);
+        let base_dir = Arc::clone(&base_dir);
+        handles.push(thread::spawn(move || {
+            let config = Config {
+                tasks_root: (*tasks_root).clone(),
+                ..Config::default()
+            };
+            let store = Store::new(config);
+            let task_path = base_dir.join(format!("project-{}", i));
+            std::fs::create_dir_all(&task_path).unwrap();
+            store
+                .register_attached(&format!("task-{}", i), &task_path)
+                .expect("register should succeed");
+        }));
     }
 
-    // Unregister some
-    for i in (0..10).step_by(2) {
-        store
-            .unregister_attached(&format!("task-{}", i))
-            .expect("unregister should succeed");
+    for h in handles {
+        h.join().expect("thread panicked");
     }
 
-    // Verify final state
+    // All 10 tasks must be present — no lost updates.
     let registry_path = tasks_root.join(".attached_registry.json");
     let content = std::fs::read_to_string(&registry_path).unwrap();
     let registry: HashMap<String, PathBuf> = serde_json::from_str(&content).unwrap();
+    assert_eq!(
+        registry.len(),
+        10,
+        "All 10 concurrent registrations must be present, got: {:?}",
+        registry.keys().collect::<Vec<_>>()
+    );
+    for i in 0..10 {
+        assert!(
+            registry.contains_key(&format!("task-{}", i)),
+            "task-{} should be in registry",
+            i
+        );
+    }
 
-    // Only odd-numbered tasks should remain
+    // Now concurrently unregister even-numbered tasks.
+    let mut handles = Vec::new();
+    for i in (0..10).step_by(2) {
+        let tasks_root = Arc::clone(&tasks_root);
+        handles.push(thread::spawn(move || {
+            let config = Config {
+                tasks_root: (*tasks_root).clone(),
+                ..Config::default()
+            };
+            let store = Store::new(config);
+            store
+                .unregister_attached(&format!("task-{}", i))
+                .expect("unregister should succeed");
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+
+    // Only odd-numbered tasks should remain.
+    let content = std::fs::read_to_string(&registry_path).unwrap();
+    let registry: HashMap<String, PathBuf> = serde_json::from_str(&content).unwrap();
     assert_eq!(registry.len(), 5);
     for i in (1..10).step_by(2) {
         assert!(
@@ -204,10 +249,6 @@ fn test_registry_concurrent_access() {
             i
         );
     }
-
-    // No tmp file left
-    let tmp_path = tasks_root.join(".attached_registry.json.tmp");
-    assert!(!tmp_path.exists(), "No leftover temp file");
 }
 
 // =============================================================================

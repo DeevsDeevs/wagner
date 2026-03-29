@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::error::{Result, WagnerError};
 use crate::model::Task;
 use std::collections::HashMap;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
 /// Resolve the task name for a given working directory by checking both the
@@ -85,16 +86,62 @@ impl Store {
         Ok(())
     }
 
-    pub fn register_attached(&self, name: &str, task_path: &Path) -> Result<()> {
+    /// Perform a locked read-modify-write on the attached registry file.
+    ///
+    /// Acquires an exclusive advisory lock (via `libc::flock`) on a `.lock`
+    /// sidecar file before reading, calls `mutate` to update the registry
+    /// in-place, then writes the result back. The lock is held for the entire
+    /// critical section so concurrent CLI/daemon processes cannot lose updates.
+    fn with_locked_registry<F>(&self, mutate: F) -> Result<()>
+    where
+        F: FnOnce(&mut HashMap<String, PathBuf>),
+    {
+        let registry_path = self.attached_registry_path();
+        if let Some(parent) = registry_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Use a sidecar .lock file for the advisory lock so we don't interfere
+        // with the atomic-rename write strategy on the main registry file.
+        let lock_path = registry_path.with_extension("json.lock");
+        let lock_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)?;
+
+        // Acquire exclusive lock — blocks until available.
+        let fd = lock_file.as_raw_fd();
+        let ret = unsafe { libc::flock(fd, libc::LOCK_EX) };
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+
+        // Read current registry (under lock).
         let mut registry = self.load_attached_registry();
-        registry.insert(name.to_string(), task_path.to_path_buf());
-        self.save_attached_registry(&registry)
+
+        // Let the caller mutate.
+        mutate(&mut registry);
+
+        // Write back (under lock).
+        let result = self.save_attached_registry(&registry);
+
+        // Release lock (explicit unlock before drop for clarity).
+        unsafe { libc::flock(fd, libc::LOCK_UN) };
+
+        result
+    }
+
+    pub fn register_attached(&self, name: &str, task_path: &Path) -> Result<()> {
+        self.with_locked_registry(|registry| {
+            registry.insert(name.to_string(), task_path.to_path_buf());
+        })
     }
 
     pub fn unregister_attached(&self, name: &str) -> Result<()> {
-        let mut registry = self.load_attached_registry();
-        registry.remove(name);
-        self.save_attached_registry(&registry)
+        self.with_locked_registry(|registry| {
+            registry.remove(name);
+        })
     }
 
     pub fn save_task(&self, task: &Task) -> Result<()> {
