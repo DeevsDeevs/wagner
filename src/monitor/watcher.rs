@@ -50,7 +50,7 @@ impl PaneWatcher {
             .with_approval_timeout(approval_timeout)
             .with_idle_threshold(idle_threshold);
 
-        let project_dir = if engine == Engine::ClaudeCode
+        let project_dir = if (engine == Engine::ClaudeCode || engine == Engine::Droid)
             && jsonl_path.as_os_str() != PENDING_DISCOVERY
         {
             jsonl_path.parent().map(PathBuf::from)
@@ -81,6 +81,16 @@ impl PaneWatcher {
         let file_len = match std::fs::metadata(&self.jsonl_path) {
             Ok(meta) => meta.len(),
             Err(_) => {
+                // Predicted file doesn't exist — try immediate discovery
+                // (e.g. Droid generates its own session ID, so the predicted
+                // filename is wrong but the directory is correct).
+                // Throttle to avoid read_dir spam on every poll cycle.
+                if self.project_dir.is_some()
+                    && self.last_data_at.elapsed() > Duration::from_secs(1)
+                {
+                    self.try_discover_newer_jsonl();
+                    self.last_data_at = Instant::now();
+                }
                 let status = self.deriver.tick();
                 return self.maybe_update(status);
             }
@@ -282,7 +292,8 @@ impl SessionWatcher {
                     if resolved.as_os_str() != PENDING_DISCOVERY {
                         watcher.jsonl_path = resolved;
                         if watcher.project_dir.is_none()
-                            && tracked.engine == Engine::ClaudeCode
+                            && (tracked.engine == Engine::ClaudeCode
+                                || tracked.engine == Engine::Droid)
                         {
                             watcher.project_dir =
                                 watcher.jsonl_path.parent().map(PathBuf::from);

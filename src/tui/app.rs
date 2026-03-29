@@ -461,6 +461,18 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 .list_panes(&SessionHandle(session_name.clone()))
             {
                 self.panes = panes;
+
+                // Override tmux directory titles with user-assigned pane names
+                if let Ok(task) = self.wagner.get_task(task_name) {
+                    for pane in &mut self.panes {
+                        if let Some(tracked) = task.panes.iter().find(|tp| tp.pane_id == pane.0)
+                            && !tracked.name.is_empty()
+                        {
+                            pane.1 = tracked.name.clone();
+                        }
+                    }
+                }
+
                 if self.selected_pane.is_none() && !self.panes.is_empty() {
                     self.pane_list_state.select(Some(0));
                     self.selected_pane = Some(self.panes[0].0.clone());
@@ -489,6 +501,37 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
 
                 self.poll_background_sessions(&session_name);
+
+                // Persist discovered JSONL paths (e.g. Droid session drift)
+                self.persist_path_updates();
+            }
+        }
+    }
+
+    fn persist_path_updates(&mut self) {
+        let updates = self.status_engine.take_path_updates();
+        for (pane_id, new_path) in updates {
+            let Some(new_session_id) = new_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+            else {
+                continue;
+            };
+            // Search all tasks, not just selected — background sessions can drift too
+            for task in &self.tasks {
+                if task.panes.iter().any(|p| p.pane_id == pane_id) {
+                    if let Ok(mut task) = self.wagner.store.load_task(&task.name)
+                        && let Some(tp) =
+                            task.panes.iter_mut().find(|p| p.pane_id == pane_id)
+                    {
+                        tp.session_id = new_session_id;
+                        tp.jsonl_path = new_path;
+                        let _ = self.wagner.store.save_task(&task);
+                    }
+                    break;
+                }
             }
         }
     }
