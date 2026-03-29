@@ -308,6 +308,20 @@ impl CodexActivity {
 pub enum DroidActivity {
     Working,
     Thinking,
+    Exploring,
+    ToolBash,
+    ToolEdit,
+    ToolCreate,
+    ToolRead,
+    ToolGrep,
+    ToolGlob,
+    Subagent,
+    WebSearch,
+    WebFetch,
+    TodoUpdate,
+    AskUser,
+    SkillInvoke,
+    VisualDesign,
 }
 
 impl DroidActivity {
@@ -315,6 +329,20 @@ impl DroidActivity {
         match self {
             Self::Working => "Working",
             Self::Thinking => "Thinking",
+            Self::Exploring => "Exploring",
+            Self::ToolBash => "Bash",
+            Self::ToolEdit => "Edit",
+            Self::ToolCreate => "Create",
+            Self::ToolRead => "Read",
+            Self::ToolGrep => "Grep",
+            Self::ToolGlob => "Glob",
+            Self::Subagent => "Subagent",
+            Self::WebSearch => "Web Search",
+            Self::WebFetch => "Web Fetch",
+            Self::TodoUpdate => "Todo",
+            Self::AskUser => "Ask User",
+            Self::SkillInvoke => "Skill",
+            Self::VisualDesign => "Design",
         }
     }
 
@@ -322,6 +350,20 @@ impl DroidActivity {
         match self {
             Self::Working => '●',
             Self::Thinking => '◐',
+            Self::Exploring => '◎',
+            Self::ToolBash => '⚡',
+            Self::ToolEdit => '✎',
+            Self::ToolCreate => '✐',
+            Self::ToolRead => '◈',
+            Self::ToolGrep => '⊕',
+            Self::ToolGlob => '⊙',
+            Self::Subagent => '◇',
+            Self::WebSearch => '◉',
+            Self::WebFetch => '◈',
+            Self::TodoUpdate => '☐',
+            Self::AskUser => '◉',
+            Self::SkillInvoke => '◆',
+            Self::VisualDesign => '◎',
         }
     }
 }
@@ -406,13 +448,28 @@ mod tests {
 
     #[test]
     fn droid_activity_labels() {
-        let working = DroidActivity::Working;
-        assert_eq!(working.label(), "Working");
-        assert_eq!(working.icon(), '●');
-
-        let thinking = DroidActivity::Thinking;
-        assert_eq!(thinking.label(), "Thinking");
-        assert_eq!(thinking.icon(), '◐');
+        let cases: Vec<(DroidActivity, &str, char)> = vec![
+            (DroidActivity::Working, "Working", '●'),
+            (DroidActivity::Thinking, "Thinking", '◐'),
+            (DroidActivity::Exploring, "Exploring", '◎'),
+            (DroidActivity::ToolBash, "Bash", '⚡'),
+            (DroidActivity::ToolEdit, "Edit", '✎'),
+            (DroidActivity::ToolCreate, "Create", '✐'),
+            (DroidActivity::ToolRead, "Read", '◈'),
+            (DroidActivity::ToolGrep, "Grep", '⊕'),
+            (DroidActivity::ToolGlob, "Glob", '⊙'),
+            (DroidActivity::Subagent, "Subagent", '◇'),
+            (DroidActivity::WebSearch, "Web Search", '◉'),
+            (DroidActivity::WebFetch, "Web Fetch", '◈'),
+            (DroidActivity::TodoUpdate, "Todo", '☐'),
+            (DroidActivity::AskUser, "Ask User", '◉'),
+            (DroidActivity::SkillInvoke, "Skill", '◆'),
+            (DroidActivity::VisualDesign, "Design", '◎'),
+        ];
+        for (activity, label, icon) in cases {
+            assert_eq!(activity.label(), label, "label mismatch for {:?}", activity);
+            assert_eq!(activity.icon(), icon, "icon mismatch for {:?}", activity);
+        }
     }
 
     #[test]
@@ -424,18 +481,37 @@ mod tests {
         let kind = ActivityKind::Droid(DroidActivity::Thinking);
         assert_eq!(kind.label(), "Thinking");
         assert_eq!(kind.icon(), '◐');
+
+        let kind = ActivityKind::Droid(DroidActivity::ToolBash);
+        assert_eq!(kind.label(), "Bash");
+        assert_eq!(kind.icon(), '⚡');
     }
 
     #[test]
     fn droid_activity_serde_roundtrip() {
-        let kind = ActivityKind::Droid(DroidActivity::Working);
-        let json = serde_json::to_string(&kind).unwrap();
-        let back: ActivityKind = serde_json::from_str(&json).unwrap();
-        assert_eq!(kind, back);
-
-        let kind = ActivityKind::Droid(DroidActivity::Thinking);
-        let json = serde_json::to_string(&kind).unwrap();
-        let back: ActivityKind = serde_json::from_str(&json).unwrap();
-        assert_eq!(kind, back);
+        let all_variants = vec![
+            DroidActivity::Working,
+            DroidActivity::Thinking,
+            DroidActivity::Exploring,
+            DroidActivity::ToolBash,
+            DroidActivity::ToolEdit,
+            DroidActivity::ToolCreate,
+            DroidActivity::ToolRead,
+            DroidActivity::ToolGrep,
+            DroidActivity::ToolGlob,
+            DroidActivity::Subagent,
+            DroidActivity::WebSearch,
+            DroidActivity::WebFetch,
+            DroidActivity::TodoUpdate,
+            DroidActivity::AskUser,
+            DroidActivity::SkillInvoke,
+            DroidActivity::VisualDesign,
+        ];
+        for variant in all_variants {
+            let kind = ActivityKind::Droid(variant);
+            let json = serde_json::to_string(&kind).unwrap();
+            let back: ActivityKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(kind, back, "serde roundtrip failed for {:?}", variant);
+        }
     }
 }

@@ -18,6 +18,7 @@ pub struct StatusDeriver {
     engine: Engine,
     state: DerivedState,
     pending_tool: Option<PendingTool>,
+    is_thinking: bool,
     last_event_time: Instant,
     last_context: Option<String>,
     approval_timeout: Duration,
@@ -49,6 +50,7 @@ impl StatusDeriver {
             engine,
             state: DerivedState::Idle,
             pending_tool: None,
+            is_thinking: false,
             last_event_time: Instant::now(),
             last_context: None,
             approval_timeout: Duration::from_millis(1000),
@@ -79,6 +81,7 @@ impl StatusDeriver {
             AgentEvent::UserMessage => {
                 self.state = DerivedState::Active;
                 self.pending_tool = None;
+                self.is_thinking = false;
                 self.completed_steps.clear();
                 self.response_text = None;
                 self.accumulated_text = None;
@@ -86,9 +89,11 @@ impl StatusDeriver {
             }
             AgentEvent::Thinking { .. } => {
                 self.state = DerivedState::Active;
+                self.is_thinking = true;
             }
             AgentEvent::TextOutput { text, .. } => {
                 self.state = DerivedState::Active;
+                self.is_thinking = false;
                 if !text.is_empty() {
                     self.accumulated_text = Some(text.clone());
                 }
@@ -101,6 +106,7 @@ impl StatusDeriver {
                 ..
             } => {
                 self.state = DerivedState::Active;
+                self.is_thinking = false;
                 self.last_context = tool_context.clone().or_else(|| Some(tool_name.clone()));
                 self.pending_tool = Some(PendingTool {
                     tool_id: tool_id.clone(),
@@ -146,6 +152,7 @@ impl StatusDeriver {
             AgentEvent::TurnComplete { response_text, .. } => {
                 self.state = DerivedState::Idle;
                 self.pending_tool = None;
+                self.is_thinking = false;
                 self.last_context = None;
                 if let Some(text) = response_text {
                     self.response_text = Some(text.clone());
@@ -232,6 +239,7 @@ impl StatusDeriver {
     pub fn reset(&mut self) {
         self.state = DerivedState::Idle;
         self.pending_tool = None;
+        self.is_thinking = false;
         self.last_event_time = Instant::now();
         self.last_context = None;
         self.clear_steps();
@@ -263,7 +271,13 @@ impl StatusDeriver {
         match self.engine {
             Engine::ClaudeCode => Activity::new(ActivityKind::Claude(ClaudeActivity::Thinking)),
             Engine::Codex => Activity::new(ActivityKind::Codex(CodexActivity::Working)),
-            Engine::Droid => Activity::new(ActivityKind::Droid(DroidActivity::Thinking)),
+            Engine::Droid => {
+                if self.is_thinking {
+                    Activity::new(ActivityKind::Droid(DroidActivity::Thinking))
+                } else {
+                    Activity::new(ActivityKind::Droid(DroidActivity::Exploring))
+                }
+            }
             Engine::Terminal => Activity::new(ActivityKind::Generic(GenericActivity::Working)),
         }
     }
@@ -286,7 +300,26 @@ fn tool_name_to_activity(engine: Engine, tool_name: &str) -> Activity {
             Activity::new(ActivityKind::Claude(kind))
         }
         Engine::Codex => Activity::new(ActivityKind::Codex(CodexActivity::Working)),
-        Engine::Droid => Activity::new(ActivityKind::Droid(DroidActivity::Working)),
+        Engine::Droid => {
+            let kind = match tool_name {
+                "Execute" => DroidActivity::ToolBash,
+                "Edit" | "MultiEdit" => DroidActivity::ToolEdit,
+                "Create" => DroidActivity::ToolCreate,
+                "Read" | "LS" => DroidActivity::ToolRead,
+                "Grep" => DroidActivity::ToolGrep,
+                "Glob" => DroidActivity::ToolGlob,
+                "Task" => DroidActivity::Subagent,
+                "WebSearch" => DroidActivity::WebSearch,
+                "FetchUrl" => DroidActivity::WebFetch,
+                "TodoWrite" => DroidActivity::TodoUpdate,
+                "AskUser" | "AskUserQuestion" => DroidActivity::AskUser,
+                "Skill" => DroidActivity::SkillInvoke,
+                "GenerateDroid" => DroidActivity::ToolCreate,
+                "ExitSpecMode" => DroidActivity::Working,
+                _ => DroidActivity::Exploring,
+            };
+            Activity::new(ActivityKind::Droid(kind))
+        }
         Engine::Terminal => Activity::new(ActivityKind::Generic(GenericActivity::Working)),
     }
 }
@@ -648,5 +681,192 @@ mod tests {
             is_error: false,
         });
         assert_eq!(d.pending_question_data(), None);
+    }
+
+    // --- Droid activity mapping tests ---
+
+    fn droid_deriver() -> StatusDeriver {
+        StatusDeriver::new(Engine::Droid)
+            .with_approval_timeout(Duration::from_millis(50))
+            .with_idle_threshold(Duration::from_millis(100))
+    }
+
+    #[test]
+    fn droid_thinking_event_shows_thinking() {
+        let mut d = droid_deriver();
+        d.process(&AgentEvent::Thinking {
+            engine: Engine::Droid,
+        });
+        match d.to_pane_status() {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                agent_type: AgentType::Droid,
+            } => assert_eq!(a.label(), "Thinking"),
+            other => panic!("Expected Droid Active(Thinking), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn droid_non_thinking_active_shows_exploring() {
+        let mut d = droid_deriver();
+        // UserMessage makes it active but not thinking
+        d.process(&AgentEvent::UserMessage);
+        match d.to_pane_status() {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                agent_type: AgentType::Droid,
+            } => assert_eq!(a.label(), "Exploring"),
+            other => panic!("Expected Droid Active(Exploring), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn droid_thinking_cleared_by_text_output() {
+        let mut d = droid_deriver();
+        d.process(&AgentEvent::Thinking {
+            engine: Engine::Droid,
+        });
+        assert_eq!(d.to_pane_status().label(), "Thinking");
+
+        // TextOutput clears thinking state
+        d.process(&AgentEvent::TextOutput {
+            engine: Engine::Droid,
+            text: "some output".into(),
+        });
+        match d.to_pane_status() {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                ..
+            } => assert_eq!(a.label(), "Exploring"),
+            other => panic!("Expected Active(Exploring), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn droid_thinking_cleared_by_tool_proposed() {
+        let mut d = droid_deriver();
+        d.process(&AgentEvent::Thinking {
+            engine: Engine::Droid,
+        });
+        assert_eq!(d.to_pane_status().label(), "Thinking");
+
+        // ToolProposed clears thinking state and shows specific tool activity
+        d.process(&AgentEvent::ToolProposed {
+            engine: Engine::Droid,
+            tool_id: "t1".into(),
+            tool_name: "Execute".into(),
+            tool_context: Some("cargo test".into()),
+            question_data: None,
+        });
+        assert_eq!(d.to_pane_status().label(), "Bash");
+    }
+
+    #[test]
+    fn droid_session_started_shows_exploring() {
+        let mut d = droid_deriver();
+        d.process(&AgentEvent::SessionStarted {
+            engine: Engine::Droid,
+            session_id: "abc".into(),
+            model: None,
+        });
+        match d.to_pane_status() {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                agent_type: AgentType::Droid,
+            } => assert_eq!(a.label(), "Exploring"),
+            other => panic!("Expected Droid Active(Exploring), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn droid_tool_activity_mapping() {
+        let cases = vec![
+            ("Execute", "Bash"),
+            ("Edit", "Edit"),
+            ("MultiEdit", "Edit"),
+            ("Create", "Create"),
+            ("Read", "Read"),
+            ("LS", "Read"),
+            ("Grep", "Grep"),
+            ("Glob", "Glob"),
+            ("Task", "Subagent"),
+            ("WebSearch", "Web Search"),
+            ("FetchUrl", "Web Fetch"),
+            ("TodoWrite", "Todo"),
+            ("AskUser", "Ask User"),
+            ("AskUserQuestion", "Ask User"),
+            ("Skill", "Skill"),
+            ("GenerateDroid", "Create"),
+            ("ExitSpecMode", "Working"),
+            ("SomeUnknownTool", "Exploring"),
+        ];
+        for (tool_name, expected_label) in cases {
+            let a = tool_name_to_activity(Engine::Droid, tool_name);
+            assert_eq!(
+                a.label(),
+                expected_label,
+                "Droid tool '{}' should map to '{}', got '{}'",
+                tool_name,
+                expected_label,
+                a.label()
+            );
+        }
+    }
+
+    #[test]
+    fn droid_tool_proposed_shows_specific_activity() {
+        let mut d = droid_deriver();
+        let status = d.process(&AgentEvent::ToolProposed {
+            engine: Engine::Droid,
+            tool_id: "t1".into(),
+            tool_name: "Execute".into(),
+            tool_context: Some("cargo build".into()),
+            question_data: None,
+        });
+        match status {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                agent_type: AgentType::Droid,
+            } => assert_eq!(a.label(), "Bash"),
+            other => panic!("Expected Droid Active(Bash), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn droid_grep_shows_grep_activity() {
+        let mut d = droid_deriver();
+        let status = d.process(&AgentEvent::ToolProposed {
+            engine: Engine::Droid,
+            tool_id: "t1".into(),
+            tool_name: "Grep".into(),
+            tool_context: Some("fn main".into()),
+            question_data: None,
+        });
+        match status {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                ..
+            } => assert_eq!(a.label(), "Grep"),
+            other => panic!("Expected Active(Grep), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn droid_subagent_shows_subagent_activity() {
+        let mut d = droid_deriver();
+        let status = d.process(&AgentEvent::ToolProposed {
+            engine: Engine::Droid,
+            tool_id: "t1".into(),
+            tool_name: "Task".into(),
+            tool_context: Some("research codebase".into()),
+            question_data: None,
+        });
+        match status {
+            PaneStatus::Agent {
+                status: AgentStatus::Active(a),
+                ..
+            } => assert_eq!(a.label(), "Subagent"),
+            other => panic!("Expected Active(Subagent), got {:?}", other),
+        }
     }
 }

@@ -192,7 +192,7 @@ fn test_command_executor_add_pane_recreates_session_in_worktree() {
         other => panic!("Expected Confirmation, got: {other:?}"),
     }
 
-    // Verify session was recreated with repo.worktree, NOT task.path
+    // Verify session was recreated with task.path (the task directory)
     let created_sessions = terminal.get_created_sessions();
     assert!(
         created_sessions.len() >= 2,
@@ -202,17 +202,12 @@ fn test_command_executor_add_pane_recreates_session_in_worktree() {
 
     let store = Store::new(ctx.config());
     let updated_task = store.load_task("dedup-recreate").unwrap();
-    let repo_worktree = &updated_task.repos[0].worktree;
 
     let last_session = &created_sessions[created_sessions.len() - 1];
     assert_eq!(
-        &last_session.1, repo_worktree,
-        "Session recreation via command_executor should use repo.worktree. Got {:?}, expected {:?}",
-        last_session.1, repo_worktree
-    );
-    assert_ne!(
         last_session.1, updated_task.path,
-        "Session recreation must NOT use task.path"
+        "Session recreation via command_executor should use task.path. Got {:?}, expected {:?}",
+        last_session.1, updated_task.path
     );
 }
 

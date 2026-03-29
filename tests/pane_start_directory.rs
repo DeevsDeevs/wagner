@@ -111,9 +111,9 @@ impl TestContext {
     }
 }
 
-// VAL-PANE-001: Session recreation uses repo worktree, not task.path
+// VAL-PANE-001: Session recreation uses task.path
 #[test]
-fn test_add_pane_session_recreation_uses_repo_worktree() {
+fn test_add_pane_session_recreation_uses_task_path() {
     let ctx = TestContext::new();
     let wagner = ctx.wagner();
 
@@ -138,30 +138,23 @@ fn test_add_pane_session_recreation_uses_repo_worktree() {
     wagner.add_pane("recreate-task", None, None).unwrap();
 
     let created_sessions = wagner.terminal.get_created_sessions();
-    // Second session creation (the recreation) should use repo.worktree
     assert!(
         created_sessions.len() >= 2,
         "Should have at least 2 session creations (initial + recreation)"
     );
 
     let task = wagner.get_task("recreate-task").unwrap();
-    let repo_worktree = &task.repos[0].worktree;
     let last_session = &created_sessions[created_sessions.len() - 1];
     assert_eq!(
-        &last_session.1, repo_worktree,
-        "Session recreation should use repo.worktree, not task.path. Got {:?}, expected {:?}",
-        last_session.1, repo_worktree
-    );
-    // Verify it's NOT task.path (which would be the task directory, not the worktree)
-    assert_ne!(
         last_session.1, task.path,
-        "Session recreation must NOT use task.path"
+        "Session recreation should use task.path. Got {:?}, expected {:?}",
+        last_session.1, task.path
     );
 }
 
-// VAL-PANE-002: Multi-repo first pane starts in first repo's worktree
+// VAL-PANE-002: Multi-repo session starts in task.path
 #[test]
-fn test_create_session_multi_repo_first_pane_uses_repo_worktree() {
+fn test_create_session_multi_repo_uses_task_path() {
     let ctx = TestContext::new();
     let repo2_path = ctx.add_second_repo();
     let wagner = ctx.wagner();
@@ -183,20 +176,14 @@ fn test_create_session_multi_repo_first_pane_uses_repo_worktree() {
         .create_task("multi-first-task", &specs, Some("main"))
         .unwrap();
 
-    // The session should be created in repos[0].worktree
     let created_sessions = wagner.terminal.get_created_sessions();
     assert!(!created_sessions.is_empty(), "Should have created a session");
 
     let session_dir = &created_sessions[0].1;
-    let first_repo_worktree = &task.repos[0].worktree;
 
     assert_eq!(
-        session_dir, first_repo_worktree,
-        "Multi-repo session should be created in repos[0].worktree, not task.path"
-    );
-    assert_ne!(
         *session_dir, task.path,
-        "Multi-repo session must NOT use task.path (the synthetic task directory)"
+        "Multi-repo session should be created in task.path"
     );
 
     // First pane should be for repo1, not a synthetic core_repo
@@ -251,9 +238,9 @@ fn test_no_pane_uses_core_repo_worktree() {
     }
 }
 
-// VAL-PANE-004: Single-repo add_pane uses that repo's worktree
+// VAL-PANE-004: Single-repo add_pane uses task.path
 #[test]
-fn test_add_pane_single_repo_uses_worktree() {
+fn test_add_pane_single_repo_uses_task_path() {
     let ctx = TestContext::new();
     let wagner = ctx.wagner();
 
@@ -271,9 +258,8 @@ fn test_add_pane_single_repo_uses_worktree() {
     wagner.add_pane("single-add-task", None, None).unwrap();
 
     let task = wagner.get_task("single-add-task").unwrap();
-    let repo_worktree = &task.repos[0].worktree;
 
-    // The new pane should be created in the repo's worktree
+    // The new pane should be created in task.path
     let created_panes = wagner.terminal.get_created_panes();
     assert!(
         !created_panes.is_empty(),
@@ -282,14 +268,14 @@ fn test_add_pane_single_repo_uses_worktree() {
 
     let last_pane = &created_panes[created_panes.len() - 1];
     assert_eq!(
-        &last_pane.1, repo_worktree,
-        "add_pane on single-repo should use repo.worktree"
+        last_pane.1, task.path,
+        "add_pane on single-repo should use task.path"
     );
 }
 
-// VAL-PANE-005: Single-repo create_session_with_panes uses worktree
+// VAL-PANE-005: Single-repo create_session_with_panes uses task.path
 #[test]
-fn test_create_session_single_repo_uses_worktree() {
+fn test_create_session_single_repo_uses_task_path() {
     let ctx = TestContext::new();
     let wagner = ctx.wagner();
 
@@ -307,11 +293,10 @@ fn test_create_session_single_repo_uses_worktree() {
     assert!(!created_sessions.is_empty(), "Should have created a session");
 
     let session_dir = &created_sessions[0].1;
-    let repo_worktree = &task.repos[0].worktree;
 
     assert_eq!(
-        session_dir, repo_worktree,
-        "Single-repo session should be created in repos[0].worktree"
+        *session_dir, task.path,
+        "Single-repo session should be created in task.path"
     );
 }
 
@@ -365,9 +350,9 @@ fn test_create_session_multi_repo_all_panes_have_correct_worktrees() {
     );
 }
 
-// VAL-PANE-012: add_pane with explicit repo_name uses that repo's worktree
+// VAL-PANE-012: add_pane with explicit repo_name still uses task.path
 #[test]
-fn test_add_pane_explicit_repo_uses_correct_worktree() {
+fn test_add_pane_explicit_repo_uses_task_path() {
     let ctx = TestContext::new();
     let repo2_path = ctx.add_second_repo();
     let wagner = ctx.wagner();
@@ -395,19 +380,18 @@ fn test_add_pane_explicit_repo_uses_correct_worktree() {
         .unwrap();
 
     let created_panes = wagner.terminal.get_created_panes();
-    let repo2_worktree = &task.repos[1].worktree;
 
-    // The last created pane should be for repo2's worktree
+    // The last created pane should use task.path
     let last_pane = &created_panes[created_panes.len() - 1];
     assert_eq!(
-        &last_pane.1, repo2_worktree,
-        "Explicit repo_name='repo2' should create pane in repo2's worktree"
+        last_pane.1, task.path,
+        "Explicit repo_name='repo2' should create pane in task.path"
     );
 }
 
-// VAL-PANE-013: add_pane multi-repo default selects first repo, not core_repo
+// VAL-PANE-013: add_pane multi-repo default selects first repo, pane opens in task.path
 #[test]
-fn test_add_pane_multi_repo_default_selects_real_repo() {
+fn test_add_pane_multi_repo_default_uses_task_path() {
     let ctx = TestContext::new();
     let repo2_path = ctx.add_second_repo();
     let wagner = ctx.wagner();
@@ -441,19 +425,18 @@ fn test_add_pane_multi_repo_default_selects_real_repo() {
         "Default repo_name on multi-repo should be repos[0].name ('repo1'), not task name"
     );
 
-    // The pane should be created in repo1's worktree
-    let repo1_worktree = &task.repos[0].worktree;
+    // The pane should be created in task.path
     let created_panes = wagner.terminal.get_created_panes();
     let last_created = &created_panes[created_panes.len() - 1];
     assert_eq!(
-        &last_created.1, repo1_worktree,
-        "Default pane on multi-repo should use repos[0].worktree"
+        last_created.1, task.path,
+        "Default pane on multi-repo should use task.path"
     );
 }
 
-// VAL-PANE-001 (with_engine variant): Session recreation with engine uses repo worktree
+// VAL-PANE-001 (with_engine variant): Session recreation with engine uses task.path
 #[test]
-fn test_add_pane_with_engine_session_recreation_uses_repo_worktree() {
+fn test_add_pane_with_engine_session_recreation_uses_task_path() {
     let ctx = TestContext::new();
     let wagner = ctx.wagner();
 
@@ -474,7 +457,7 @@ fn test_add_pane_with_engine_session_recreation_uses_repo_worktree() {
         .kill_session(&SessionHandle(session_name))
         .unwrap();
 
-    // add_pane_with_engine should recreate the session with repo.worktree
+    // add_pane_with_engine should recreate the session with task.path
     wagner
         .add_pane_with_engine(
             "engine-recreate-task",
@@ -491,14 +474,9 @@ fn test_add_pane_with_engine_session_recreation_uses_repo_worktree() {
     );
 
     let task = wagner.get_task("engine-recreate-task").unwrap();
-    let repo_worktree = &task.repos[0].worktree;
     let last_session = &created_sessions[created_sessions.len() - 1];
     assert_eq!(
-        &last_session.1, repo_worktree,
-        "Engine session recreation should use repo.worktree"
-    );
-    assert_ne!(
         last_session.1, task.path,
-        "Engine session recreation must NOT use task.path"
+        "Engine session recreation should use task.path"
     );
 }

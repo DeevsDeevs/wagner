@@ -31,8 +31,10 @@ pub fn add_pane_shared(
     let task_name = &task.name;
     let session = SessionHandle(session_name_for_task(task_name));
 
+    let pane_cwd = &task.path;
+
     let created_session = if !terminal.session_exists(task_name)? {
-        terminal.create_session(task_name, &repo.worktree)?;
+        terminal.create_session(task_name, pane_cwd)?;
         true
     } else {
         false
@@ -45,7 +47,7 @@ pub fn add_pane_shared(
             .next()
             .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
     } else {
-        terminal.create_pane(&session, &repo.worktree)?
+        terminal.create_pane(&session, pane_cwd)?
     };
 
     let session_id = Uuid::new_v4().to_string();
@@ -581,13 +583,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         name: &str,
         task: &mut Task,
     ) -> Result<SessionHandle> {
-        let session_dir = task
-            .repos
-            .first()
-            .map(|r| r.worktree.clone())
-            .unwrap_or_else(|| task.path.clone());
-
-        let session = self.terminal.create_session(name, &session_dir)?;
+        let session = self.terminal.create_session(name, &task.path)?;
 
         if task.repos.len() > 1 {
             let repos: Vec<_> = task.repos.clone();

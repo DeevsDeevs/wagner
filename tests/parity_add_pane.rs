@@ -343,16 +343,15 @@ fn test_parity_explicit_name_both_paths_equivalent() {
     assert_eq!(direct_jsonl_parent, executor_jsonl_parent);
 }
 
-/// Session directory: when session must be recreated, both paths use repo.worktree.
+/// Session directory: when session must be recreated, both paths use task.path.
 #[test]
-fn test_parity_session_directory_both_paths_use_worktree() {
+fn test_parity_session_directory_both_paths_use_task_path() {
     let fixture = ParityFixture::new();
     let terminal = MockTerminal::new();
     fixture.create_task(&terminal, "parity-dir");
 
     let store = Store::new(fixture.config());
     let task = store.load_task("parity-dir").unwrap();
-    let repo_worktree = task.repos[0].worktree.clone();
 
     // Track session creation count before our test
     let sessions_before = terminal.get_created_sessions().len();
@@ -363,13 +362,13 @@ fn test_parity_session_directory_both_paths_use_worktree() {
         .kill_session(&wagner::SessionHandle(session_name.clone()))
         .unwrap();
 
-    // Direct path: should recreate session with repo.worktree
+    // Direct path: should recreate session with task.path
     let _direct = fixture.add_pane_direct(&terminal, "parity-dir", None, Some(Engine::ClaudeCode));
     let sessions_after_direct = terminal.get_created_sessions();
     let direct_session = sessions_after_direct.last().unwrap();
     assert_eq!(
-        direct_session.1, repo_worktree,
-        "Direct path: session recreation should use repo.worktree"
+        direct_session.1, task.path,
+        "Direct path: session recreation should use task.path"
     );
 
     // Kill session again to test executor path
@@ -377,29 +376,19 @@ fn test_parity_session_directory_both_paths_use_worktree() {
         .kill_session(&wagner::SessionHandle(session_name))
         .unwrap();
 
-    // Executor path: should also recreate session with repo.worktree
+    // Executor path: should also recreate session with task.path
     let _executor = fixture.add_pane_executor(&terminal, "parity-dir", None, engine_to_agent_string(Engine::ClaudeCode));
     let sessions_after_executor = terminal.get_created_sessions();
     let executor_session = sessions_after_executor.last().unwrap();
     assert_eq!(
-        executor_session.1, repo_worktree,
-        "Executor path: session recreation should use repo.worktree"
+        executor_session.1, task.path,
+        "Executor path: session recreation should use task.path"
     );
 
     // Both used the same directory
     assert_eq!(
         direct_session.1, executor_session.1,
-        "Both paths should recreate session in the same directory (repo.worktree)"
-    );
-
-    // Neither should use task.path
-    assert_ne!(
-        direct_session.1, task.path,
-        "Direct path must not use task.path for session"
-    );
-    assert_ne!(
-        executor_session.1, task.path,
-        "Executor path must not use task.path for session"
+        "Both paths should recreate session in the same directory (task.path)"
     );
 
     // We should have at least 2 new session creations (one per path)
