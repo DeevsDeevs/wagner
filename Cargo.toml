@@ -1,6 +1,6 @@
 [package]
 name = "wagner"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.93"
 description = "AI agent monitoring CLI tool with TUI"
