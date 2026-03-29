@@ -290,7 +290,11 @@ fn check_agent_health(terminal: &Tmux, tasks: &[crate::model::Task]) -> Vec<Core
                 if !expected.is_empty() && !cmd.contains(expected) {
                     let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
                     if !resume_cmd.is_empty() {
-                        if let Err(e) = terminal.send_text_enter(&pane, &resume_cmd, tracked.engine.enter_delay_ms()) {
+                        if let Err(e) = terminal.send_text_enter(
+                            &pane,
+                            &resume_cmd,
+                            tracked.engine.enter_delay_ms(),
+                        ) {
                             warn!(
                                 task = %task.name, pane = %tracked.name,
                                 error = %e, "failed to resume dead agent"

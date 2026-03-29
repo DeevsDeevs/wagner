@@ -12,8 +12,8 @@ use super::StatusMonitor;
 use super::StatusUpdate;
 use super::claude_events::parse_claude_event;
 use super::codex_events::parse_codex_event;
-use super::droid_events::parse_droid_event;
 use super::deriver::StatusDeriver;
+use super::droid_events::parse_droid_event;
 use super::status::{PaneStatus, SessionAggregateStatus};
 
 pub struct SessionWatcher {
@@ -295,8 +295,7 @@ impl SessionWatcher {
                             && (tracked.engine == Engine::ClaudeCode
                                 || tracked.engine == Engine::Droid)
                         {
-                            watcher.project_dir =
-                                watcher.jsonl_path.parent().map(PathBuf::from);
+                            watcher.project_dir = watcher.jsonl_path.parent().map(PathBuf::from);
                         }
                     }
                 }
@@ -341,11 +340,7 @@ impl SessionWatcher {
                             status: new_status,
                         });
                     }
-                    Self::collect_path_change(
-                        &mut self.path_updates,
-                        &pane.0,
-                        watcher,
-                    );
+                    Self::collect_path_change(&mut self.path_updates, &pane.0, watcher);
                 }
             } else {
                 untracked_panes.push(pane.clone());
@@ -390,11 +385,7 @@ impl SessionWatcher {
                     if let Some(new_status) = watcher.poll(self.max_lines_per_poll) {
                         self.pane_statuses.insert(pane.0.clone(), new_status);
                     }
-                    Self::collect_path_change(
-                        &mut self.path_updates,
-                        &pane.0,
-                        watcher,
-                    );
+                    Self::collect_path_change(&mut self.path_updates, &pane.0, watcher);
                 } else {
                     untracked_panes.push(pane.clone());
                 }

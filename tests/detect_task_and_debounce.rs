@@ -227,11 +227,10 @@ fn test_needs_attention_not_suppressed_by_debounce() {
 
     // Set up MockTerminal with the session and pane
     let terminal = MockTerminal::new();
-    terminal
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(session_name.clone(), vec![PaneHandle("%50".into(), "claude-repo1".into())]);
+    terminal.sessions.lock().unwrap().insert(
+        session_name.clone(),
+        vec![PaneHandle("%50".into(), "claude-repo1".into())],
+    );
 
     engine.track_task(&task, &session_name);
 
@@ -245,12 +244,9 @@ fn test_needs_attention_not_suppressed_by_debounce() {
     // This call starts the debounce timer for the session status change
     let events = engine.poll_transitions(&terminal, &[task.clone()]);
     // The pane-level NeedsAttention event may be emitted here (no debounce on pane events)
-    let pane_needs_attention = events.iter().any(|e| {
-        matches!(
-            e,
-            wagner::transport::CoreEvent::NeedsAttention { .. }
-        )
-    });
+    let pane_needs_attention = events
+        .iter()
+        .any(|e| matches!(e, wagner::transport::CoreEvent::NeedsAttention { .. }));
     assert!(
         pane_needs_attention,
         "Pane-level NeedsAttention should be emitted immediately"
@@ -306,11 +302,10 @@ fn test_working_status_uses_normal_debounce() {
     let session_name = wagner::terminal::session_name_for_task(&task.name);
 
     let terminal = MockTerminal::new();
-    terminal
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(session_name.clone(), vec![PaneHandle("%51".into(), "claude-repo1".into())]);
+    terminal.sessions.lock().unwrap().insert(
+        session_name.clone(),
+        vec![PaneHandle("%51".into(), "claude-repo1".into())],
+    );
 
     engine.track_task(&task, &session_name);
 

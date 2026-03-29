@@ -60,7 +60,11 @@ impl QuickLaunchCtx {
         std::fs::write(plugin_dir.join("important.txt"), "precious data").unwrap();
 
         // Simulate a WIP file in the worktree
-        std::fs::write(self.worktree_path.join("wip.rs"), "fn work_in_progress() {}").unwrap();
+        std::fs::write(
+            self.worktree_path.join("wip.rs"),
+            "fn work_in_progress() {}",
+        )
+        .unwrap();
 
         // The task metadata itself (task.json) is stored by create_persisted_task
         // but let's also verify the metadata dir is there
@@ -81,10 +85,7 @@ impl QuickLaunchCtx {
         let _ = task_name;
     }
 
-    fn wagner_with_terminal(
-        &self,
-        terminal: MockTerminal,
-    ) -> Wagner<MockTerminal, TestAgent> {
+    fn wagner_with_terminal(&self, terminal: MockTerminal) -> Wagner<MockTerminal, TestAgent> {
         Wagner::new(terminal, TestAgent::echo(), self.config())
     }
 }
@@ -212,9 +213,9 @@ fn test_quick_launch_dead_session_recreates_and_launches() {
 
     // Verify the agent was launched (sent keys for ClaudeCode launch command)
     let sent_keys = terminal.get_sent_keys();
-    let has_claude_launch = sent_keys.iter().any(|(_pane, keys)| {
-        keys.contains("claude --session-id")
-    });
+    let has_claude_launch = sent_keys
+        .iter()
+        .any(|(_pane, keys)| keys.contains("claude --session-id"));
     assert!(
         has_claude_launch,
         "Agent must be relaunched in recreated session. Sent keys: {:?}",
@@ -293,9 +294,7 @@ fn test_quick_launch_dead_session_clears_stale_panes() {
     let terminal = MockTerminal::new();
     let wagner = ctx.wagner_with_terminal(terminal);
 
-    wagner
-        .quick_launch(Engine::Codex, Some(task_name))
-        .unwrap();
+    wagner.quick_launch(Engine::Codex, Some(task_name)).unwrap();
 
     let loaded_task = ctx.store().load_task(task_name).unwrap();
 
@@ -329,9 +328,7 @@ fn test_quick_launch_dead_session_uses_specified_engine() {
     let wagner = ctx.wagner_with_terminal(terminal.clone());
 
     // Launch with Codex engine (not ClaudeCode which is TestAgent's default)
-    wagner
-        .quick_launch(Engine::Codex, Some(task_name))
-        .unwrap();
+    wagner.quick_launch(Engine::Codex, Some(task_name)).unwrap();
 
     let loaded_task = ctx.store().load_task(task_name).unwrap();
     assert_eq!(loaded_task.panes[0].engine, Engine::Codex);
@@ -371,9 +368,9 @@ fn test_quick_launch_dead_session_terminal_no_launch_command() {
     // Actually: prepare_agent_in_pane_with_engine skips launch for Terminal
     // So no claude/codex commands should appear
     let sent_keys = terminal.get_sent_keys();
-    let has_agent_launch = sent_keys.iter().any(|(_pane, keys)| {
-        keys.contains("claude") || keys.contains("codex")
-    });
+    let has_agent_launch = sent_keys
+        .iter()
+        .any(|(_pane, keys)| keys.contains("claude") || keys.contains("codex"));
     assert!(
         !has_agent_launch,
         "No agent launch command should be sent for Terminal engine. Sent keys: {:?}",

@@ -414,9 +414,7 @@ fn test_delete_without_branches_doesnt_delete_branches() {
     assert!(branch_exists, "Branch should exist before delete");
 
     // Delete with delete_branches=false
-    wagner_inst
-        .delete_task("no-branch-del", false)
-        .unwrap();
+    wagner_inst.delete_task("no-branch-del", false).unwrap();
 
     // Branch should still exist
     let branch_exists_after = Command::new("git")

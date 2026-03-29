@@ -48,8 +48,10 @@ fn test_tui_delete_pane_updates_tracking() {
         }],
         None,
     );
-    task.panes.push(make_tracked_pane("claude-api", "%1", "api"));
-    task.panes.push(make_tracked_pane("claude-api-2", "%2", "api"));
+    task.panes
+        .push(make_tracked_pane("claude-api", "%1", "api"));
+    task.panes
+        .push(make_tracked_pane("claude-api-2", "%2", "api"));
     wagner.store.save_task(&task).unwrap();
 
     // Verify task initially has 2 panes

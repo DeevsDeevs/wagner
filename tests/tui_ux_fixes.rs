@@ -134,10 +134,7 @@ fn test_tui_delete_pane_empty_name_gets_fixup() {
     let session_name = wagner::terminal::session_name_for_task("fixup-test");
     {
         let mut sessions = wagner.terminal.sessions.lock().unwrap();
-        sessions.insert(
-            session_name,
-            vec![PaneHandle("%20".into(), "".into())],
-        );
+        sessions.insert(session_name, vec![PaneHandle("%20".into(), "".into())]);
     }
 
     let mut app = App::new(wagner);
@@ -186,10 +183,7 @@ fn test_tui_delete_pane_falls_back_when_pane_not_tracked() {
     let session_name = wagner::terminal::session_name_for_task("untracked-test");
     {
         let mut sessions = wagner.terminal.sessions.lock().unwrap();
-        sessions.insert(
-            session_name,
-            vec![PaneHandle("%30".into(), "pane".into())],
-        );
+        sessions.insert(session_name, vec![PaneHandle("%30".into(), "pane".into())]);
     }
 
     let mut app = App::new(wagner);
@@ -217,12 +211,7 @@ fn test_tui_delete_task_uses_force_false() {
     let task_path = wagner.config.tasks_root.join("force-test");
     std::fs::create_dir_all(task_path.join(".wagner")).unwrap();
 
-    let task = wagner::Task::new(
-        "force-test",
-        task_path.clone(),
-        vec![],
-        None,
-    );
+    let task = wagner::Task::new("force-test", task_path.clone(), vec![], None);
     wagner.store.save_task(&task).unwrap();
 
     let session_name = wagner::terminal::session_name_for_task("force-test");

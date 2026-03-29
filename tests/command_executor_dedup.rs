@@ -7,10 +7,8 @@ use wagner::core::WagnerCore;
 use wagner::model::Engine;
 use wagner::store::Store;
 use wagner::terminal::session_name_for_task;
-use wagner::{
-    MockTerminal, RepoSource, RepoSpec, SessionHandle, Terminal, TestAgent, Wagner,
-};
 use wagner::transport::{CoreCommand, CoreResponse};
+use wagner::{MockTerminal, RepoSource, RepoSpec, SessionHandle, Terminal, TestAgent, Wagner};
 
 struct TestContext {
     _temp_dir: TempDir,
@@ -73,11 +71,7 @@ impl TestContext {
         }
     }
 
-    fn create_task_with_panes(
-        &self,
-        terminal: &MockTerminal,
-        task_name: &str,
-    ) -> wagner::Task {
+    fn create_task_with_panes(&self, terminal: &MockTerminal, task_name: &str) -> wagner::Task {
         let wagner = Wagner::new(terminal.clone(), TestAgent::echo(), self.config());
         let spec = RepoSpec {
             name: "main".to_string(),
@@ -151,7 +145,9 @@ fn test_command_executor_add_pane_delegates_to_shared_fn() {
 
     // Verify launch command was sent
     let keys = terminal.get_sent_keys();
-    let has_claude_launch = keys.iter().any(|(_, k)| k.contains("claude") && k.contains("--session-id"));
+    let has_claude_launch = keys
+        .iter()
+        .any(|(_, k)| k.contains("claude") && k.contains("--session-id"));
     assert!(
         has_claude_launch,
         "Should have sent claude launch command via shared code: {keys:?}"
@@ -167,9 +163,7 @@ fn test_command_executor_add_pane_recreates_session_in_worktree() {
 
     // Kill the session to simulate dead session
     let session_name = session_name_for_task("dedup-recreate");
-    terminal
-        .kill_session(&SessionHandle(session_name))
-        .unwrap();
+    terminal.kill_session(&SessionHandle(session_name)).unwrap();
 
     // Add pane via command_executor — should recreate session
     let resp = ctx.execute_cmd(
@@ -211,7 +205,7 @@ fn test_command_executor_add_pane_recreates_session_in_worktree() {
     );
 }
 
-// Verify that AddPane with no inline session creation, pane naming, or agent launch 
+// Verify that AddPane with no inline session creation, pane naming, or agent launch
 // in command_executor — the behavior matches the direct wagner.rs path.
 #[test]
 fn test_command_executor_add_pane_codex_matches_wagner_path() {
@@ -231,10 +225,7 @@ fn test_command_executor_add_pane_codex_matches_wagner_path() {
 
     match &resp {
         CoreResponse::Confirmation { message } => {
-            assert!(
-                message.contains("Codex"),
-                "Expected 'Codex' in: {message}"
-            );
+            assert!(message.contains("Codex"), "Expected 'Codex' in: {message}");
             assert!(
                 message.contains("codex-main"),
                 "Expected auto-name 'codex-main' in: {message}"
@@ -258,7 +249,10 @@ fn test_command_executor_add_pane_codex_matches_wagner_path() {
     // Codex should have a launch command sent
     let keys = terminal.get_sent_keys();
     let has_codex = keys.iter().any(|(_, k)| k == "codex");
-    assert!(has_codex, "Should have sent 'codex' launch command: {keys:?}");
+    assert!(
+        has_codex,
+        "Should have sent 'codex' launch command: {keys:?}"
+    );
 }
 
 // Verify terminal engine pane via command_executor does NOT launch an agent
@@ -361,9 +355,7 @@ fn test_command_executor_add_pane_multi_repo_default_uses_first_repo() {
             branch: "feature/multi-default".to_string(),
         },
     ];
-    wagner
-        .create_task("multi-default", &specs, None)
-        .unwrap();
+    wagner.create_task("multi-default", &specs, None).unwrap();
 
     // Add pane via command_executor with repo_name=None
     let resp = ctx.execute_cmd(

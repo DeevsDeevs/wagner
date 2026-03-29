@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 use tempfile::TempDir;
-use wagner::config::Workspace;
 use wagner::Config;
+use wagner::config::Workspace;
 
 struct SyncTestContext {
     _temp_dir: TempDir,

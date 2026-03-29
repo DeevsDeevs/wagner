@@ -80,11 +80,13 @@ fn test_gitignore_modifies_worktree() {
     let wagner = ctx.wagner();
 
     // Create a task with a worktree that differs from the source repo
-    let specs = vec![wagner::RepoSpec::parse(
-        &format!("myrepo:{}:feature/test-gitignore", ctx.repo_path.display()),
-        None,
-    )
-    .unwrap()];
+    let specs = vec![
+        wagner::RepoSpec::parse(
+            &format!("myrepo:{}:feature/test-gitignore", ctx.repo_path.display()),
+            None,
+        )
+        .unwrap(),
+    ];
 
     let task = wagner.create_task("test-gitignore", &specs, None).unwrap();
 

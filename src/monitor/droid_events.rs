@@ -285,7 +285,8 @@ mod tests {
 
     #[test]
     fn parse_session_start() {
-        let line = r#"{"type":"session_start","id":"sess-abc-123","model":"claude-opus-4-20250514"}"#;
+        let line =
+            r#"{"type":"session_start","id":"sess-abc-123","model":"claude-opus-4-20250514"}"#;
         let event = parse_droid_event(line).unwrap();
         assert_eq!(
             event,
@@ -639,7 +640,8 @@ mod tests {
 
     #[test]
     fn parse_todo_state() {
-        let line = r#"{"type":"todo_state","todos":[{"id":"1","text":"Fix bug","status":"completed"}]}"#;
+        let line =
+            r#"{"type":"todo_state","todos":[{"id":"1","text":"Fix bug","status":"completed"}]}"#;
         let event = parse_droid_event(line).unwrap();
         assert_eq!(event, AgentEvent::Progress);
     }

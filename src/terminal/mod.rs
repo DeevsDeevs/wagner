@@ -173,10 +173,7 @@ mod tests {
         let result = session_name_for_task("a..b//c  d");
         assert_eq!(result, "wagner_a_2e__2e_b_2f__2f_c_20__20_d");
         // Verify the encoding is reversible / unique
-        assert_ne!(
-            session_name_for_task("a..b"),
-            session_name_for_task("a//b")
-        );
+        assert_ne!(session_name_for_task("a..b"), session_name_for_task("a//b"));
     }
 
     #[test]

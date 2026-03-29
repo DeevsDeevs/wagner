@@ -236,13 +236,8 @@ fn draw_input_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &Ap
     TextInput::new(&app.input_label, &app.input_buffer, app.input_cursor).draw(frame, area);
 }
 
-fn draw_add_pane_agent_bar<T: Terminal, A: Agent>(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App<T, A>,
-) {
-    Selector::new(&app.input_label, &app.add_pane_options, app.add_pane_index)
-        .draw(frame, area);
+fn draw_add_pane_agent_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {
+    Selector::new(&app.input_label, &app.add_pane_options, app.add_pane_index).draw(frame, area);
 }
 
 fn draw_workspace_bar<T: Terminal, A: Agent>(frame: &mut Frame, area: Rect, app: &App<T, A>) {

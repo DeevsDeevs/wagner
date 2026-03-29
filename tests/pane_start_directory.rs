@@ -123,9 +123,7 @@ fn test_add_pane_session_recreation_uses_task_path() {
         branch: "feature/recreate".to_string(),
     };
 
-    wagner
-        .create_task("recreate-task", &[spec], None)
-        .unwrap();
+    wagner.create_task("recreate-task", &[spec], None).unwrap();
 
     // Kill the session to simulate a dead session
     let session_name = session_name_for_task("recreate-task");
@@ -177,7 +175,10 @@ fn test_create_session_multi_repo_uses_task_path() {
         .unwrap();
 
     let created_sessions = wagner.terminal.get_created_sessions();
-    assert!(!created_sessions.is_empty(), "Should have created a session");
+    assert!(
+        !created_sessions.is_empty(),
+        "Should have created a session"
+    );
 
     let session_dir = &created_sessions[0].1;
 
@@ -290,7 +291,10 @@ fn test_create_session_single_repo_uses_task_path() {
         .unwrap();
 
     let created_sessions = wagner.terminal.get_created_sessions();
-    assert!(!created_sessions.is_empty(), "Should have created a session");
+    assert!(
+        !created_sessions.is_empty(),
+        "Should have created a session"
+    );
 
     let session_dir = &created_sessions[0].1;
 
@@ -459,12 +463,7 @@ fn test_add_pane_with_engine_session_recreation_uses_task_path() {
 
     // add_pane_with_engine should recreate the session with task.path
     wagner
-        .add_pane_with_engine(
-            "engine-recreate-task",
-            None,
-            None,
-            Some(Engine::ClaudeCode),
-        )
+        .add_pane_with_engine("engine-recreate-task", None, None, Some(Engine::ClaudeCode))
         .unwrap();
 
     let created_sessions = wagner.terminal.get_created_sessions();

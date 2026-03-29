@@ -396,10 +396,7 @@ pub fn execute(
                 Err(_) => {
                     let name = repo_name.as_deref().unwrap_or("(default)");
                     return CoreResponse::Error {
-                        message: format!(
-                            "Repo '{}' not found in task '{}'",
-                            name, task_name
-                        ),
+                        message: format!("Repo '{}' not found in task '{}'", name, task_name),
                     };
                 }
             };
@@ -420,10 +417,7 @@ pub fn execute(
                         Engine::Terminal => "terminal",
                     };
                     CoreResponse::Confirmation {
-                        message: format!(
-                            "Added {label} pane '{}' to {task_name}",
-                            tracked.name
-                        ),
+                        message: format!("Added {label} pane '{}' to {task_name}", tracked.name),
                     }
                 }
                 Err(e) => CoreResponse::Error {
@@ -589,7 +583,11 @@ fn smart_approve(terminal: &dyn Terminal, engine: &StatusEngine, tasks: &[Task])
     }
 
     CoreResponse::Confirmation {
-        message: format!("Approved {} pane(s): {}", approved.len(), approved.join(", ")),
+        message: format!(
+            "Approved {} pane(s): {}",
+            approved.len(),
+            approved.join(", ")
+        ),
     }
 }
 

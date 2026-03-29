@@ -8,9 +8,7 @@
 
 use std::path::PathBuf;
 use tempfile::TempDir;
-use wagner::{
-    Config, Engine, MockTerminal, RepoSource, Store, Task, TaskRepo, TestAgent, Wagner,
-};
+use wagner::{Config, Engine, MockTerminal, RepoSource, Store, Task, TaskRepo, TestAgent, Wagner};
 
 struct DelayTestCtx {
     _temp_dir: TempDir,
@@ -100,7 +98,8 @@ fn test_prepare_agent_uses_engine_delay() {
     // We need to set cwd to worktree_path for quick_launch
     std::env::set_current_dir(&ctx.worktree_path).unwrap();
 
-    w.quick_launch(Engine::ClaudeCode, Some("delay-test")).unwrap();
+    w.quick_launch(Engine::ClaudeCode, Some("delay-test"))
+        .unwrap();
 
     // Verify send_text_enter was called with the correct delay
     let text_enter_calls = terminal.get_text_enter_calls();
@@ -131,7 +130,8 @@ fn test_prepare_agent_droid_engine_delay() {
     std::env::set_current_dir(&ctx.worktree_path).unwrap();
 
     // quick_launch with Engine::Droid uses prepare_agent_in_pane_with_engine
-    w.quick_launch(Engine::Droid, Some("droid-delay-test")).unwrap();
+    w.quick_launch(Engine::Droid, Some("droid-delay-test"))
+        .unwrap();
 
     let text_enter_calls = terminal.get_text_enter_calls();
     assert!(
@@ -140,7 +140,11 @@ fn test_prepare_agent_droid_engine_delay() {
     );
 
     let (_, text, delay) = &text_enter_calls[0];
-    assert_eq!(*delay, 5, "Droid engine should use 5ms delay, got {}ms", delay);
+    assert_eq!(
+        *delay, 5,
+        "Droid engine should use 5ms delay, got {}ms",
+        delay
+    );
     assert_eq!(text, "droid", "Droid launch command should be 'droid'");
 }
 
@@ -154,7 +158,8 @@ fn test_prepare_agent_codex_engine_delay() {
 
     std::env::set_current_dir(&ctx.worktree_path).unwrap();
 
-    w.quick_launch(Engine::Codex, Some("codex-delay-test")).unwrap();
+    w.quick_launch(Engine::Codex, Some("codex-delay-test"))
+        .unwrap();
 
     let text_enter_calls = terminal.get_text_enter_calls();
     assert!(
@@ -195,17 +200,13 @@ fn test_resume_dead_agents_uses_engine_delay() {
 
     // Set up MockTerminal: session exists with the pane, but pane is running "bash"
     // (not "claude"), so it should be considered dead and resumed
-    terminal
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(
-            "wagner_resume-test".to_string(),
-            vec![wagner::PaneHandle(
-                "wagner_resume-test:0.0".to_string(),
-                "main".to_string(),
-            )],
-        );
+    terminal.sessions.lock().unwrap().insert(
+        "wagner_resume-test".to_string(),
+        vec![wagner::PaneHandle(
+            "wagner_resume-test:0.0".to_string(),
+            "main".to_string(),
+        )],
+    );
     terminal.set_pane_command("wagner_resume-test:0.0", "bash");
 
     let w = ctx.wagner_with_terminal(terminal.clone());
@@ -253,17 +254,13 @@ fn test_resume_dead_agents_droid_delay() {
         session_id,
     );
 
-    terminal
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(
-            "wagner_droid-resume-test".to_string(),
-            vec![wagner::PaneHandle(
-                "wagner_droid-resume-test:0.0".to_string(),
-                "main".to_string(),
-            )],
-        );
+    terminal.sessions.lock().unwrap().insert(
+        "wagner_droid-resume-test".to_string(),
+        vec![wagner::PaneHandle(
+            "wagner_droid-resume-test:0.0".to_string(),
+            "main".to_string(),
+        )],
+    );
     terminal.set_pane_command("wagner_droid-resume-test:0.0", "bash");
 
     let w = ctx.wagner_with_terminal(terminal.clone());
@@ -325,17 +322,13 @@ fn test_daemon_droid_resume_uses_correct_delay() {
         session_id,
     );
 
-    terminal
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(
-            "wagner_droid-health-test".to_string(),
-            vec![wagner::PaneHandle(
-                "wagner_droid-health-test:0.0".to_string(),
-                "main".to_string(),
-            )],
-        );
+    terminal.sessions.lock().unwrap().insert(
+        "wagner_droid-health-test".to_string(),
+        vec![wagner::PaneHandle(
+            "wagner_droid-health-test:0.0".to_string(),
+            "main".to_string(),
+        )],
+    );
     // Pane is running "bash" instead of "droid" -> should be resumed
     terminal.set_pane_command("wagner_droid-health-test:0.0", "bash");
 
@@ -369,17 +362,13 @@ fn test_resume_uses_text_enter_not_send_keys() {
         session_id,
     );
 
-    terminal
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(
-            "wagner_no-sk-test".to_string(),
-            vec![wagner::PaneHandle(
-                "wagner_no-sk-test:0.0".to_string(),
-                "main".to_string(),
-            )],
-        );
+    terminal.sessions.lock().unwrap().insert(
+        "wagner_no-sk-test".to_string(),
+        vec![wagner::PaneHandle(
+            "wagner_no-sk-test:0.0".to_string(),
+            "main".to_string(),
+        )],
+    );
     terminal.set_pane_command("wagner_no-sk-test:0.0", "bash");
 
     let w = ctx.wagner_with_terminal(terminal.clone());
@@ -404,5 +393,8 @@ fn test_resume_uses_text_enter_not_send_keys() {
         "Expected exactly 2 sent_keys entries (literal + Enter) from send_text_enter, got: {:?}",
         sent_keys
     );
-    assert_eq!(sent_keys[1].1, "Enter", "Second entry should be 'Enter' key");
+    assert_eq!(
+        sent_keys[1].1, "Enter",
+        "Second entry should be 'Enter' key"
+    );
 }
