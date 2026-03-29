@@ -1,0 +1,43 @@
+{
+  "milestone": "high-medium-fixes",
+  "round": 1,
+  "status": "pass",
+  "assertionsSummary": {
+    "total": 20,
+    "passed": 20,
+    "failed": 0,
+    "blocked": 0
+  },
+  "passedAssertions": [
+    "VAL-HIGH-001",
+    "VAL-HIGH-002",
+    "VAL-HIGH-003",
+    "VAL-HIGH-004",
+    "VAL-HIGH-005",
+    "VAL-HIGH-006",
+    "VAL-HIGH-007",
+    "VAL-MED-001",
+    "VAL-MED-002",
+    "VAL-MED-003",
+    "VAL-MED-004",
+    "VAL-MED-005",
+    "VAL-MED-006",
+    "VAL-MED-007",
+    "VAL-MED-008",
+    "VAL-MED-009",
+    "VAL-MED-010",
+    "VAL-MED-011",
+    "VAL-MED-012",
+    "VAL-CROSS-002"
+  ],
+  "failedAssertions": [],
+  "blockedAssertions": [],
+  "appliedUpdates": [
+    {
+      "target": "user-testing.md",
+      "description": "Added guidance to map stale/generic contract evidence labels by running `devbox run -- cargo test -- --list` before targeted assertion checks.",
+      "source": "flow-report"
+    }
+  ],
+  "previousRound": null
+}

@@ -31,4 +31,6 @@ There is no running application to interact with. All behavioral assertions are 
 - Isolation boundary: validators must stay inside `/Users/deevs/programming/agents/wagner` and only run cargo-based validation commands.
 - Shared state constraints: do not run concurrent cargo validators; this repo uses a shared target directory and lock files.
 - Required command surface: use `devbox run cargo test` as the primary assertion tool. Use targeted tests only for diagnosis, but finalize with full test command output in the flow report.
+- Argument passthrough rule: when passing test-binary flags (for example `-- --exact`), use `devbox run -- cargo ...` so arguments are forwarded correctly.
+- Contract evidence mapping rule: if assertion evidence names are stale or generic, run `devbox run -- cargo test -- --list` first and map assertions to current concrete test names before running targeted commands.
 - Evidence location: write assertion evidence and command transcripts under the assigned mission evidence directory only.
