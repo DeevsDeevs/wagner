@@ -2,6 +2,7 @@ mod ansi;
 pub mod claude_events;
 pub mod codex_events;
 pub mod deriver;
+pub mod droid_events;
 mod detector;
 mod detectors;
 pub mod events;
@@ -22,8 +23,8 @@ pub use detector::{AgentDetector, IDLE_THRESHOLD};
 pub use detectors::TerminalDetector;
 pub use events::{QuestionData, QuestionOption};
 pub use status::{
-    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, PaneStatus,
-    STUCK_THRESHOLD, SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
+    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, DroidActivity,
+    PaneStatus, STUCK_THRESHOLD, SessionAggregateStatus, TerminalStatus, TrackedPane, WaitReason,
 };
 pub use watcher::SessionWatcher;
 
@@ -234,6 +235,9 @@ impl StatusMonitor {
         let command = pane_command.to_ascii_lowercase();
         if command.contains("codex") {
             return Some(AgentType::Codex);
+        }
+        if command.contains("droid") {
+            return Some(AgentType::Droid);
         }
         if command.contains("claude") {
             return Some(AgentType::ClaudeCode);

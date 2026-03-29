@@ -1,0 +1,163 @@
+{
+  "groupId": "group-cli-a",
+  "testedAt": "2026-03-28T23:08:06Z",
+  "isolation": {
+    "surface": "cargo-test",
+    "repoPath": "/Users/deevs/programming/agents/wagner",
+    "missionDir": "/Users/deevs/.factory/missions/28acaf48-78b9-4713-8c87-5c0a1d1af192",
+    "constraints": [
+      "Stayed inside repo path for command execution",
+      "Used devbox/cargo command surface for validation"
+    ]
+  },
+  "toolsUsed": [
+    "devbox",
+    "cargo",
+    "rg"
+  ],
+  "assertions": [
+    {
+      "id": "VAL-DROID-020",
+      "title": "CLI wagner droid command exists",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect CLI dispatch in src/cli/commands/mod.rs",
+          "expected": "Commands::Droid dispatches to cmd_quick_launch with Engine::Droid",
+          "observed": "Found `Some(Commands::Droid { name }) => cmd_quick_launch(&wagner, Engine::Droid, name),`"
+        },
+        {
+          "action": "Run `devbox run -- cargo build` and `devbox run -- cargo test`",
+          "expected": "Build and tests pass with Droid CLI wiring intact",
+          "observed": "cargo build exit 0; full cargo test rerun exit 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "droid-support/group-cli-a/code-inspection.txt",
+          "droid-support/group-cli-a/cargo-build.txt",
+          "droid-support/group-cli-a/cargo-test-full-rerun.txt"
+        ],
+        "commandTranscript": "CLI Droid dispatch line present; build/test completed successfully"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-021",
+      "title": "Zsh completions include droid command",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect print_zsh_completions in src/cli/mod.rs",
+          "expected": "zsh completion command list contains droid entry",
+          "observed": "Found `'droid:Launch Droid in the current directory'` and `claude|codex|droid|terminal`"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "droid-support/group-cli-a/code-inspection.txt"
+        ],
+        "commandTranscript": "Code inspection confirms Droid completion entries in zsh output"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-023",
+      "title": "Config agent list includes droid",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect src/cli/commands/mod.rs cmd_config_agent",
+          "expected": "Config agent options include droid",
+          "observed": "Found `let agents = [\"claude\", \"codex\", \"droid\"]`"
+        },
+        {
+          "action": "Run `devbox run -- cargo test test_agent_choice_from_key_droid -- --exact`",
+          "expected": "droid agent key resolves successfully",
+          "observed": "test test_agent_choice_from_key_droid ... ok (exit 0)"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "droid-support/group-cli-a/code-inspection.txt",
+          "droid-support/group-cli-a/targeted-tests.txt"
+        ],
+        "commandTranscript": "Config options include droid; AgentChoice droid resolution test passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-024",
+      "title": "command_executor handles droid engine string",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect src/core/command_executor.rs and src/wagner.rs add-pane shared path",
+          "expected": "agent: Some(\"droid\") maps to Engine::Droid; default pane base uses droid-{repo}; launch uses engine command",
+          "observed": "Found `Some(\"droid\") => Engine::Droid`, base naming match arm `Engine::Droid => format!(\"droid-{}\", repo.name)`, and launch via `send_text_enter(... engine_type.launch_command ...)`"
+        },
+        {
+          "action": "Run related add-pane tests (`test_command_executor_add_pane_delegates_to_shared_fn`, `test_command_executor_add_pane_codex_matches_wagner_path`) and full cargo test",
+          "expected": "Shared AddPane path is validated and regression-free",
+          "observed": "Both targeted tests passed; full cargo test rerun passed"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "droid-support/group-cli-a/code-inspection.txt",
+          "droid-support/group-cli-a/targeted-tests.txt",
+          "droid-support/group-cli-a/cargo-test-full-rerun.txt",
+          "droid-support/group-cli-a/cargo-test-list.txt"
+        ],
+        "commandTranscript": "Droid branch and naming/launch logic present in AddPane path; related AddPane tests and full suite passed"
+      },
+      "issues": null
+    },
+    {
+      "id": "VAL-DROID-025",
+      "title": "TUI agent parsing recognizes droid",
+      "status": "pass",
+      "steps": [
+        {
+          "action": "Inspect src/tui/app.rs add-pane agent selection and parsing",
+          "expected": "droid option maps to Engine::Droid",
+          "observed": "Found `2 => Some(\"droid\".to_string())` and `Some(\"droid\") => Some(crate::model::Engine::Droid)`"
+        },
+        {
+          "action": "Run `devbox run -- cargo build`",
+          "expected": "TUI code compiles with droid parsing path",
+          "observed": "cargo build exit 0"
+        }
+      ],
+      "evidence": {
+        "terminalSnapshots": [
+          "droid-support/group-cli-a/code-inspection.txt",
+          "droid-support/group-cli-a/cargo-build.txt"
+        ],
+        "commandTranscript": "TUI droid parsing arms present and project build passed"
+      },
+      "issues": null
+    }
+  ],
+  "frictions": [
+    {
+      "description": "Validation contract names `add_pane_droid_engine` as evidence for VAL-DROID-024, but no such test appears in `cargo test -- --list`.",
+      "resolved": true,
+      "resolution": "Used direct code inspection for the droid AddPane branch/naming/launch path and ran related AddPane regression tests plus full cargo test.",
+      "affectedAssertions": [
+        "VAL-DROID-024"
+      ]
+    },
+    {
+      "description": "First full `cargo test` run failed once in `test_create_single_repo_task` with `README should exist in worktree`.",
+      "resolved": true,
+      "resolution": "Immediately reran full `cargo test`; rerun passed completely (all suites green).",
+      "affectedAssertions": [
+        "VAL-DROID-020",
+        "VAL-DROID-024"
+      ]
+    }
+  ],
+  "blockers": [],
+  "summary": "Tested 5 assertions (VAL-DROID-020/021/023/024/025): all passed. Evidence includes code inspection, targeted tests, cargo build, and full cargo validations (cargo test rerun, cargo check --all-features, cargo clippy --all-features -- -D warnings)."
+}

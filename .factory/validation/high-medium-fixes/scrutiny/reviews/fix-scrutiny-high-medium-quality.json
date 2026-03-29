@@ -1,0 +1,34 @@
+{
+  "featureId": "fix-scrutiny-high-medium-quality",
+  "reviewedAt": "2026-03-29T09:50:08Z",
+  "commitId": "740cf3b",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "fail",
+  "codeReview": {
+    "summary": "The rerun correctly fixes three prior blocking findings (daemon tick cadence via interval, URL port parsing, and injective session-name encoding). However, the attached-registry concurrency finding is only partially addressed: unique temp paths prevent tmp-file clobber, but concurrent read-modify-write operations can still lose updates.",
+    "issues": [
+      {
+        "file": "src/store.rs",
+        "line": 88,
+        "severity": "blocking",
+        "description": "register_attached/unregister_attached still do unlocked read-modify-write (`load_attached_registry` -> mutate -> `save_attached_registry`). The new unique tmp filename in save_attached_registry removes tmp-path collisions, but concurrent writers can still overwrite each other's logical updates (last-writer-wins), so the prior blocking race from fix-git-and-persistence-issues is not fully resolved."
+      },
+      {
+        "file": "tests/git_and_persistence.rs",
+        "line": 158,
+        "severity": "non_blocking",
+        "description": "test_registry_concurrent_access remains sequential and does not exercise real concurrent writers, so it cannot detect the remaining lost-update race."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-worker skill requires RED-first testing, but this worker session edited source files before adding tests while handoff.skillFeedback reported followedProcedure=true.",
+      "evidence": "worker-transcripts.jsonl skeleton for session 927c16f1-3bbc-4c35-b3b6-08dc92c8db0e shows Edit calls on src/transport/daemon.rs, src/store.rs, src/wagner.rs, and src/terminal/mod.rs before new tests were added; .factory/skills/rust-worker/SKILL.md step 3 requires writing failing tests first."
+    }
+  ],
+  "addressesFailureFrom": "/Users/deevs/programming/agents/wagner/.factory/validation/high-medium-fixes/scrutiny/reviews/fix-daemon-ipc-latency.json; /Users/deevs/programming/agents/wagner/.factory/validation/high-medium-fixes/scrutiny/reviews/fix-git-and-persistence-issues.json; /Users/deevs/programming/agents/wagner/.factory/validation/high-medium-fixes/scrutiny/reviews/fix-repo-spec-parse-urls.json; /Users/deevs/programming/agents/wagner/.factory/validation/high-medium-fixes/scrutiny/reviews/fix-session-name-collisions.json",
+  "summary": "Reviewed fix-scrutiny-high-medium-quality (commit 740cf3b) against all four prior failed reviews. Daemon cadence, URL-port parsing, and session-name collision issues are fixed. Attached-registry concurrency is still race-prone due unlocked read-modify-write, so overall review status is fail."
+}

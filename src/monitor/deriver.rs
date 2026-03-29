@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use super::events::{AgentEvent, QuestionData};
 use super::status::{
-    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, GenericActivity,
-    PaneStatus, TerminalStatus, WaitReason,
+    Activity, ActivityKind, AgentStatus, AgentType, ClaudeActivity, CodexActivity, DroidActivity,
+    GenericActivity, PaneStatus, TerminalStatus, WaitReason,
 };
 use crate::model::Engine;
 
@@ -243,6 +243,7 @@ impl StatusDeriver {
         let agent_type = match self.engine {
             Engine::ClaudeCode => AgentType::ClaudeCode,
             Engine::Codex => AgentType::Codex,
+            Engine::Droid => AgentType::Droid,
             Engine::Terminal => return PaneStatus::Terminal(TerminalStatus::Active),
         };
 
@@ -262,6 +263,7 @@ impl StatusDeriver {
         match self.engine {
             Engine::ClaudeCode => Activity::new(ActivityKind::Claude(ClaudeActivity::Thinking)),
             Engine::Codex => Activity::new(ActivityKind::Codex(CodexActivity::Working)),
+            Engine::Droid => Activity::new(ActivityKind::Droid(DroidActivity::Thinking)),
             Engine::Terminal => Activity::new(ActivityKind::Generic(GenericActivity::Working)),
         }
     }
@@ -284,6 +286,7 @@ fn tool_name_to_activity(engine: Engine, tool_name: &str) -> Activity {
             Activity::new(ActivityKind::Claude(kind))
         }
         Engine::Codex => Activity::new(ActivityKind::Codex(CodexActivity::Working)),
+        Engine::Droid => Activity::new(ActivityKind::Droid(DroidActivity::Working)),
         Engine::Terminal => Activity::new(ActivityKind::Generic(GenericActivity::Working)),
     }
 }

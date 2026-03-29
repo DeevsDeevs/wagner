@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone)]
@@ -124,4 +124,22 @@ pub fn get_diff_content(repo_path: &Path, base: &str, file_path: &str) -> Vec<St
     )
     .map(|s| s.lines().map(String::from).collect())
     .unwrap_or_default()
+}
+
+/// Detect the current git repository from the working directory.
+/// Returns `(repo_path, repo_name)` if inside a git repo.
+pub fn detect_git_repo() -> Option<(PathBuf, String)> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let repo_path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    let repo_name = repo_path.file_name()?.to_string_lossy().to_string();
+
+    Some((repo_path, repo_name))
 }

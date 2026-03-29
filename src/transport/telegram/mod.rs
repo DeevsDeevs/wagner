@@ -546,7 +546,7 @@ impl TelegramAdapter {
                     }
                     _ if self.awaiting_response.contains_key(pane_id) => {
                         let &(_, _, engine) = self.awaiting_response.get(pane_id).unwrap();
-                        if engine == Engine::ClaudeCode {
+                        if engine == Engine::ClaudeCode || engine == Engine::Droid {
                             // JSONL will deliver response on a later poll — wait for it
                             None
                         } else {
@@ -2538,6 +2538,6 @@ fn strip_tui_chrome(output: &str, engine: Engine) -> String {
             }
             lines[..end].join("\n")
         }
-        _ => output.to_string(),
+        Engine::ClaudeCode | Engine::Droid | Engine::Terminal => output.to_string(),
     }
 }

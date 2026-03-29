@@ -9,8 +9,135 @@ use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
+
+/// Shared pane-creation logic used by both `Wagner::add_pane_with_engine` and
+/// `command_executor::execute` (AddPane handler). This eliminates the duplication
+/// that previously existed in `command_executor.rs`.
+///
+/// Handles: session check/creation, pane creation, agent launch, JSONL path
+/// prediction, TrackedPane construction, and task persistence.
+pub fn add_pane_shared(
+    terminal: &dyn Terminal,
+    store: &Store,
+    task: &mut Task,
+    repo: &TaskRepo,
+    engine_type: crate::model::Engine,
+    pane_name: Option<&str>,
+) -> Result<TrackedPane> {
+    use crate::model::{Engine, PENDING_DISCOVERY};
+
+    let task_name = &task.name;
+    let session = SessionHandle(session_name_for_task(task_name));
+
+    let created_session = if !terminal.session_exists(task_name)? {
+        terminal.create_session(task_name, &repo.worktree)?;
+        true
+    } else {
+        false
+    };
+
+    let pane = if created_session {
+        let panes = terminal.list_panes(&session)?;
+        panes
+            .into_iter()
+            .next()
+            .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
+    } else {
+        terminal.create_pane(&session, &repo.worktree)?
+    };
+
+    let session_id = Uuid::new_v4().to_string();
+
+    let name = match pane_name {
+        Some(n) => {
+            if task.panes.iter().any(|p| p.name == n) {
+                task.next_pane_name(n)
+            } else {
+                n.to_string()
+            }
+        }
+        None => {
+            let base = match engine_type {
+                Engine::ClaudeCode => format!("claude-{}", repo.name),
+                Engine::Codex => format!("codex-{}", repo.name),
+                Engine::Droid => format!("droid-{}", repo.name),
+                Engine::Terminal => repo.name.clone(),
+            };
+            task.next_pane_name(&base)
+        }
+    };
+
+    if engine_type != Engine::Terminal {
+        terminal.shell_init_delay();
+        let launch_cmd = engine_type.launch_command(&session_id);
+        terminal.send_text_enter(&pane, &launch_cmd, engine_type.enter_delay_ms())?;
+    }
+
+    let jsonl_path = match engine_type {
+        Engine::ClaudeCode => {
+            let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
+            if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(home)
+                    .join(".claude")
+                    .join("projects")
+                    .join(project_id)
+                    .join(format!("{session_id}.jsonl"))
+            } else {
+                PathBuf::from(PENDING_DISCOVERY)
+            }
+        }
+        Engine::Droid => {
+            let project_id = repo.worktree.to_string_lossy().replace('/', "-");
+            if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(home)
+                    .join(".factory")
+                    .join("sessions")
+                    .join(project_id)
+                    .join(format!("{session_id}.jsonl"))
+            } else {
+                PathBuf::from(PENDING_DISCOVERY)
+            }
+        }
+        Engine::Codex | Engine::Terminal => PathBuf::from(PENDING_DISCOVERY),
+    };
+
+    let tracked = TrackedPane {
+        name,
+        repo_name: repo.name.clone(),
+        engine: engine_type,
+        session_id,
+        pane_id: pane.0.clone(),
+        jsonl_path,
+        launched_at: Utc::now(),
+    };
+
+    task.panes.push(tracked.clone());
+    store.save_task(task)?;
+
+    Ok(tracked)
+}
+
+/// Resolve a repo from a task given an optional repo_name.
+/// Uses the named repo if specified, otherwise falls back to the first repo.
+pub fn resolve_repo(task: &Task, repo_name: Option<&str>) -> Result<TaskRepo> {
+    match repo_name {
+        Some(name) => task
+            .repos
+            .iter()
+            .find(|r| r.name == name)
+            .cloned()
+            .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new())),
+        None => task
+            .repos
+            .first()
+            .cloned()
+            .ok_or_else(|| {
+                WagnerError::Terminal("Task has no repos".into())
+            }),
+    }
+}
 
 pub struct Wagner<T: Terminal, A: Agent> {
     pub terminal: T,
@@ -171,6 +298,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if self.store.task_exists(task_name) {
             let session_name = session_name_for_task(task_name);
             if self.terminal.session_exists(task_name)? {
+                // Session is alive — resume any dead agents and attach
                 match self.resume_dead_agents(task_name) {
                     Ok(n) if n > 0 => {
                         debug!(count = n, "Resumed dead agents");
@@ -179,7 +307,27 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 }
                 return self.terminal.attach(&SessionHandle(session_name));
             }
-            self.store.delete_task(task_name)?;
+
+            // Session is dead but task exists — recreate session, preserve task data
+            let mut task = self.store.load_task(task_name)?;
+            let repo = task
+                .repos
+                .first()
+                .cloned()
+                .ok_or_else(|| WagnerError::Terminal("Task has no repos".into()))?;
+
+            let session = self.terminal.create_session(task_name, &repo.worktree)?;
+
+            // Clear stale pane tracking and relaunch agent in recreated session
+            task.panes.clear();
+            if let Ok(panes) = self.terminal.list_panes(&session)
+                && let Some(pane) = panes.first()
+            {
+                self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine)?;
+            }
+
+            self.store.save_task(&task)?;
+            return self.terminal.attach(&session);
         }
 
         let branch = crate::attach::get_current_branch(&cwd).unwrap_or_else(|| "none".to_string());
@@ -205,7 +353,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     }
 
     pub fn detach_task(&self, name: &str) -> Result<()> {
-        let _task = self.store.load_task(name)?;
+        let task = self.store.load_task(name)?;
+
+        if task.kind == crate::model::TaskKind::Managed {
+            return Err(WagnerError::DetachManagedTask(name.to_string()));
+        }
 
         if self.terminal.session_exists(name)? {
             self.terminal
@@ -258,11 +410,31 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     }
 
     fn fetch_and_update_branch(&self, repo: &Path, branch: &str) {
-        let _ = Command::new("git")
+        match Command::new("git")
             .args(["-C", &repo.to_string_lossy(), "fetch", "origin", branch])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    stderr = %stderr.trim(),
+                    "git fetch failed"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    error = %e,
+                    "git fetch command failed to execute"
+                );
+            }
+            _ => {}
+        }
 
-        let _ = Command::new("git")
+        match Command::new("git")
             .args([
                 "-C",
                 &repo.to_string_lossy(),
@@ -271,7 +443,27 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 branch,
                 &format!("origin/{}", branch),
             ])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    stderr = %stderr.trim(),
+                    "git branch update failed"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    error = %e,
+                    "git branch update command failed to execute"
+                );
+            }
+            _ => {}
+        }
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>> {
@@ -359,53 +551,19 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         engine: Option<crate::model::Engine>,
     ) -> Result<PaneHandle> {
         let mut task = self.store.load_task(task_name)?;
-        let session = SessionHandle(session_name_for_task(task_name));
+        let repo = resolve_repo(&task, repo_name)?;
 
-        let created_session = if !self.terminal.session_exists(task_name)? {
-            self.terminal.create_session(task_name, &task.path)?;
-            true
-        } else {
-            false
-        };
+        let engine_type = engine.unwrap_or_else(|| self.agent.engine());
+        let tracked = add_pane_shared(
+            &self.terminal,
+            &self.store,
+            &mut task,
+            &repo,
+            engine_type,
+            pane_name,
+        )?;
 
-        let repo = match repo_name {
-            Some(name) => task
-                .repos
-                .iter()
-                .find(|r| r.name == name)
-                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
-                .clone(),
-            None => {
-                if task.repos.len() == 1 {
-                    task.repos[0].clone()
-                } else {
-                    task.core_repo()
-                }
-            }
-        };
-
-        let pane = if created_session {
-            let panes = self.terminal.list_panes(&session)?;
-            panes
-                .into_iter()
-                .next()
-                .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
-        } else {
-            self.terminal.create_pane(&session, &repo.worktree)?
-        };
-
-        if let Some(engine_type) = engine {
-            self.prepare_agent_in_pane_with_engine(
-                &mut task,
-                &pane,
-                &repo,
-                pane_name,
-                engine_type,
-            )?;
-        } else {
-            self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
-        }
-        self.store.save_task(&task)?;
+        let pane = PaneHandle(tracked.pane_id.clone(), tracked.name.clone());
         Ok(pane)
     }
 
@@ -415,45 +573,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         repo_name: Option<&str>,
         pane_name: Option<&str>,
     ) -> Result<PaneHandle> {
-        let mut task = self.store.load_task(task_name)?;
-        let session = SessionHandle(session_name_for_task(task_name));
-
-        let created_session = if !self.terminal.session_exists(task_name)? {
-            self.terminal.create_session(task_name, &task.path)?;
-            true
-        } else {
-            false
-        };
-
-        let repo = match repo_name {
-            Some(name) => task
-                .repos
-                .iter()
-                .find(|r| r.name == name)
-                .ok_or_else(|| WagnerError::RepoNotFound(name.to_string(), PathBuf::new()))?
-                .clone(),
-            None => {
-                if task.repos.len() == 1 {
-                    task.repos[0].clone()
-                } else {
-                    task.core_repo()
-                }
-            }
-        };
-
-        let pane = if created_session {
-            let panes = self.terminal.list_panes(&session)?;
-            panes
-                .into_iter()
-                .next()
-                .ok_or_else(|| WagnerError::Terminal("Session created but no panes found".into()))?
-        } else {
-            self.terminal.create_pane(&session, &repo.worktree)?
-        };
-
-        self.prepare_agent_in_pane(&mut task, &pane, &repo, pane_name)?;
-        self.store.save_task(&task)?;
-        Ok(pane)
+        self.add_pane_with_engine(task_name, repo_name, pane_name, None)
     }
 
     fn create_session_with_panes(
@@ -461,27 +581,24 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         name: &str,
         task: &mut Task,
     ) -> Result<SessionHandle> {
-        let is_multi_repo = task.repos.len() > 1;
-        let session_dir = if is_multi_repo {
-            task.path.clone()
-        } else {
-            task.repos
-                .first()
-                .map(|r| r.worktree.clone())
-                .unwrap_or_else(|| task.path.clone())
-        };
+        let session_dir = task
+            .repos
+            .first()
+            .map(|r| r.worktree.clone())
+            .unwrap_or_else(|| task.path.clone());
 
         let session = self.terminal.create_session(name, &session_dir)?;
 
-        if is_multi_repo {
+        if task.repos.len() > 1 {
+            let repos: Vec<_> = task.repos.clone();
+            // First pane (already created with session) gets first repo
             if let Ok(panes) = self.terminal.list_panes(&session)
                 && let Some(pane) = panes.first()
             {
-                let core_repo = task.core_repo();
-                let _ = self.prepare_agent_in_pane(task, pane, &core_repo, None);
+                let _ = self.prepare_agent_in_pane(task, pane, &repos[0], None);
             }
-            let repos: Vec<_> = task.repos.clone();
-            for repo in &repos {
+            // Additional repos get new panes
+            for repo in &repos[1..] {
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
                 let _ = self.prepare_agent_in_pane(task, &pane, repo, None);
             }
@@ -512,6 +629,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 let base = match engine_type {
                     Engine::ClaudeCode => format!("claude-{}", repo.name),
                     Engine::Codex => format!("codex-{}", repo.name),
+                    Engine::Droid => format!("droid-{}", repo.name),
                     Engine::Terminal => repo.name.clone(),
                 };
                 task.next_pane_name(&base)
@@ -538,7 +656,19 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                     PathBuf::from(PENDING_DISCOVERY)
                 }
             }
-            _ => PathBuf::from(PENDING_DISCOVERY),
+            Engine::Droid => {
+                let project_id = repo.worktree.to_string_lossy().replace('/', "-");
+                if let Ok(home) = std::env::var("HOME") {
+                    std::path::PathBuf::from(home)
+                        .join(".factory")
+                        .join("sessions")
+                        .join(project_id)
+                        .join(format!("{session_id}.jsonl"))
+                } else {
+                    PathBuf::from(PENDING_DISCOVERY)
+                }
+            }
+            Engine::Codex | Engine::Terminal => PathBuf::from(PENDING_DISCOVERY),
         };
 
         let tracked = TrackedPane {
@@ -573,7 +703,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         self.terminal.shell_init_delay();
         let cmd = self.agent.launch_command(&session_id);
-        self.terminal.send_keys(pane, &cmd)?;
+        self.terminal
+            .send_text_enter(pane, &cmd, engine.enter_delay_ms())?;
 
         let jsonl_path = self
             .agent
@@ -616,7 +747,8 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             }
 
             let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
-            self.terminal.send_keys(pane, &resume_cmd)?;
+            self.terminal
+                .send_text_enter(pane, &resume_cmd, tracked.engine.enter_delay_ms())?;
             resumed += 1;
         }
 
@@ -904,17 +1036,16 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             None => return Ok(()),
         };
 
-        let source_repo = match &first_repo.source {
-            RepoSource::Local(path) => path.clone(),
-            RepoSource::Remote(_) => return Ok(()),
-        };
+        // Use worktree path (not source repo) so .wagner/ and .gitignore
+        // modifications go into the worktree, not the user's original repo.
+        let worktree_path = &first_repo.worktree;
 
-        let repo_wagner_dir = source_repo.join(".wagner");
+        let repo_wagner_dir = worktree_path.join(".wagner");
         let repo_plugins_dir = repo_wagner_dir.join("plugins");
 
         std::fs::create_dir_all(&repo_plugins_dir)?;
 
-        self.ensure_gitignore_has_wagner(&source_repo)?;
+        self.ensure_gitignore_has_wagner(worktree_path)?;
 
         for plugin in &enabled_plugins {
             let plugin_data_dir = repo_plugins_dir.join(plugin.data_dir());
@@ -1036,23 +1167,90 @@ pub struct RepoSpec {
 
 impl RepoSpec {
     pub fn parse(s: &str, default_branch: Option<&str>) -> Result<Self> {
-        let parts: Vec<&str> = s.split(':').collect();
-
-        match parts.len() {
-            3 => Ok(Self {
-                name: parts[0].to_string(),
-                source: RepoSource::parse(parts[1]),
-                branch: parts[2].to_string(),
-            }),
-            2 => Ok(Self {
-                name: parts[0].to_string(),
-                source: RepoSource::parse(parts[1]),
-                branch: default_branch.unwrap_or("main").to_string(),
-            }),
-            _ => Err(WagnerError::InvalidRepoSpec(format!(
-                "Expected format: name:source:branch or name:source, got: {}",
+        // Split into name and rest (at most 2 parts)
+        let Some((name, rest)) = s.split_once(':') else {
+            return Err(WagnerError::InvalidRepoSpec(format!(
+                "Expected format: name:source[:branch], got: {}",
                 s
-            ))),
+            )));
+        };
+
+        if name.is_empty() || rest.is_empty() {
+            return Err(WagnerError::InvalidRepoSpec(format!(
+                "Expected format: name:source[:branch], got: {}",
+                s
+            )));
+        }
+
+        // Parse rest into (source, optional branch) depending on URL type
+        let (source_str, branch) = Self::split_source_and_branch(rest);
+
+        Ok(Self {
+            name: name.to_string(),
+            source: RepoSource::parse(source_str),
+            branch: branch
+                .unwrap_or_else(|| default_branch.unwrap_or("main"))
+                .to_string(),
+        })
+    }
+
+    /// Split a source string (after the name: prefix) into (source, optional branch).
+    ///
+    /// Handles:
+    /// - HTTPS/HTTP URLs: `https://host/path` or `https://host/path:branch`
+    /// - HTTPS/HTTP URLs with ports: `https://host:8443/path` or `https://host:8443/path:branch`
+    /// - SSH URLs: `git@host:path` or `git@host:path:branch`
+    /// - Local paths: `/path/to/repo` or `/path/to/repo:branch`
+    fn split_source_and_branch(rest: &str) -> (&str, Option<&str>) {
+        if rest.starts_with("https://") || rest.starts_with("http://") || rest.starts_with("git://")
+        {
+            // For scheme-based URLs, find the authority section first.
+            let scheme_end = rest.find("://").unwrap() + 3; // past "://"
+            // The authority ends at the first '/' after the scheme. The
+            // authority may contain a port (e.g., host:8443), so we must
+            // skip past it before looking for the branch delimiter ':'.
+            let path_start = rest[scheme_end..]
+                .find('/')
+                .map(|i| scheme_end + i)
+                .unwrap_or(rest.len());
+            // Only search for branch delimiter ':' in the path portion
+            if let Some(last_colon) = rest[path_start..].rfind(':') {
+                let split_pos = path_start + last_colon;
+                let source = &rest[..split_pos];
+                let branch = &rest[split_pos + 1..];
+                if !branch.is_empty() {
+                    return (source, Some(branch));
+                }
+            }
+            (rest, None)
+        } else if let Some(after_git_at) = rest.strip_prefix("git@") {
+            // SSH URLs: git@host:path — first ':' after 'git@' is part of the URL.
+            // If there's a second ':', it's the branch delimiter.
+            let prefix_len = rest.len() - after_git_at.len(); // length of "git@"
+            // Find the first ':' (host:path separator, part of the URL)
+            if let Some(first_colon) = after_git_at.find(':') {
+                let after_first_colon = &after_git_at[first_colon + 1..];
+                // Look for another ':' — that's the branch delimiter
+                if let Some(second_colon) = after_first_colon.rfind(':') {
+                    let split_pos = prefix_len + first_colon + 1 + second_colon;
+                    let source = &rest[..split_pos];
+                    let branch = &rest[split_pos + 1..];
+                    if !branch.is_empty() {
+                        return (source, Some(branch));
+                    }
+                }
+            }
+            (rest, None)
+        } else {
+            // Local path: the last ':' is the branch delimiter
+            if let Some(last_colon) = rest.rfind(':') {
+                let source = &rest[..last_colon];
+                let branch = &rest[last_colon + 1..];
+                if !source.is_empty() && !branch.is_empty() {
+                    return (source, Some(branch));
+                }
+            }
+            (rest, None)
         }
     }
 }
@@ -1137,5 +1335,279 @@ mod tests {
     fn url_to_repo_path_ssh_protocol_with_port() {
         let result = url_to_repo_path("ssh://git@github.com:22/user/repo.git");
         assert_eq!(result, PathBuf::from("github.com/user/repo"));
+    }
+
+    // --- RepoSpec::parse tests ---
+
+    #[test]
+    fn repo_spec_parse_https_url() {
+        let spec =
+            RepoSpec::parse("myrepo:https://github.com/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://github.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_ssh_url() {
+        let spec =
+            RepoSpec::parse("myrepo:git@github.com:org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git@github.com:org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:https://github.com/org/repo:feat", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "feat");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://github.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_ssh_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:git@github.com:org/repo:main", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git@github.com:org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_local_path() {
+        // Regression test: local paths continue to work
+        let spec =
+            RepoSpec::parse("myrepo:/path/to/repo:feature/branch", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "feature/branch");
+        match &spec.source {
+            RepoSource::Local(path) => {
+                assert_eq!(path, &PathBuf::from("/path/to/repo"));
+            }
+            _ => panic!("Expected local source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_simple_name_path() {
+        // name:path without branch
+        let spec = RepoSpec::parse("myrepo:/path/to/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Local(path) => {
+                assert_eq!(path, &PathBuf::from("/path/to/repo"));
+            }
+            _ => panic!("Expected local source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_local_path_with_default_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:/path/to/repo", Some("develop")).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "develop");
+    }
+
+    #[test]
+    fn repo_spec_parse_invalid_no_colon() {
+        let result = RepoSpec::parse("invalid", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.com/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.com/org/repo:develop", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "develop");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.com/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_url_with_port() {
+        let spec =
+            RepoSpec::parse("myrepo:https://host:8443/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://host:8443/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_url_with_port_and_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:https://host:8443/org/repo:develop", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "develop");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://host:8443/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url_with_port() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.local:3000/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.local:3000/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_http_url_with_port_and_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:http://gitlab.local:3000/org/repo:feat/x", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "feat/x");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "http://gitlab.local:3000/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_git_url_with_port() {
+        let spec =
+            RepoSpec::parse("myrepo:git://host:9418/org/repo", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git://host:9418/org/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_https_url_port_only_no_path() {
+        // Edge case: URL with port but no path beyond authority
+        let spec =
+            RepoSpec::parse("myrepo:https://host:8443", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "main");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "https://host:8443");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    #[test]
+    fn repo_spec_parse_ssh_nested_path_with_branch() {
+        let spec =
+            RepoSpec::parse("myrepo:git@gitlab.com:org/sub/repo:release/v1", None).unwrap();
+        assert_eq!(spec.name, "myrepo");
+        assert_eq!(spec.branch, "release/v1");
+        match &spec.source {
+            RepoSource::Remote(url) => {
+                assert_eq!(url, "git@gitlab.com:org/sub/repo");
+            }
+            _ => panic!("Expected remote source"),
+        }
+    }
+
+    // --- fetch_and_update_branch error handling tests ---
+
+    #[test]
+    fn fetch_and_update_branch_nonexistent_repo_no_panic() {
+        // Before the fix, errors were silently discarded with `let _ = ...`.
+        // After the fix, errors are logged at warn! level but don't panic.
+        let config = crate::config::Config {
+            tasks_root: std::env::temp_dir().join("wagner-test-fetch"),
+            ..crate::config::Config::default()
+        };
+        let w = Wagner::new(
+            crate::terminal::MockTerminal::new(),
+            crate::agent::TestAgent::echo(),
+            config,
+        );
+        // Non-existent path — both git commands will fail
+        let bad_path = PathBuf::from("/nonexistent/repo/path");
+        w.fetch_and_update_branch(&bad_path, "main");
+        // If we reach here without panic, the test passes
+    }
+
+    #[test]
+    fn fetch_and_update_branch_no_remote_no_panic() {
+        // Real repo but no remote configured — fetch will fail but shouldn't panic
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let config = crate::config::Config {
+            tasks_root: std::env::temp_dir().join("wagner-test-fetch2"),
+            ..crate::config::Config::default()
+        };
+        let w = Wagner::new(
+            crate::terminal::MockTerminal::new(),
+            crate::agent::TestAgent::echo(),
+            config,
+        );
+        w.fetch_and_update_branch(&repo, "nonexistent-branch");
+        // Should not panic
     }
 }

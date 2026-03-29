@@ -1,0 +1,9 @@
+commands:
+  install: devbox run cargo build
+  check: devbox run cargo check --all-features
+  build: devbox run cargo build
+  test: devbox run cargo test
+  lint: devbox run -- cargo clippy --all-features -- -D warnings
+  test_single: devbox run cargo test --lib
+
+services: {}

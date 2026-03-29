@@ -49,9 +49,13 @@ pub enum Commands {
         /// Task name
         name: String,
 
-        /// Force delete (removes branches too)
-        #[arg(short, long)]
-        force: bool,
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long = "yes", alias = "force")]
+        yes: bool,
+
+        /// Also delete the worktree branches
+        #[arg(long)]
+        delete_branches: bool,
     },
 
     /// Add a new agent pane to a task
@@ -139,12 +143,11 @@ pub enum Commands {
     },
 
     /// Clean up orphaned worktrees and task directories
+    ///
+    /// By default, shows what would be cleaned up without making changes (dry run).
+    /// Pass --execute to actually perform cleanup.
     Repair {
-        /// Show what would be cleaned up without making changes
-        #[arg(long, default_value = "true")]
-        dry_run: bool,
-
-        /// Actually perform cleanup (use with caution)
+        /// Actually perform cleanup (default is dry run)
         #[arg(long)]
         execute: bool,
     },
@@ -177,6 +180,13 @@ pub enum Commands {
 
     /// Launch Codex in the current directory
     Codex {
+        /// Custom task name (defaults to directory name)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+
+    /// Launch Droid in the current directory
+    Droid {
         /// Custom task name (defaults to directory name)
         #[arg(short, long)]
         name: Option<String>,
@@ -479,6 +489,7 @@ _wagner() {{
         'chains:Manage chains (requires chains plugin)'
         'claude:Launch Claude Code in the current directory'
         'codex:Launch Codex in the current directory'
+        'droid:Launch Droid in the current directory'
         'terminal:Launch a terminal pane in the current directory'
         'start:Start agent sessions on existing repos'
         's:Start agent sessions on existing repos'
@@ -519,8 +530,9 @@ _wagner() {{
                 delete|rm)
                     _arguments \
                         '1:task:_wagner_tasks' \
-                        '-f[Force delete]' \
-                        '--force[Force delete]'
+                        '-y[Skip confirmation prompt]' \
+                        '--yes[Skip confirmation prompt]' \
+                        '--delete-branches[Also delete worktree branches]'
                     ;;
                 attach|a)
                     _arguments '1:task:_wagner_tasks'
@@ -650,7 +662,7 @@ _wagner() {{
                             ;;
                     esac
                     ;;
-                claude|codex|terminal)
+                claude|codex|droid|terminal)
                     _arguments \
                         '-n[Task name]:name:' \
                         '--name=[Task name]:name:'

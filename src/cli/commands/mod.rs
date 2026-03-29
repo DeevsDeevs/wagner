@@ -52,7 +52,7 @@ pub fn run(cli: Cli) -> Result<()> {
             workspace.as_deref(),
         ),
         Some(Commands::List) => cmd_list(&wagner),
-        Some(Commands::Delete { name, force }) => cmd_delete(&wagner, &name, force),
+        Some(Commands::Delete { name, yes, delete_branches }) => cmd_delete(&wagner, &name, yes, delete_branches),
         Some(Commands::Add { .. }) => unreachable!(),
         Some(Commands::RenamePane {
             task,
@@ -66,13 +66,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Some(Commands::Completions { .. }) => unreachable!(),
         Some(Commands::Workspace { command }) => cmd_workspace(command),
         Some(Commands::Update { check }) => cmd_update(check),
-        Some(Commands::Repair { dry_run, execute }) => {
-            cmd_repair(&wagner.config, !execute || dry_run)
+        Some(Commands::Repair { execute }) => {
+            cmd_repair(&wagner.config, !execute)
         }
         Some(Commands::Plugin { command }) => cmd_plugin(command),
         Some(Commands::Chains { command }) => cmd_chains(&wagner, command),
         Some(Commands::Claude { name }) => cmd_quick_launch(&wagner, Engine::ClaudeCode, name),
         Some(Commands::Codex { name }) => cmd_quick_launch(&wagner, Engine::Codex, name),
+        Some(Commands::Droid { name }) => cmd_quick_launch(&wagner, Engine::Droid, name),
         Some(Commands::Terminal { name }) => cmd_quick_launch(&wagner, Engine::Terminal, name),
         Some(Commands::Start { paths, name }) => cmd_start(&wagner, paths, name),
         Some(Commands::Detach { task }) => cmd_detach(&wagner, task),
@@ -173,39 +174,12 @@ fn cmd_new<T: Terminal, A: Agent>(
 }
 
 fn detect_git_repo() -> Option<(std::path::PathBuf, String)> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let repo_path = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-
-    let repo_name = repo_path.file_name()?.to_string_lossy().to_string();
-
-    Some((repo_path, repo_name))
+    wagner::git::detect_git_repo()
 }
 
 fn detect_task_from_cwd(config: &Config) -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
-    let tasks_root = &config.tasks_root;
-
-    if !cwd.starts_with(tasks_root) {
-        return None;
-    }
-
-    let relative = cwd.strip_prefix(tasks_root).ok()?;
-    let task_name = relative.components().next()?;
-
-    let task_dir = tasks_root.join(task_name);
-    if task_dir.join(".wagner").join("task.json").exists() {
-        Some(task_name.as_os_str().to_string_lossy().to_string())
-    } else {
-        None
-    }
+    wagner::store::detect_task_for_cwd(&cwd, config)
 }
 
 fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
@@ -246,12 +220,12 @@ fn cmd_list<T: Terminal, A: Agent>(wagner: &Wagner<T, A>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: bool) -> Result<()> {
-    debug!(task = %name, force = %force, "Deleting task");
+fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, skip_confirm: bool, delete_branches: bool) -> Result<()> {
+    debug!(task = %name, skip_confirm = %skip_confirm, delete_branches = %delete_branches, "Deleting task");
 
-    if !force {
+    if !skip_confirm {
         println!("Delete task '{}'? This will remove worktrees.", name);
-        println!("Use --force to also delete branches.");
+        println!("Use --yes to skip this prompt, --delete-branches to also remove branches.");
         print!("Continue? [y/N] ");
 
         use std::io::{self, Write};
@@ -267,7 +241,7 @@ fn cmd_delete<T: Terminal, A: Agent>(wagner: &Wagner<T, A>, name: &str, force: b
         }
     }
 
-    wagner.delete_task(name, force)?;
+    wagner.delete_task(name, delete_branches)?;
     info!(task = %name, "Task deleted");
     println!("Deleted task: {}", name);
 
@@ -1554,7 +1528,7 @@ fn cmd_config_telegram() -> Result<()> {
 
 fn cmd_config_agent() -> Result<()> {
     let mut config = Config::load()?;
-    let agents = ["claude", "codex"];
+    let agents = ["claude", "codex", "droid"];
 
     println!("Default agent: {}", config.default_agent);
     println!("Options: {}", agents.join(", "));

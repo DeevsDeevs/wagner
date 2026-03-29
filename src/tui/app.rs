@@ -900,7 +900,15 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn start_new_task(&mut self) {
         if self.wagner.config.workspaces.is_empty() {
-            self.set_status("No workspaces configured. Use: wagner workspace add <name> repo:path");
+            // No workspaces configured: try auto-detecting current git repo
+            if crate::git::detect_git_repo().is_some() {
+                self.input_mode = InputMode::NewTask;
+                self.input_buffer.clear();
+                self.input_cursor = 0;
+                self.input_label = "Task name (auto-detected repo)".to_string();
+                return;
+            }
+            self.set_status("No workspaces configured and not in a git repo");
             return;
         }
         self.input_mode = InputMode::NewTask;
@@ -922,9 +930,22 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
     pub fn start_delete(&mut self) {
         if let Some(pane_id) = &self.selected_pane {
+            // Look up friendly pane name from task.panes, fall back to pane_id
+            let display_name = self
+                .selected_task
+                .as_ref()
+                .and_then(|task_name| self.wagner.get_task(task_name).ok())
+                .and_then(|task| {
+                    task.panes
+                        .iter()
+                        .find(|p| p.pane_id == *pane_id)
+                        .map(|p| p.name.clone())
+                })
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| pane_id.clone());
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(format!("delete_pane:{}", pane_id));
-            self.input_label = format!("Delete pane '{}'? [y/n]", pane_id);
+            self.input_label = format!("Delete pane '{}'? [y/n]", display_name);
         } else if let Some(task_name) = &self.selected_task {
             self.input_mode = InputMode::Confirm;
             self.confirm_action = Some(task_name.clone());
@@ -949,7 +970,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.pending_add_pane = PendingAddPane::default();
         if task.repos.len() <= 1 {
             self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
-            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Terminal".into()];
+            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Droid".into(), "Terminal".into()];
             self.add_pane_index = 0;
             self.input_mode = InputMode::AddPaneAgent;
             self.input_label = "Select agent".to_string();
@@ -959,7 +980,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
             self.input_mode = InputMode::AddPaneAgent;
             self.input_label = "Select agent (repo auto-selected)".to_string();
             self.pending_add_pane.repo_name = task.repos.first().map(|r| r.name.clone());
-            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Terminal".into()];
+            self.add_pane_options = vec!["Claude".into(), "Codex".into(), "Droid".into(), "Terminal".into()];
         }
     }
 
@@ -967,7 +988,8 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let agent = match self.add_pane_index {
             0 => Some("claude".to_string()),
             1 => Some("codex".to_string()),
-            2 => Some("terminal".to_string()),
+            2 => Some("droid".to_string()),
+            3 => Some("terminal".to_string()),
             _ => Some("claude".to_string()),
         };
         self.pending_add_pane.agent = agent;
@@ -994,6 +1016,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
         let engine = match pending.agent.as_deref() {
             Some("codex") => Some(crate::model::Engine::Codex),
             Some("terminal") => Some(crate::model::Engine::Terminal),
+            Some("droid") => Some(crate::model::Engine::Droid),
             _ => None,
         };
         match self.wagner.add_pane_with_engine(
@@ -1058,8 +1081,10 @@ impl<T: Terminal, A: Agent> App<T, A> {
 
         let workspaces: Vec<String> = self.wagner.config.workspaces.keys().cloned().collect();
         if workspaces.is_empty() {
+            // No workspaces: try auto-detecting current git repo
             self.input_mode = InputMode::Normal;
             self.input_buffer.clear();
+            self.create_task_from_auto_detected_repo(&name);
             return;
         }
 
@@ -1118,6 +1143,31 @@ impl<T: Terminal, A: Agent> App<T, A> {
         self.workspace_index = 0;
     }
 
+    fn create_task_from_auto_detected_repo(&mut self, task_name: &str) {
+        let Some((repo_path, repo_name)) = crate::git::detect_git_repo() else {
+            self.set_status("Not in a git repository");
+            return;
+        };
+
+        let default_branch = default_branch_for_task(task_name);
+        let specs = vec![RepoSpec {
+            name: repo_name,
+            source: crate::model::RepoSource::Local(repo_path),
+            branch: default_branch,
+        }];
+
+        match self.wagner.create_task(task_name, &specs, None) {
+            Ok(task) => {
+                self.set_status(&format!("Created task: {}", task.name));
+                self.selected_task = Some(task.name);
+                let _ = self.refresh_data();
+            }
+            Err(e) => {
+                self.set_status(&format!("Error: {}", e));
+            }
+        }
+    }
+
     pub fn workspace_next(&mut self) {
         if !self.workspace_list.is_empty() {
             self.workspace_index = (self.workspace_index + 1) % self.workspace_list.len();
@@ -1166,6 +1216,21 @@ impl<T: Terminal, A: Agent> App<T, A> {
             let pane = crate::terminal::PaneHandle(pane_id.to_string(), String::new());
             match self.wagner.terminal.kill_pane(&pane) {
                 Ok(_) => {
+                    // Update task.panes tracking (mirrors command_executor KillPane)
+                    if let Some(task_name) = &self.selected_task
+                        && let Ok(mut task) = self.wagner.store.load_task(task_name)
+                    {
+                        task.panes.retain(|p| p.pane_id != pane_id);
+                        if let Err(e) = self.wagner.store.save_task(&task) {
+                            self.set_status(&format!(
+                                "Pane killed but failed to save: {}",
+                                e
+                            ));
+                            self.selected_pane = None;
+                            let _ = self.refresh_data();
+                            return;
+                        }
+                    }
                     self.set_status(&format!("Deleted pane: {}", pane_id));
                     self.selected_pane = None;
                     let _ = self.refresh_data();
@@ -1175,7 +1240,7 @@ impl<T: Terminal, A: Agent> App<T, A> {
                 }
             }
         } else {
-            match self.wagner.delete_task(&action, true) {
+            match self.wagner.delete_task(&action, false) {
                 Ok(_) => {
                     self.set_status(&format!("Deleted task: {}", action));
                     self.selected_task = None;

@@ -29,7 +29,7 @@
 
         wagner = rustPlatform.buildRustPackage {
           pname = "wagner";
-          version = "0.4.1";
+          version = "0.5.0";
 
           src = ./.;
 

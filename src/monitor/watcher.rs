@@ -12,6 +12,7 @@ use super::StatusMonitor;
 use super::StatusUpdate;
 use super::claude_events::parse_claude_event;
 use super::codex_events::parse_codex_event;
+use super::droid_events::parse_droid_event;
 use super::deriver::StatusDeriver;
 use super::status::{PaneStatus, SessionAggregateStatus};
 
@@ -217,6 +218,7 @@ impl PaneWatcher {
             let event = match self.engine {
                 Engine::ClaudeCode => parse_claude_event(trimmed),
                 Engine::Codex => parse_codex_event(trimmed),
+                Engine::Droid => parse_droid_event(trimmed),
                 Engine::Terminal => None,
             };
 
@@ -493,6 +495,12 @@ impl SessionWatcher {
             watcher.path_changed = false;
         }
     }
+
+    /// Inject a pane status for testing purposes.
+    #[doc(hidden)]
+    pub fn inject_pane_status(&mut self, pane_id: &str, status: PaneStatus) {
+        self.pane_statuses.insert(pane_id.to_string(), status);
+    }
 }
 
 #[cfg(test)]
@@ -684,6 +692,134 @@ mod tests {
 
         let status = watcher.poll(1000).unwrap();
         assert!(status.is_active());
+    }
+
+    #[test]
+    fn pane_watcher_reads_droid_events() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"session_start","id":"sess-abc","model":"opus"}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"message","message":{{"role":"user","content":"hello"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"message","message":{{"role":"assistant","stop_reason":"tool_use","content":[{{"type":"tool_use","id":"t1","name":"Bash","input":{{"command":"cargo test"}}}}]}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let mut watcher = PaneWatcher::new(
+            Engine::Droid,
+            file.path().to_path_buf(),
+            Duration::from_millis(5000),
+            Duration::from_millis(5000),
+        );
+
+        let status = watcher.poll(1000).unwrap();
+        assert!(status.is_active());
+        assert_eq!(watcher.deriver.last_tool_name(), Some("Bash"));
+    }
+
+    #[test]
+    fn full_droid_session_lifecycle() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+
+        let mut watcher = PaneWatcher::new(
+            Engine::Droid,
+            file.path().to_path_buf(),
+            Duration::from_millis(5000),
+            Duration::from_millis(5000),
+        );
+
+        // 1. Session start
+        writeln!(
+            file,
+            r#"{{"type":"session_start","id":"sess-abc","model":"opus"}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let status = watcher.poll(1000).unwrap();
+        assert!(status.is_active(), "SessionStarted → Active");
+
+        // 2. User sends message
+        writeln!(
+            file,
+            r#"{{"type":"message","message":{{"role":"user","content":"fix the bug"}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        watcher.poll(1000);
+
+        // 3. Agent thinks
+        writeln!(file, r#"{{"type":"message","message":{{"role":"assistant","stop_reason":null,"content":[{{"type":"thinking","thinking":"analyzing..."}}]}}}}"#).unwrap();
+        file.flush().unwrap();
+        watcher.poll(1000);
+
+        // 4. Agent proposes Bash tool
+        writeln!(file, r#"{{"type":"message","message":{{"role":"assistant","stop_reason":"tool_use","content":[{{"type":"tool_use","id":"toolu_001","name":"Bash","input":{{"command":"cargo test"}}}}]}}}}"#).unwrap();
+        file.flush().unwrap();
+        watcher.poll(1000);
+        assert_eq!(watcher.deriver.last_tool_name(), Some("Bash"));
+
+        // 5. Todo state (progress)
+        writeln!(
+            file,
+            r#"{{"type":"todo_state","todos":[{{"id":"1","text":"Fix","status":"in_progress"}}]}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        watcher.poll(1000);
+
+        // 6. Tool result
+        writeln!(file, r#"{{"type":"message","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"toolu_001","is_error":false,"content":"test passed"}}]}}}}"#).unwrap();
+        file.flush().unwrap();
+        watcher.poll(1000);
+        assert!(
+            watcher.deriver.last_tool_name().is_none(),
+            "Tool cleared after result"
+        );
+
+        // 7. Agent responds with end_turn
+        writeln!(file, r#"{{"type":"message","message":{{"role":"assistant","stop_reason":"end_turn","content":[{{"type":"text","text":"Fixed!"}}]}}}}"#).unwrap();
+        file.flush().unwrap();
+        let status = watcher.poll(1000).unwrap();
+        assert!(status.is_idle(), "end_turn → Idle");
+    }
+
+    #[test]
+    fn droid_session_end_becomes_idle() {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+
+        let mut watcher = PaneWatcher::new(
+            Engine::Droid,
+            file.path().to_path_buf(),
+            Duration::from_millis(5000),
+            Duration::from_millis(5000),
+        );
+
+        writeln!(
+            file,
+            r#"{{"type":"session_start","id":"sess-1","model":"opus"}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"message","message":{{"role":"user","content":"do stuff"}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        watcher.poll(1000);
+
+        writeln!(file, r#"{{"type":"session_end","reason":"completed"}}"#).unwrap();
+        file.flush().unwrap();
+        let status = watcher.poll(1000).unwrap();
+        assert!(status.is_idle(), "session_end → Idle");
     }
 
     #[test]

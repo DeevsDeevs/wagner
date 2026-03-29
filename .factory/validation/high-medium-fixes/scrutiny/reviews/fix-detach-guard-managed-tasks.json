@@ -1,0 +1,21 @@
+{
+  "featureId": "fix-detach-guard-managed-tasks",
+  "reviewedAt": "2026-03-29T00:26:08Z",
+  "commitId": "c5bba4e",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Implementation matches the feature requirements. detach_task now rejects managed tasks via DetachManagedTask before session/store mutation, while attached-task detach behavior remains intact. Added integration tests cover managed rejection, attached success, and unchanged session/store on rejected detach.",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "skills",
+      "observation": "The rust-worker skill requires RED-first workflow (write failing tests first), but this run implemented code changes before adding tests; handoff still marked followedProcedure=true.",
+      "evidence": "Transcript skeleton for workerSessionId b815fe48-385c-4b33-8014-e84b3aa5a9cf shows Edit on src/error.rs and src/wagner.rs before Edit on tests/integration.rs. Skill procedure in .factory/skills/rust-worker/SKILL.md step 3 states to write failing tests first."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "Code review PASS for c5bba4e: detach guard for managed tasks is correctly implemented and tested, with no blocking or non-blocking code defects found."
+}

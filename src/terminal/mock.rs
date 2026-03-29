@@ -11,6 +11,10 @@ pub struct MockTerminal {
     pub resize_calls: Arc<Mutex<Vec<(String, u16, u16)>>>,
     pub capture_output: Arc<Mutex<HashMap<String, String>>>,
     pub pane_commands: Arc<Mutex<HashMap<String, String>>>,
+    pub created_sessions: Arc<Mutex<Vec<(String, std::path::PathBuf)>>>,
+    pub created_panes: Arc<Mutex<Vec<(String, std::path::PathBuf)>>>,
+    /// Tracks (pane_id, text, delay_ms) for each send_text_enter call.
+    pub text_enter_calls: Arc<Mutex<Vec<(String, String, u64)>>>,
 }
 
 impl MockTerminal {
@@ -48,25 +52,46 @@ impl MockTerminal {
             .unwrap()
             .insert(pane_id.to_string(), command.to_string());
     }
+
+    pub fn get_created_sessions(&self) -> Vec<(String, std::path::PathBuf)> {
+        self.created_sessions.lock().unwrap().clone()
+    }
+
+    pub fn get_created_panes(&self) -> Vec<(String, std::path::PathBuf)> {
+        self.created_panes.lock().unwrap().clone()
+    }
+
+    pub fn get_text_enter_calls(&self) -> Vec<(String, String, u64)> {
+        self.text_enter_calls.lock().unwrap().clone()
+    }
 }
 
 impl Terminal for MockTerminal {
-    fn create_session(&self, name: &str, _cwd: &Path) -> Result<SessionHandle> {
+    fn create_session(&self, name: &str, cwd: &Path) -> Result<SessionHandle> {
         let session_name = session_name_for_task(name);
         let pane = PaneHandle(format!("{}:0.0", session_name), "main".to_string());
         self.sessions
             .lock()
             .unwrap()
             .insert(session_name.clone(), vec![pane]);
+        self.created_sessions
+            .lock()
+            .unwrap()
+            .push((name.to_string(), cwd.to_path_buf()));
         Ok(SessionHandle(session_name))
     }
 
-    fn create_pane(&self, session: &SessionHandle, _cwd: &Path) -> Result<PaneHandle> {
+    fn create_pane(&self, session: &SessionHandle, cwd: &Path) -> Result<PaneHandle> {
         let mut sessions = self.sessions.lock().unwrap();
         let panes = sessions.entry(session.0.clone()).or_default();
         let pane_id = format!("{}:0.{}", session.0, panes.len());
         let pane = PaneHandle(pane_id, "pane".to_string());
         panes.push(pane.clone());
+        drop(sessions);
+        self.created_panes
+            .lock()
+            .unwrap()
+            .push((session.0.clone(), cwd.to_path_buf()));
         Ok(pane)
     }
 
@@ -150,6 +175,17 @@ impl Terminal for MockTerminal {
             .lock()
             .unwrap()
             .push((pane.0.clone(), width, height));
+        Ok(())
+    }
+
+    fn send_text_enter(&self, pane: &PaneHandle, text: &str, delay_ms: u64) -> Result<()> {
+        self.text_enter_calls
+            .lock()
+            .unwrap()
+            .push((pane.0.clone(), text.to_string(), delay_ms));
+        // Also record in sent_keys for backward compatibility with existing tests
+        self.send_literal(pane, text)?;
+        self.send_key(pane, "Enter")?;
         Ok(())
     }
 }

@@ -148,6 +148,10 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
     });
 
     let poll_interval = Duration::from_millis(config.daemon.poll_interval_ms);
+    let mut tick_interval = tokio::time::interval(poll_interval);
+    // The first tick fires immediately; consume it so the loop starts with a
+    // real wait period.
+    tick_interval.tick().await;
 
     loop {
         tokio::select! {
@@ -159,20 +163,19 @@ pub async fn run_daemon(config: Config) -> crate::Result<()> {
                 info!("received SIGINT, shutting down");
                 break;
             }
-            _ = tokio::time::sleep(poll_interval) => {
+            Some((cmd, resp_tx)) = ipc_rx.recv() => {
+                let tasks = state.store.list_tasks().unwrap_or_default();
+                let response = state.core.execute(
+                    &state.terminal,
+                    &state.store,
+                    &cmd,
+                    &tasks,
+                );
+                let _ = resp_tx.send(response);
+            }
+            _ = tick_interval.tick() => {
                 if let Err(e) = daemon_tick(&mut state, &mut adapter).await {
                     error!(%e, "daemon tick error");
-                }
-
-                while let Ok((cmd, resp_tx)) = ipc_rx.try_recv() {
-                    let tasks = state.store.list_tasks().unwrap_or_default();
-                    let response = state.core.execute(
-                        &state.terminal,
-                        &state.store,
-                        &cmd,
-                        &tasks,
-                    );
-                    let _ = resp_tx.send(response);
                 }
             }
         }
@@ -287,7 +290,7 @@ fn check_agent_health(terminal: &Tmux, tasks: &[crate::model::Task]) -> Vec<Core
                 if !expected.is_empty() && !cmd.contains(expected) {
                     let resume_cmd = tracked.engine.resume_command(&tracked.session_id);
                     if !resume_cmd.is_empty() {
-                        if let Err(e) = terminal.send_keys(&pane, &resume_cmd) {
+                        if let Err(e) = terminal.send_text_enter(&pane, &resume_cmd, tracked.engine.enter_delay_ms()) {
                             warn!(
                                 task = %task.name, pane = %tracked.name,
                                 error = %e, "failed to resume dead agent"

@@ -97,7 +97,15 @@ impl StatusEngine {
         let now = Instant::now();
         match self.session_stable_since.get(&task.name) {
             Some((pending, since)) if *pending == session_status => {
-                if since.elapsed() >= Duration::from_secs(1)
+                // NeedsAttention transitions use a very short debounce (100ms)
+                // so notifications are never suppressed. Other transitions keep
+                // the original 1-second debounce to avoid flapping.
+                let debounce = if session_status == SessionAggregateStatus::NeedsAttention {
+                    Duration::from_millis(100)
+                } else {
+                    Duration::from_secs(1)
+                };
+                if since.elapsed() >= debounce
                     && self.startup_time.elapsed() >= Duration::from_secs(3)
                 {
                     self.last_session_statuses
@@ -310,6 +318,21 @@ impl StatusEngine {
 
     pub fn take_path_updates(&mut self) -> Vec<(String, PathBuf)> {
         self.watcher.take_path_updates()
+    }
+
+    /// Inject a pane status for testing purposes.
+    #[doc(hidden)]
+    pub fn inject_pane_status(&mut self, pane_id: &str, status: PaneStatus) {
+        self.watcher.inject_pane_status(pane_id, status);
+    }
+
+    /// Create a StatusEngine with startup_time set far in the past so the
+    /// 3-second startup guard is already satisfied. For tests only.
+    #[doc(hidden)]
+    pub fn new_for_test(config: &MonitorConfig) -> Self {
+        let mut engine = Self::new(config);
+        engine.startup_time = Instant::now() - Duration::from_secs(60);
+        engine
     }
 }
 
