@@ -151,7 +151,7 @@ pub fn uninstall_skills(plugin: &dyn Plugin) -> Result<()> {
 fn home_dir() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/wagner"))
 }
 
 #[cfg(test)]

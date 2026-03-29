@@ -9,7 +9,7 @@ use crate::terminal::{PaneHandle, SessionHandle, Terminal, session_name_for_task
 use chrono::Utc;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::debug;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 /// Shared pane-creation logic used by both `Wagner::add_pane_with_engine` and
@@ -410,11 +410,31 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
     }
 
     fn fetch_and_update_branch(&self, repo: &Path, branch: &str) {
-        let _ = Command::new("git")
+        match Command::new("git")
             .args(["-C", &repo.to_string_lossy(), "fetch", "origin", branch])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    stderr = %stderr.trim(),
+                    "git fetch failed"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    error = %e,
+                    "git fetch command failed to execute"
+                );
+            }
+            _ => {}
+        }
 
-        let _ = Command::new("git")
+        match Command::new("git")
             .args([
                 "-C",
                 &repo.to_string_lossy(),
@@ -423,7 +443,27 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 branch,
                 &format!("origin/{}", branch),
             ])
-            .output();
+            .output()
+        {
+            Ok(output) if !output.status.success() => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    stderr = %stderr.trim(),
+                    "git branch update failed"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    repo = %repo.display(),
+                    branch = %branch,
+                    error = %e,
+                    "git branch update command failed to execute"
+                );
+            }
+            _ => {}
+        }
     }
 
     pub fn list_tasks(&self) -> Result<Vec<Task>> {
@@ -996,17 +1036,16 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             None => return Ok(()),
         };
 
-        let source_repo = match &first_repo.source {
-            RepoSource::Local(path) => path.clone(),
-            RepoSource::Remote(_) => return Ok(()),
-        };
+        // Use worktree path (not source repo) so .wagner/ and .gitignore
+        // modifications go into the worktree, not the user's original repo.
+        let worktree_path = &first_repo.worktree;
 
-        let repo_wagner_dir = source_repo.join(".wagner");
+        let repo_wagner_dir = worktree_path.join(".wagner");
         let repo_plugins_dir = repo_wagner_dir.join("plugins");
 
         std::fs::create_dir_all(&repo_plugins_dir)?;
 
-        self.ensure_gitignore_has_wagner(&source_repo)?;
+        self.ensure_gitignore_has_wagner(worktree_path)?;
 
         for plugin in &enabled_plugins {
             let plugin_data_dir = repo_plugins_dir.join(plugin.data_dir());
@@ -1431,5 +1470,51 @@ mod tests {
             }
             _ => panic!("Expected remote source"),
         }
+    }
+
+    // --- fetch_and_update_branch error handling tests ---
+
+    #[test]
+    fn fetch_and_update_branch_nonexistent_repo_no_panic() {
+        // Before the fix, errors were silently discarded with `let _ = ...`.
+        // After the fix, errors are logged at warn! level but don't panic.
+        let config = crate::config::Config {
+            tasks_root: std::env::temp_dir().join("wagner-test-fetch"),
+            ..crate::config::Config::default()
+        };
+        let w = Wagner::new(
+            crate::terminal::MockTerminal::new(),
+            crate::agent::TestAgent::echo(),
+            config,
+        );
+        // Non-existent path — both git commands will fail
+        let bad_path = PathBuf::from("/nonexistent/repo/path");
+        w.fetch_and_update_branch(&bad_path, "main");
+        // If we reach here without panic, the test passes
+    }
+
+    #[test]
+    fn fetch_and_update_branch_no_remote_no_panic() {
+        // Real repo but no remote configured — fetch will fail but shouldn't panic
+        let temp = tempfile::TempDir::new().unwrap();
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+
+        let config = crate::config::Config {
+            tasks_root: std::env::temp_dir().join("wagner-test-fetch2"),
+            ..crate::config::Config::default()
+        };
+        let w = Wagner::new(
+            crate::terminal::MockTerminal::new(),
+            crate::agent::TestAgent::echo(),
+            config,
+        );
+        w.fetch_and_update_branch(&repo, "nonexistent-branch");
+        // Should not panic
     }
 }

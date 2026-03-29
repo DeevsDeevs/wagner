@@ -34,7 +34,13 @@ impl Store {
             std::fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(registry)?;
-        std::fs::write(path, content)?;
+
+        // Atomic write: write to a temporary file in the same directory,
+        // then rename. This prevents corruption from concurrent writes or
+        // crashes mid-write.
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, content)?;
+        std::fs::rename(&tmp_path, &path)?;
         Ok(())
     }
 
