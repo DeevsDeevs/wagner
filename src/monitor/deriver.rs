@@ -175,8 +175,7 @@ impl StatusDeriver {
         if let Some(ref pending) = self.pending_tool
             && pending.proposed_at.elapsed() >= self.approval_timeout
         {
-            let reason = if pending.tool_name == "AskUserQuestion"
-                || pending.tool_name == "AskUser"
+            let reason = if pending.tool_name == "AskUserQuestion" || pending.tool_name == "AskUser"
             {
                 WaitReason::Question
             } else {

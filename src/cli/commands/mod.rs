@@ -1265,7 +1265,8 @@ fn start_daemon_background() -> Result<()> {
         .append(true)
         .open(&log_path)
         .map_err(|e| wagner::WagnerError::Transport(format!("Failed to open daemon log: {e}")))?;
-    let err_file = log_file.try_clone()
+    let err_file = log_file
+        .try_clone()
         .map_err(|e| wagner::WagnerError::Transport(format!("Failed to clone log handle: {e}")))?;
 
     let exe = std::env::current_exe()?;
@@ -1286,7 +1287,8 @@ fn start_daemon_background() -> Result<()> {
         }
     }
 
-    let child = cmd.spawn()
+    let child = cmd
+        .spawn()
         .map_err(|e| wagner::WagnerError::Transport(format!("Failed to spawn daemon: {e}")))?;
 
     let pid = child.id();
@@ -1296,7 +1298,10 @@ fn start_daemon_background() -> Result<()> {
     if daemon_alive(&pid.to_string()) {
         println!("Daemon is running");
     } else {
-        eprintln!("Warning: Daemon may have exited immediately, check logs at {}", log_path.display());
+        eprintln!(
+            "Warning: Daemon may have exited immediately, check logs at {}",
+            log_path.display()
+        );
     }
 
     Ok(())

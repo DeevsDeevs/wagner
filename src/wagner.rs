@@ -324,7 +324,9 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
             if let Ok(panes) = self.terminal.list_panes(&session)
                 && let Some(pane) = panes.first()
             {
-                self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine, &task_path)?;
+                self.prepare_agent_in_pane_with_engine(
+                    &mut task, pane, &repo, None, engine, &task_path,
+                )?;
             }
 
             self.store.save_task(&task)?;
