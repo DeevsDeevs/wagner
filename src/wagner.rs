@@ -79,7 +79,7 @@ pub fn add_pane_shared(
 
     let jsonl_path = match engine_type {
         Engine::ClaudeCode => {
-            let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
+            let project_id = pane_cwd.to_string_lossy().replace(['/', '.'], "-");
             if let Ok(home) = std::env::var("HOME") {
                 PathBuf::from(home)
                     .join(".claude")
@@ -91,7 +91,7 @@ pub fn add_pane_shared(
             }
         }
         Engine::Droid => {
-            let project_id = repo.worktree.to_string_lossy().replace('/', "-");
+            let project_id = pane_cwd.to_string_lossy().replace('/', "-");
             if let Ok(home) = std::env::var("HOME") {
                 PathBuf::from(home)
                     .join(".factory")
@@ -310,20 +310,23 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
             // Session is dead but task exists — recreate session, preserve task data
             let mut task = self.store.load_task(task_name)?;
+            let task_path = task.path.clone();
             let repo = task
                 .repos
                 .first()
                 .cloned()
                 .ok_or_else(|| WagnerError::Terminal("Task has no repos".into()))?;
 
-            let session = self.terminal.create_session(task_name, &repo.worktree)?;
+            let session = self.terminal.create_session(task_name, &task_path)?;
 
             // Clear stale pane tracking and relaunch agent in recreated session
             task.panes.clear();
             if let Ok(panes) = self.terminal.list_panes(&session)
                 && let Some(pane) = panes.first()
             {
-                self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine)?;
+                self.prepare_agent_in_pane_with_engine(
+                    &mut task, pane, &repo, None, engine, &task_path,
+                )?;
             }
 
             self.store.save_task(&task)?;
@@ -345,7 +348,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         if let Ok(panes) = self.terminal.list_panes(&session)
             && let Some(pane) = panes.first()
         {
-            self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine)?;
+            self.prepare_agent_in_pane_with_engine(&mut task, pane, &repo, None, engine, &cwd)?;
         }
 
         self.store.save_task(&task)?;
@@ -581,22 +584,24 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         if task.repos.len() > 1 {
             let repos: Vec<_> = task.repos.clone();
+            let task_path = task.path.clone();
             // First pane (already created with session) gets first repo
             if let Ok(panes) = self.terminal.list_panes(&session)
                 && let Some(pane) = panes.first()
             {
-                let _ = self.prepare_agent_in_pane(task, pane, &repos[0], None);
+                let _ = self.prepare_agent_in_pane(task, pane, &repos[0], None, &task_path);
             }
             // Additional repos get new panes
             for repo in &repos[1..] {
                 let pane = self.terminal.create_pane(&session, &repo.worktree)?;
-                let _ = self.prepare_agent_in_pane(task, &pane, repo, None);
+                let _ = self.prepare_agent_in_pane(task, &pane, repo, None, &repo.worktree);
             }
         } else if let Ok(panes) = self.terminal.list_panes(&session)
             && let Some(pane) = panes.first()
         {
             let first_repo = task.repos[0].clone();
-            let _ = self.prepare_agent_in_pane(task, pane, &first_repo, None);
+            let task_path = task.path.clone();
+            let _ = self.prepare_agent_in_pane(task, pane, &first_repo, None, &task_path);
         }
 
         Ok(session)
@@ -609,6 +614,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         repo: &TaskRepo,
         name_override: Option<&str>,
         engine_type: crate::model::Engine,
+        pane_cwd: &Path,
     ) -> Result<TrackedPane> {
         use crate::model::{Engine, PENDING_DISCOVERY};
         let session_id = Uuid::new_v4().to_string();
@@ -635,7 +641,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
 
         let jsonl_path = match engine_type {
             Engine::ClaudeCode => {
-                let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
+                let project_id = pane_cwd.to_string_lossy().replace(['/', '.'], "-");
                 if let Ok(home) = std::env::var("HOME") {
                     std::path::PathBuf::from(home)
                         .join(".claude")
@@ -647,7 +653,7 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
                 }
             }
             Engine::Droid => {
-                let project_id = repo.worktree.to_string_lossy().replace('/', "-");
+                let project_id = pane_cwd.to_string_lossy().replace('/', "-");
                 if let Ok(home) = std::env::var("HOME") {
                     std::path::PathBuf::from(home)
                         .join(".factory")
@@ -681,10 +687,11 @@ impl<T: Terminal, A: Agent> Wagner<T, A> {
         pane: &PaneHandle,
         repo: &TaskRepo,
         name_override: Option<&str>,
+        pane_cwd: &Path,
     ) -> Result<TrackedPane> {
         let session_id = Uuid::new_v4().to_string();
         let engine = self.agent.engine();
-        let cwd = &repo.worktree;
+        let cwd = pane_cwd;
 
         let pane_name = match name_override {
             Some(n) => n.to_string(),

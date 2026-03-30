@@ -113,8 +113,10 @@ impl PaneWatcher {
         } else if self.project_dir.is_some()
             && self.last_data_at.elapsed() > self.session_check_interval
             && !self.last_status.is_active()
-            && !self.last_status.is_waiting()
         {
+            // Allow discovery when idle OR when stuck in waiting (agent may have
+            // crashed after proposing a tool, so no new events will arrive in the
+            // current file).
             self.try_discover_newer_jsonl();
             self.last_data_at = Instant::now();
         }
@@ -251,20 +253,34 @@ impl PaneWatcher {
 }
 
 fn resolve_jsonl_path(tracked: &TrackedPane, task: &Task) -> PathBuf {
-    if !tracked.is_discovery_pending() || tracked.engine != Engine::ClaudeCode {
+    if !tracked.is_discovery_pending() {
         return tracked.jsonl_path.clone();
     }
 
-    let repo = task.repos.iter().find(|r| r.name == tracked.repo_name);
-    if let Some(repo) = repo {
-        let project_id = repo.worktree.to_string_lossy().replace(['/', '.'], "-");
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home)
-                .join(".claude")
-                .join("projects")
-                .join(project_id)
-                .join(format!("{}.jsonl", tracked.session_id));
+    let pane_cwd = &task.path;
+
+    match tracked.engine {
+        Engine::ClaudeCode => {
+            let project_id = pane_cwd.to_string_lossy().replace(['/', '.'], "-");
+            if let Ok(home) = std::env::var("HOME") {
+                return PathBuf::from(home)
+                    .join(".claude")
+                    .join("projects")
+                    .join(project_id)
+                    .join(format!("{}.jsonl", tracked.session_id));
+            }
         }
+        Engine::Droid => {
+            let project_id = pane_cwd.to_string_lossy().replace('/', "-");
+            if let Ok(home) = std::env::var("HOME") {
+                return PathBuf::from(home)
+                    .join(".factory")
+                    .join("sessions")
+                    .join(project_id)
+                    .join(format!("{}.jsonl", tracked.session_id));
+            }
+        }
+        _ => {}
     }
 
     tracked.jsonl_path.clone()

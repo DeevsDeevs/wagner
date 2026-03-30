@@ -140,7 +140,7 @@ pub fn ensure_daemon_running() -> crate::Result<()> {
 
     let exe = std::env::current_exe()?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["daemon", "start"])
+    cmd.args(["daemon", "start", "--foreground"])
         .stdout(log_file)
         .stderr(err_file)
         .stdin(std::process::Stdio::null());

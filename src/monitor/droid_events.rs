@@ -232,11 +232,19 @@ fn extract_tool_context(tool_name: &str, tool_block: &serde_json::Value) -> Opti
             Some(path.to_string())
         }
         "Grep" | "Glob" => {
-            let pattern = input
-                .get("pattern")
-                .or(input.get("patterns"))
-                .and_then(|v| v.as_str())?;
-            Some(pattern.to_string())
+            let val = input.get("pattern").or(input.get("patterns"))?;
+            if let Some(s) = val.as_str() {
+                Some(s.to_string())
+            } else if let Some(arr) = val.as_array() {
+                let joined: Vec<&str> = arr.iter().filter_map(|v| v.as_str()).collect();
+                if joined.is_empty() {
+                    None
+                } else {
+                    Some(joined.join(", "))
+                }
+            } else {
+                None
+            }
         }
         "WebSearch" => {
             let query = input.get("query")?.as_str()?;

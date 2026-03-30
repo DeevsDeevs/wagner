@@ -1215,23 +1215,27 @@ fn print_response(response: &wagner::transport::CoreResponse) {
 
 fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
     match command {
-        DaemonCommands::Start => {
-            if config.daemon.telegram.is_none() {
-                info!("No Telegram configured, running with log transport");
+        DaemonCommands::Start { foreground } => {
+            if let Some(pid_str) = read_daemon_pid() {
+                if daemon_alive(&pid_str) {
+                    println!("Daemon already running (PID {pid_str})");
+                    return Ok(());
+                }
             }
-            info!("Starting daemon");
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(wagner::transport::daemon::run_daemon(config))
+            if foreground {
+                start_daemon_foreground(config)
+            } else {
+                start_daemon_background()
+            }
         }
         DaemonCommands::Stop => stop_daemon(),
-        DaemonCommands::Restart => {
+        DaemonCommands::Restart { foreground } => {
             stop_daemon_and_wait();
-            if config.daemon.telegram.is_none() {
-                info!("No Telegram configured, running with log transport");
+            if foreground {
+                start_daemon_foreground(config)
+            } else {
+                start_daemon_background()
             }
-            info!("Starting daemon");
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(wagner::transport::daemon::run_daemon(config))
         }
         DaemonCommands::Status => {
             match read_daemon_pid() {
@@ -1243,6 +1247,64 @@ fn cmd_daemon(command: DaemonCommands, config: Config) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn start_daemon_foreground(config: Config) -> Result<()> {
+    if config.daemon.telegram.is_none() {
+        info!("No Telegram configured, running with log transport");
+    }
+    info!("Starting daemon (foreground)");
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(wagner::transport::daemon::run_daemon(config))
+}
+
+fn start_daemon_background() -> Result<()> {
+    let log_path = Config::config_dir().join("daemon.log");
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| wagner::WagnerError::Transport(format!("Failed to open daemon log: {e}")))?;
+    let err_file = log_file
+        .try_clone()
+        .map_err(|e| wagner::WagnerError::Transport(format!("Failed to clone log handle: {e}")))?;
+
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.args(["daemon", "start", "--foreground"])
+        .stdin(std::process::Stdio::null())
+        .stdout(log_file)
+        .stderr(err_file);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| wagner::WagnerError::Transport(format!("Failed to spawn daemon: {e}")))?;
+
+    let pid = child.id();
+    println!("Daemon started (PID {pid})");
+
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if daemon_alive(&pid.to_string()) {
+        println!("Daemon is running");
+    } else {
+        eprintln!(
+            "Warning: Daemon may have exited immediately, check logs at {}",
+            log_path.display()
+        );
+    }
+
+    Ok(())
 }
 
 fn stop_daemon() -> Result<()> {
@@ -1293,7 +1355,25 @@ fn stop_daemon_and_wait() {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    println!("Daemon did not stop within 5s, proceeding anyway");
+    println!("Daemon did not stop within 5s, sending SIGKILL...");
+    let killed = std::process::Command::new("kill")
+        .args(["-9", &pid_str])
+        .status()
+        .is_ok_and(|s| s.success());
+    if killed {
+        // Wait briefly for process to actually die
+        for _ in 0..20 {
+            if !daemon_alive(&pid_str) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    // Clean up stale files regardless
+    let _ = std::fs::remove_file(wagner::transport::daemon::pid_path());
+    let sock_path = wagner::transport::ipc::socket_path();
+    let _ = std::fs::remove_file(&sock_path);
+    println!("Daemon killed");
 }
 
 fn read_daemon_pid() -> Option<String> {
