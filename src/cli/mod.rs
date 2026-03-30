@@ -307,12 +307,20 @@ pub enum ConfigCommands {
 
 #[derive(Subcommand)]
 pub enum DaemonCommands {
-    /// Start the daemon (foreground)
-    Start,
+    /// Start the daemon
+    Start {
+        /// Run in foreground instead of daemonizing
+        #[arg(long, short)]
+        foreground: bool,
+    },
     /// Stop a running daemon
     Stop,
     /// Stop and restart the daemon
-    Restart,
+    Restart {
+        /// Run in foreground instead of daemonizing
+        #[arg(long, short)]
+        foreground: bool,
+    },
     /// Check if daemon is running
     Status,
 }
